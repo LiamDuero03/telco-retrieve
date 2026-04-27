@@ -1,0 +1,53 @@
+# ── Environment & secrets ─────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+venv/
+.venv/
+env/
+
+# ── Data & corpus ─────────────────────────────────────────────────────────────
+data/
+download/
+data_processed/
+
+# ── Pipeline runtime outputs ──────────────────────────────────────────────────
+chroma_db/
+logs/
+results/
+compare_output/
+draft_questions/
+expert_templates/
+marker_output
+sources_output.txt
+
+# ── Notebooks & scratch ───────────────────────────────────────────────────────
+notebooks/
+hf_notebooks/
+*.ipynb
+.ipynb_checkpoints/
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ── Testing & coverage ────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
