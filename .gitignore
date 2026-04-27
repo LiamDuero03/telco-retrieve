@@ -61,3 +61,5 @@ generate_questions.py
 storage_analysis.py
 test_marker_quality.py
 hw_compatibility/
+
+scripts/
