@@ -103,6 +103,7 @@ def chunk_text(
             ))
             idx += 1
             # keep overlap from end of current chunk
+            # note: overlap here counts words, not characters
             words   = current.split()
             overlap_text = " ".join(words[-overlap:]) if len(words) > overlap else current
             current = overlap_text

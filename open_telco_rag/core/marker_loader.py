@@ -1,8 +1,6 @@
 """
 Shared Marker-based PDF loader using the Datalab hosted API (raw requests).
 
-Drop this file into open_telco_rag/core/marker_loader.py
-
 Requires:
     pip install requests
     Set DATALAB_API_KEY in your .env file
