@@ -1,0 +1,76 @@
+{
+  "_corpus": "3gpp",
+  "_description": "3GPP Rel-18 evaluation questions. canonical_source is the expected spec series number (28, 32, 38...).",
+  "questions": [
+    {
+      "question": "What does TS 28.312 define about intent management?",
+      "keywords": ["IntentExpectation", "fulfilment", "intent", "MnS", "closed-loop"],
+      "canonical_source": "28",
+      "reference_answer": null,
+      "corpus": "3gpp"
+    },
+    {
+      "question": "What are the 3GPP autonomous network level definitions?",
+      "keywords": ["autonomous", "level", "closed-loop", "self", "cognition"],
+      "canonical_source": "32",
+      "reference_answer": null,
+      "corpus": "3gpp"
+    },
+    {
+      "question": "How does 3GPP define network slicing management?",
+      "keywords": ["NSSMF", "NSMF", "NSI", "NSSI", "slice", "provisioning"],
+      "canonical_source": "28",
+      "reference_answer": null,
+      "corpus": "3gpp"
+    },
+    {
+      "question": "What is NWDAF and what does it provide in 5G?",
+      "keywords": ["NWDAF", "analytics", "inference", "model", "data collection"],
+      "canonical_source": "23",
+      "reference_answer": null,
+      "corpus": "3gpp"
+    },
+    {
+      "question": "What are the requirements for energy efficiency in 5G NR?",
+      "keywords": ["energy", "efficiency", "power", "sleep", "DTX", "DRX"],
+      "canonical_source": "38",
+      "reference_answer": null,
+      "corpus": "3gpp"
+    },
+    {
+      "question": "How does SON work in 3GPP network management?",
+      "keywords": ["SON", "self-optimisation", "self-healing", "self-configuration", "ANR"],
+      "canonical_source": "32",
+      "reference_answer": null,
+      "corpus": "3gpp"
+    },
+    {
+      "question": "What is the 3GPP management data analytics service?",
+      "keywords": ["MDAS", "analytics", "MnS", "data", "reporting"],
+      "canonical_source": "28",
+      "reference_answer": null,
+      "corpus": "3gpp"
+    },
+    {
+      "question": "What does 3GPP specify for RAN intelligence and optimisation?",
+      "keywords": ["RAN", "intelligence", "optimisation", "ML", "inference", "model"],
+      "canonical_source": "38",
+      "reference_answer": null,
+      "corpus": "3gpp"
+    },
+    {
+      "question": "How does 3GPP define the SMO framework for O-RAN?",
+      "keywords": ["SMO", "O1", "O2", "orchestration", "management", "OAM"],
+      "canonical_source": "28",
+      "reference_answer": null,
+      "corpus": "3gpp"
+    },
+    {
+      "question": "What are the 3GPP security requirements for network slicing?",
+      "keywords": ["security", "isolation", "slice", "authentication", "integrity"],
+      "canonical_source": "33",
+      "reference_answer": null,
+      "corpus": "3gpp"
+    }
+  ]
+}

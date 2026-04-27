@@ -1,0 +1,1 @@
+from open_telco_rag.core.pipeline import ingest, search, generate

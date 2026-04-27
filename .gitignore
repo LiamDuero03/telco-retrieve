@@ -53,3 +53,11 @@ Thumbs.db
 htmlcov/
 # Download scripts (contain local paths, not part of published package)
 download/
+
+# Local utility scripts
+check_errors.py
+file_count.py
+generate_questions.py
+storage_analysis.py
+test_marker_quality.py
+hw_compatibility/

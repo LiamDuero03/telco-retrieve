@@ -1,0 +1,76 @@
+{
+  "_corpus": "camara",
+  "_description": "CAMARA Fall25 evaluation questions. canonical_source is the expected repository name.",
+  "questions": [
+    {
+      "question": "What is the Quality on Demand API and what QoS profiles does it support?",
+      "keywords": ["QoS", "session", "profile", "latency", "throughput"],
+      "canonical_source": "QualityOnDemand",
+      "reference_answer": null,
+      "corpus": "camara"
+    },
+    {
+      "question": "How does CAMARA handle network slice booking for QoS?",
+      "keywords": ["slice", "booking", "QoS", "assignment", "resources"],
+      "canonical_source": "NetworkSliceBooking",
+      "reference_answer": null,
+      "corpus": "camara"
+    },
+    {
+      "question": "What device location APIs does CAMARA provide?",
+      "keywords": ["location", "device", "area", "coordinates", "subscription"],
+      "canonical_source": "DeviceLocation",
+      "reference_answer": null,
+      "corpus": "camara"
+    },
+    {
+      "question": "How does the CAMARA Number Verification API work?",
+      "keywords": ["number", "verification", "phone", "match", "hashed"],
+      "canonical_source": "NumberVerification",
+      "reference_answer": null,
+      "corpus": "camara"
+    },
+    {
+      "question": "What are the CAMARA API design guidelines for error handling?",
+      "keywords": ["error", "status", "422", "400", "problem", "detail"],
+      "canonical_source": "Commonalities",
+      "reference_answer": null,
+      "corpus": "camara"
+    },
+    {
+      "question": "What does the ConnectivityInsights API provide?",
+      "keywords": ["connectivity", "insight", "network", "quality", "prediction"],
+      "canonical_source": "ConnectivityInsights",
+      "reference_answer": null,
+      "corpus": "camara"
+    },
+    {
+      "question": "How does the SimSwap API detect SIM swap fraud?",
+      "keywords": ["SIM", "swap", "fraud", "date", "check", "detection"],
+      "canonical_source": "SimSwap",
+      "reference_answer": null,
+      "corpus": "camara"
+    },
+    {
+      "question": "How does CAMARA define event notifications and subscriptions?",
+      "keywords": ["subscription", "notification", "webhook", "event", "callback"],
+      "canonical_source": "Commonalities",
+      "reference_answer": null,
+      "corpus": "camara"
+    },
+    {
+      "question": "What APIs does CAMARA provide for edge computing?",
+      "keywords": ["edge", "MEC", "discovery", "application", "optimal"],
+      "canonical_source": "SimpleEdgeDiscovery",
+      "reference_answer": null,
+      "corpus": "camara"
+    },
+    {
+      "question": "What is the CAMARA consent management model?",
+      "keywords": ["consent", "purpose", "data", "identity", "permission"],
+      "canonical_source": "IdentityAndConsentManagement",
+      "reference_answer": null,
+      "corpus": "camara"
+    }
+  ]
+}

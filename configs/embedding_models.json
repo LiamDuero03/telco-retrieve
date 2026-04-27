@@ -1,0 +1,22 @@
+{
+    "minilm": {
+        "model_name": "sentence-transformers/all-MiniLM-L6-v2",
+        "dimensions": 384,
+        "description": "Fast and lightweight — good for development and baseline comparison"
+    },
+    "mpnet": {
+        "model_name": "sentence-transformers/all-mpnet-base-v2",
+        "dimensions": 768,
+        "description": "Stronger general-purpose model — good balance of quality and speed"
+    },
+    "e5": {
+        "model_name": "intfloat/e5-large-v2",
+        "dimensions": 1024,
+        "description": "High quality retrieval model — best for production and final evaluation"
+    },
+    "bge": {
+        "model_name": "BAAI/bge-large-en-v1.5",
+        "dimensions": 1024,
+        "description": "Strong retrieval-focused model — competitive with e5 on technical domains"
+    }
+}

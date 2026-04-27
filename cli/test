@@ -1,0 +1,264 @@
+# Copy your O-RAN PDFs to data/oran/
+# Then ingest
+open-telco-rag ingest oran --model minilm
+
+# Search
+open-telco-rag search "What is the E2 interface?" --source-type oran
+
+# Ask a question
+open-telco-rag ask "What is the role of the Near-RT RIC?" --source-type oran
+open-telco-rag ask "What is the A1 interface used for?" --source-type oran
+open-telco-rag ask "How does O-RAN support network slicing?" --source-type oran
+
+# Check what is in the database
+open-telco-rag info
+
+# 3GPP
+
+# Ingest only Rel-18, 28_series (most relevant — network management)
+open-telco-rag ingest 3gpp --data data/3gpp/TSpec-LLM/3GPP-clean/Rel-18/28_series --model minilm
+
+# Then ask questions
+open-telco-rag ask "What does TS 28.312 say about intent management?" --source-type 3gpp
+open-telco-rag ask "What does TS 28.312 say about intent management?" --source-type 3gpp --model minilm
+open-telco-rag ask "What are the requirements for autonomous network level 4?" --source-type 3gpp --model minilm
+
+# Camara
+
+https://camaraproject.org/api-overview/
+
+cd data/camara
+git clone https://github.com/camaraproject/SessionInsights
+git clone https://github.com/camaraproject/PopulationDensityData
+git clone https://github.com/camaraproject/ConnectedNetworkType
+git clone https://github.com/camaraproject/DeviceIdentifier
+git clone https://github.com/camaraproject/CarrierBilling
+git clone https://github.com/camaraproject/WebRTC
+git clone https://github.com/camaraproject/OTPValidation
+git clone https://github.com/camaraproject/IdentityAndConsentManagement
+git clone https://github.com/camaraproject/RegionDeviceCount
+git clone https://github.com/camaraproject/NetworkAccessManagement
+
+open-telco-rag ingest camara --data data/camara/Commonalities --model minilm
+open-telco-rag ingest camara --data data/camara/ConnectivityInsights --model minilm
+open-telco-rag ingest camara --data data/camara/DeviceLocation --model minilm
+open-telco-rag ingest camara --data data/camara/NetworkSliceBooking --model minilm
+
+open-telco-rag ingest camara --data data/camara/QualityOnDemand --model minilm
+
+open-telco-rag ask "What is the Quality on Demand API and what QoS profiles does it support?" --source-type camara --model minilm
+
+open-telco-rag ask "How does CAMARA handle network slice booking for QoS?" --source-type camara --model minilm
+
+# GSMA
+Source: https://gsmasso.sharepoint.com/sites/TechnologyMarketingAI2/Shared%20Documents/Forms/AllItems.aspx?id=%2Fsites%2FTechnologyMarketingAI2%2FShared%20Documents%2FOpen%20Telco%20AI%20Assets%2FData%2FRaw%20Data%2FGSMA%2FFirst%20Tranche&viewid=b4ffb90b%2D562f%2D4bd4%2D8308%2D5e1e32f66604&newTargetListUrl=%2Fsites%2FTechnologyMarketingAI2%2FShared%20Documents&viewpath=%2Fsites%2FTechnologyMarketingAI2%2FShared%20Documents%2FForms%2FAllItems%2Easpx
+
+open-telco-rag ingest gsma --data data/gsma/Raw --model minilm
+
+GSMA Open Gateway API Descriptions
+Open Gateway northbound service APIs are defined within the CAMARA project
+
+# TM Forum
+https://github.com/tmforum-apis/Open_Api_And_Data_Model
+
+https://www.tmforum.org/resources/?yith_wcan=1&s=IG1218&post_type=product&filter_frameworx-version=22-5&query_type_frameworx-version=or
+done: 
+IG1230 v1.1.1 — ✓ the core L1–L5 architecture document
+IG1230A v1.1.0 — ✓ scenario realisations
+IG1230B v1.1.0 — ✓ industry standards alignment (bridges 3GPP, ETSI, GSMA)
+IG1218F v2.0.0 — ✓ autonomous networks framework
+
+not sure:
+Priority 1 — The L1–L5 document:
+Search: IG1230
+Full title: Autonomous Networks Technical Report
+This is the core document defining the five autonomy levels
+
+Priority 2 — Business requirements:
+Search: IG1218
+Full title: Autonomous Networks Business Requirements and Architecture
+
+Priority 3 — Open API overview:
+Search: TMF Open API table or TMF921
+This gives you the full catalogue of TM Forum Open APIs
+
+# itu
+
+python download_itu.py --output C:/Users/znezami/open-telco-rag/data/itu
+
+# Y.3172 — ML architecture framework (the foundational one)
+https://www.itu.int/rec/T-REC-Y.3172-201906-I
+
+# Y.3173 — Framework for evaluating network intelligence levels
+https://www.itu.int/rec/T-REC-Y.3173
+
+# Y.3176 — ML marketplaces in future networks
+https://www.itu.int/rec/T-REC-Y.3176
+
+# Y Supplement 96 — ML standardisation roadmap (November 2025, very recent)
+https://www.itu.int/epublications/es/publication/itu-t-y-suppl-96-2025-11-machine-learning-standardization-roadmap
+
+# etsi
+https://www.etsi.org/deliver/
+
+https://github.com/etsi-forge
+
+cd data/etsi
+
+# MEC APIs
+git clone https://github.com/etsi-forge/mec.gs011-app-enablement-api
+git clone https://github.com/etsi-forge/mec.gs012-rnis-api
+git clone https://github.com/etsi-forge/mec.gs013-location-api
+git clone https://github.com/etsi-forge/mec.gs014-ue-identity-api
+git clone https://github.com/etsi-forge/mec.gs015-bandwith-mgmt-api
+git clone https://github.com/etsi-forge/mec.gs016-ue-app-api
+git clone https://github.com/etsi-forge/mec.gs021-amsi-api
+git clone https://github.com/etsi-forge/mec.gs028-wai-api
+git clone https://github.com/etsi-forge/mec.gs030-vis-api
+git clone https://github.com/etsi-forge/mec.gs010-2-app-pkg-lcm-api
+
+# NFV APIs
+git clone https://github.com/etsi-forge/NFV-SOL006
+git clone https://github.com/etsi-forge/NFV-SOL009
+git clone https://github.com/etsi-forge/NFV-SOL012
+
+# ETSI MEC — Mobile Edge Computing APIs (relevant to your EdgeCloud use cases)
+git clone https://github.com/etsi-forge/MEC-GS011-AppEnabler
+
+# ETSI NFV SOL APIs — NFV orchestration
+git clone https://github.com/etsi-forge/NFV-SOL009
+
+# ENI 005 V3.1.1 — System Architecture (latest)
+https://www.etsi.org/deliver/etsi_gs/ENI/001_099/005/03.01.01_60/gs_ENI005v030101p.pdf
+
+# ENI 001 — Use Cases
+https://www.etsi.org/deliver/etsi_gr/ENI/001_099/001/01.01.01_60/gr_ENI001v010101p.pdf
+
+# ENI 049 V4.1.1 (2025) — Autonomous Network levels for data centre networks — references TM Forum IG1230
+https://www.etsi.org/deliver/etsi_gr/ENI/001_099/049/04.01.01_60/gr_eni049v040101p.pdf
+
+# ENI 051 V4.1.1 (2025) — 6G native AI, LLMs, AI agents for next-gen networks
+https://www.etsi.org/deliver/etsi_gr/ENI/001_099/051/04.01.01_60/gr_ENI051v040101p.pdf
+
+# F5G 019 — Fixed Network Autonomous Network level definition L0-L5
+https://www.etsi.org/deliver/etsi_gr/F5G/001_099/019/01.01.01_60/gr_F5G019v010101p.pdf
+
+
+
+test overall:
+# O-RAN
+open-telco-rag ask "What is the role of the Near-RT RIC in O-RAN architecture?" --source-type oran --model minilm
+
+# 3GPP
+open-telco-rag ask "What is closed loop automation in 5G network management?" --source-type 3gpp --model minilm
+
+# CAMARA
+open-telco-rag ask "How does the QoD API manage quality of service for application sessions?" --source-type camara --model minilm
+
+# TM Forum
+open-telco-rag ask "What are the autonomous network levels defined in TM Forum IG1230?" --source-type tmforum --model minilm
+
+# GSMA
+open-telco-rag ask "What is the GSMA Open Gateway initiative?" --source-type gsma --model minilm
+
+# ITU
+open-telco-rag ask "What is the ITU-T Y.3172 architectural framework for machine learning in future networks?" --source-type itu --model minilm
+
+# ETSI
+open-telco-rag ask "What is the ENI system architecture and its observe-orient-decide-act model?" --source-type etsi --model minilm
+
+# List all unique source files per collection
+open-telco-rag sources --source-type oran --model minilm
+open-telco-rag sources --source-type 3gpp --model minilm
+open-telco-rag sources --source-type tmforum --model minilm
+open-telco-rag sources --source-type gsma --model minilm
+open-telco-rag sources --source-type itu --model minilm
+open-telco-rag sources --source-type etsi --model minilm
+open-telco-rag sources --source-type camara --model minilm
+
+# diff with telcorag paper: 
+Two datasets were used: a synthetic optimization set of 2,000 MCQs generated from 3GPP Rel-18 documents, and the TeleQnA evaluation set of 1,840 MCQs. The options (A/B/C/D) were deliberately excluded from the retrieval process and only used to check whether the final answer was correct — the authors note explicitly that MCQ format doesn't reflect real-world query patterns, so they didn't want the options to influence retrieval.
+A few things worth noting for your chapter's TelcoRAG comparison:
+What accuracy captures: whether the system picks the right MCQ option — a fairly narrow signal. It says nothing about faithfulness (is the answer grounded in retrieved chunks?), answer completeness, or whether the retrieved chunks were actually the right ones.
+What it misses entirely: retrieval quality is only measured indirectly, via the downstream MCQ score. There's no separate measurement of whether the correct 3GPP chunks were retrieved — the NN router accuracy (Table IV) measures series-level routing, not chunk-level relevance.
+Contrast with your approach: your layered evaluation framework — keyword scoring, RAGAS faithfulness, RAGAS answer relevancy, and planned ground truth benchmarking — directly separates retrieval quality from generation quality, which TelcoRAG doesn't do. That's a meaningful methodological distinction worth calling out in your Background chapter's "TelcoRAG Research Context" section.
+
+# evaluate
+# Single corpus
+open-telco-rag evaluate oran --model minilm --top-k 5
+
+# All corpora, save to results/
+open-telco-rag evaluate all --model minilm --output results/
+
+# Quick test, no save
+open-telco-rag evaluate camara --no-save --delay 0.5
+
+# draft question generation
+python generate_questions.py gsma --n-chunks 200 --n-questions 1000 --output draft_questions
+
+
+# Test notebooks: 
+pip install jupyter
+jupyter notebook notebooks/01_oran_quickstart.ipynb
+
+# open-telco-rag info                                                               
+                                                             
+Database: chroma_db               
+Collections (7):
+  tmforum_minilm: 7036 chunks
+  itu_minilm: 238 chunks
+  3gpp_minilm: 234614 chunks
+  oran_minilm: 79555 chunks
+  etsi_minilm: 2195 chunks
+  camara_minilm: 6514 chunks
+  gsma_minilm: 141867 chunks
+
+# HF
+
+Section 1 — Setup cell detects the environment and sets paths conditionally:
+pythonON_HF = os.environ.get("SPACE_ID") is not None
+DATA_DIR = Path("/tmp/{corpus}") if ON_HF else Path("data/{corpus}")
+DB_PATH  = "/tmp/chroma_db"      if ON_HF else "chroma_db"
+API key loading branches too — Spaces secret vs .env file, with a clear error message for each case.
+Section 2 — Download cell branches on ON_HF:
+
+HF: snapshot_download() from gsma-open-telco-ai/{corpus} dataset repo into /tmp/
+Local: checks DATA_DIR.exists() and prints the appropriate download command if missing
+
+Section 9 — Save cell branches on ON_HF:
+
+HF: saves to /tmp/results/ and prints the upload_file() snippet to persist results back to a HF dataset repo
+Local: saves to results/
+
+The title cell also has a two-option "Running this notebook" block (Option A local, Option B HuggingFace Spaces) and a footer link to huggingface.co/gsma-open-telco-ai.
+Still remaining: 08_cross_corpus and 09_evaluation_all in both local and HF versions. Shall we do those next?
+
+
+# preprocess
+# Install Marker on AMD VM
+pip install marker-pdf
+
+# Step 1 — compare output quality on one file first
+python preprocess.py --compare data/oran/WG1.TS.OAD-R005-v16.00.pdf
+# Saves compare_output/WG1_pypdf.txt and WG1_marker.md for manual inspection
+
+# Step 2 — dry run to see what would be processed
+python preprocess.py oran --dry-run
+
+# Step 3 — preprocess all PDF-heavy corpora on AMD GPU
+python preprocess.py oran gsma itu etsi tmforum
+
+# Step 4 — ingest from preprocessed Markdown (fast, repeatable)
+open-telco-rag ingest oran --model minilm --data data_processed/oran
+open-telco-rag ingest gsma --model minilm --data data_processed/gsma
+open-telco-rag ingest itu  --model minilm --data data_processed/itu
+open-telco-rag ingest etsi --model minilm --data data_processed/etsi
+open-telco-rag ingest tmforum --model minilm --data data_processed/tmforum
+
+# 3GPP and CAMARA unchanged — ingest directly as before
+open-telco-rag ingest 3gpp --model minilm
+open-telco-rag ingest camara --model minilm
+
+# marker test
+# Test on a table-heavy file
+python preprocess.py --compare data/etsi/gs_ENI/gs_ENI005v030101p.pdf

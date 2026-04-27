@@ -1,0 +1,1 @@
+from open_telco_rag.stores.chroma import ChromaStore

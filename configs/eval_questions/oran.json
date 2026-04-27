@@ -1,0 +1,76 @@
+{
+  "_corpus": "oran",
+  "_description": "O-RAN Alliance R005 evaluation questions. canonical_source is the expected work group (WG1, WG2, WG3...). reference_answer is null until validated with domain experts.",
+  "questions": [
+    {
+      "question": "What is the role of the Near-RT RIC in O-RAN architecture?",
+      "keywords": ["xApp", "E2", "A1", "near-real-time", "AI/ML"],
+      "canonical_source": "WG3",
+      "reference_answer": null,
+      "corpus": "oran"
+    },
+    {
+      "question": "How does O-RAN support network slicing?",
+      "keywords": ["slice", "S-NSSAI", "SMO", "RIC", "policy"],
+      "canonical_source": "WG1",
+      "reference_answer": null,
+      "corpus": "oran"
+    },
+    {
+      "question": "What is the A1 interface used for?",
+      "keywords": ["Non-RT RIC", "Near-RT RIC", "policy", "enrichment"],
+      "canonical_source": "WG2",
+      "reference_answer": null,
+      "corpus": "oran"
+    },
+    {
+      "question": "What are the main use cases described in the O-RAN use cases report?",
+      "keywords": ["traffic steering", "QoS", "energy", "interference"],
+      "canonical_source": "WG1",
+      "reference_answer": null,
+      "corpus": "oran"
+    },
+    {
+      "question": "How does the SMO interact with other O-RAN components?",
+      "keywords": ["O1", "O2", "Non-RT RIC", "orchestration", "management"],
+      "canonical_source": "WG1",
+      "reference_answer": null,
+      "corpus": "oran"
+    },
+    {
+      "question": "What are the security requirements for xApps in O-RAN?",
+      "keywords": ["authentication", "authorisation", "E2", "certificate", "trust"],
+      "canonical_source": "WG11",
+      "reference_answer": null,
+      "corpus": "oran"
+    },
+    {
+      "question": "What is the O2 interface and what does it enable?",
+      "keywords": ["O2", "cloud", "infrastructure", "deployment", "SMO"],
+      "canonical_source": "WG6",
+      "reference_answer": null,
+      "corpus": "oran"
+    },
+    {
+      "question": "How does O-RAN define the Open Fronthaul interface?",
+      "keywords": ["fronthaul", "CU-Plane", "M-Plane", "S-Plane", "O-DU", "O-RU"],
+      "canonical_source": "WG4",
+      "reference_answer": null,
+      "corpus": "oran"
+    },
+    {
+      "question": "What AI and ML use cases does O-RAN define for the Non-RT RIC?",
+      "keywords": ["policy", "enrichment", "training", "inference", "A1-ML"],
+      "canonical_source": "WG2",
+      "reference_answer": null,
+      "corpus": "oran"
+    },
+    {
+      "question": "What is the E2 service model and how do xApps use it?",
+      "keywords": ["E2SM", "KPM", "RC", "report", "control", "indication"],
+      "canonical_source": "WG3",
+      "reference_answer": null,
+      "corpus": "oran"
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "_corpus": "gsma",
+  "_description": "GSMA evaluation questions. canonical_source is the document series (OPG, FS).",
+  "questions": [
+    {
+      "question": "What is the GSMA Open Gateway and how does it relate to CAMARA?",
+      "keywords": ["Open Gateway", "CAMARA", "operator", "API", "commercial"],
+      "canonical_source": "OPG",
+      "reference_answer": null,
+      "corpus": "gsma"
+    },
+    {
+      "question": "How does GSMA OPG.10 describe the alignment between Open Gateway and TM Forum?",
+      "keywords": ["TMF931", "TM Forum", "CAMARA", "alignment", "OPG"],
+      "canonical_source": "OPG",
+      "reference_answer": null,
+      "corpus": "gsma"
+    },
+    {
+      "question": "What are the GSMA fraud and security specifications?",
+      "keywords": ["fraud", "security", "SIM", "FS", "prevention"],
+      "canonical_source": "FS",
+      "reference_answer": null,
+      "corpus": "gsma"
+    },
+    {
+      "question": "What does the GSMA define for network API monetisation?",
+      "keywords": ["monetisation", "API", "commercial", "operator", "revenue"],
+      "canonical_source": "OPG",
+      "reference_answer": null,
+      "corpus": "gsma"
+    },
+    {
+      "question": "How does GSMA define roaming and interconnect security requirements?",
+      "keywords": ["roaming", "interconnect", "SS7", "Diameter", "security"],
+      "canonical_source": "FS",
+      "reference_answer": null,
+      "corpus": "gsma"
+    }
+  ]
+}

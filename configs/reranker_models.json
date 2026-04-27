@@ -1,0 +1,14 @@
+{
+    "ms-marco-minilm": {
+        "model_name": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+        "description": "Fast, lightweight baseline cross-encoder"
+    },
+    "ms-marco-large": {
+        "model_name": "cross-encoder/ms-marco-MiniLM-L-12-v2",
+        "description": "Larger cross-encoder — better accuracy, slower"
+    },
+    "bge-reranker": {
+        "model_name": "BAAI/bge-reranker-large",
+        "description": "Retrieval-optimised reranker — strong on technical domains"
+    }
+}
