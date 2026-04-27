@@ -51,3 +51,5 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+# Download scripts (contain local paths, not part of published package)
+download/
