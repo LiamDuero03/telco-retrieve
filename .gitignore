@@ -65,3 +65,5 @@ hw_compatibility/
 scripts/
 
 open_telco_rag/evaluation/
+
+configs/eval_questions/
