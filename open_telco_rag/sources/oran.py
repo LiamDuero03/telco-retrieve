@@ -12,7 +12,7 @@ from open_telco_rag.core.marker_loader import MarkerMixin
 class ORANSource(MarkerMixin):
     """Loads, cleans and extracts metadata from O-RAN Alliance specifications."""
 
-    SUPPORTED_EXTENSIONS = [".pdf", ".docx", ".doc"]
+    SUPPORTED_EXTENSIONS = [".pdf", ".docx"]
 
     def __init__(self, use_marker: bool = False):
         super().__init__(use_marker=use_marker)

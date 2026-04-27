@@ -67,15 +67,11 @@ class OpenRouterGenerator:
         max_tokens:  int   = 1000,
         temperature: float = 0.0,
         api_key:     str | None = None,
-        site_url:    str   = "https://github.com/gsma-open-telco-ai/open-telco-rag",
-        site_name:   str   = "Open Telco RAG",
     ):
         # Resolve short key to full model ID
         self.model       = RECOMMENDED_MODELS.get(model, model)
         self.max_tokens  = max_tokens
         self.temperature = temperature
-        self.site_url    = site_url
-        self.site_name   = site_name
         self._api_key    = api_key or os.environ.get("OPENROUTER_API_KEY")
 
         if not self._api_key:

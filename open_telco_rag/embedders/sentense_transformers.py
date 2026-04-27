@@ -12,7 +12,8 @@ class SentenceTransformerEmbedder:
     def __init__(
         self,
         model_key:    str = "minilm",
-        models_file:  str | Path = "configs/embedding_models.json",
+        models_file: str | Path = Path(__file__).parent.parent.parent / "configs" / "embedding_models.json",
+
     ):
         models_file = Path(models_file)
         if not models_file.exists():

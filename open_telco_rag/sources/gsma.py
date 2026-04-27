@@ -93,7 +93,7 @@ class GSMASource(MarkerMixin):
     # ── Private loaders ───────────────────────────────────────────────────────
 
     def _load_docx(self, path: Path) -> str:
-        # DOCX uses python-docx only — Marker requires WeasyPrint/GTK (not available on Windows)
+        # DOCX uses python-docx — Marker API handles PDF only
         try:
             from docx import Document
         except ImportError:

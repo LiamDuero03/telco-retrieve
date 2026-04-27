@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-#import anthropic
+
 from dotenv import load_dotenv
 
 from open_telco_rag.types import Chunk, IngestStats, SearchResult
@@ -18,7 +18,7 @@ from open_telco_rag.types import Chunk, IngestStats, SearchResult
 if TYPE_CHECKING:
     from open_telco_rag.types import Embedder, Source, VectorStore
 
-load_dotenv(Path(__file__).parent.parent.parent / ".env")
+load_dotenv()
 
 # ── Ingest ────────────────────────────────────────────────────────────────────
 

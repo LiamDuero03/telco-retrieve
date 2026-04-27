@@ -95,7 +95,7 @@ class IngestStats:
 
 @dataclass
 class EvalResult:
-    """Result of evaluating a single question."""
+    """Result of evaluating a single question, phase 2"""
     question:         str
     answer:           str
     sources:          list[str]
