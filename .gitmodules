@@ -1,0 +1,3 @@
+[submodule "docs/paper"]
+	path = docs/paper
+	url = https://github.com/Znbne/open-telco-rag-paper
