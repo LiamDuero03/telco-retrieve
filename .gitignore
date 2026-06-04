@@ -25,6 +25,7 @@ data_processed/
 
 # ── Pipeline runtime outputs ──────────────────────────────────────────────────
 chroma_db/
+chroma_db_r19_marker/
 logs/
 results/
 compare_output/
@@ -34,7 +35,7 @@ marker_output
 sources_output.txt
 
 # ── Notebooks & scratch ───────────────────────────────────────────────────────
-notebooks/
+#notebooks/
 hf_notebooks/
 *.ipynb
 .ipynb_checkpoints/
@@ -46,6 +47,7 @@ hf_notebooks/
 *.swo
 .DS_Store
 Thumbs.db
+app.py
 
 # ── Testing & coverage ────────────────────────────────────────────────────────
 .pytest_cache/
@@ -55,12 +57,14 @@ htmlcov/
 download/
 
 # Local utility scripts
+convert_qna.py
 check_errors.py
 file_count.py
 generate_questions.py
 storage_analysis.py
 test_marker_quality.py
 hw_compatibility/
+download_3gpp.py
 
 scripts/
 
