@@ -5,7 +5,7 @@
 [![GSMA Open Telco AI](https://img.shields.io/badge/GSMA-Open%20Telco%20AI-red.svg)](https://www.gsma.com/solutions-and-impact/technologies/networks/gsma_resources/open-telco-ai/)
 [![HuggingFace](https://img.shields.io/badge/🤗%20HuggingFace-GSMA-orange.svg)](https://huggingface.co/GSMA)
 
-An open, vendor-neutral RAG pipeline for telecom specifications — covering 7 standards bodies, 2M+ indexed chunks, and 470M+ tokens across O-RAN, 3GPP, ETSI, ITU-T, TM Forum, CAMARA, and GSMA.
+An open, vendor-neutral RAG pipeline for telecom specifications — covering 7 standards bodies across O-RAN, 3GPP, ETSI, ITU-T, TM Forum, CAMARA, and GSMA.
 
 Part of the [GSMA Open Telco AI Initiative](https://www.gsma.com/solutions-and-impact/technologies/networks/gsma_resources/open-telco-ai/).
 
@@ -31,7 +31,7 @@ open-telco-rag ask "What does 3GPP TS 28.312 define for intent management?" --so
 | 3GPP | TSpec-LLM dataset, Rel-18 | Markdown | `3gpp` |
 | ETSI | ENI, ZSM, MEC, NFV, SAI, F5G, RIS | PDF, YAML | `etsi` |
 | ITU-T | 14 active series (G, Y, Q, X, M...) | PDF | `itu` |
-| TM Forum | IG series, TMF Open APIs, ODA | DOCX, PDF, YAML, JSON | `tmforum` |
+| TM Forum | TMF Open APIs, ODA | DOCX, PDF, YAML, JSON | `tmforum` |
 | CAMARA | Fall25 — 75+ API repos | Markdown, YAML | `camara` |
 | GSMA | OPG, IG, AID, SGP, RCS and more | PDF, DOCX | `gsma` |
 
@@ -60,7 +60,7 @@ Create a `.env` file in your project root:
 
 ```bash
 ANTHROPIC_API_KEY=your_key_here       # for answer generation via Claude
-OPENROUTER_API_KEY=your_key_here      # optional — for open-source LLM generation
+OPENROUTER_API_KEY=your_key_here      # for open-source LLM generation (Llama, Mistral, etc.)
 DATALAB_API_KEY=your_key_here         # optional — for Marker PDF preprocessing
 ```
 
@@ -97,12 +97,31 @@ open-telco-rag ask "What interfaces does the Near-RT RIC expose?" --source-type 
 
 ---
 
+## Cookbook
+
+The Open Telco RAG cookbook is available as a [paper](docs/paper/cookbook.pdf) and as interactive Jupyter notebooks in the [`notebooks/`](notebooks/) directory — one per corpus:
+
+| Notebook | Corpus |
+|----------|--------|
+| [`01_oran_quickstart.ipynb`](notebooks/01_oran_quickstart.ipynb) | O-RAN Alliance R005 |
+| [`02_3gpp_quickstart.ipynb`](notebooks/02_3gpp_quickstart.ipynb) | 3GPP Release 18 |
+| [`03_camara_quickstart.ipynb`](notebooks/03_camara_quickstart.ipynb) | CAMARA Fall25 |
+| [`04_tmforum_quickstart.ipynb`](notebooks/04_tmforum_quickstart.ipynb) | TM Forum Open APIs |
+| [`05_gsma_quickstart.ipynb`](notebooks/05_gsma_quickstart.ipynb) | GSMA Open Gateway |
+| [`06_itu_quickstart.ipynb`](notebooks/06_itu_quickstart.ipynb) | ITU-T |
+| [`07_etsi_quickstart.ipynb`](notebooks/07_etsi_quickstart.ipynb) | ETSI ISG groups |
+
+Each notebook covers ingestion, search, question answering, and evaluation for its corpus.
+
+---
+
 ## CLI Reference
 
 ```
 open-telco-rag ingest <source>   Ingest documents into the vector database
 open-telco-rag search <query>    Search the vector database
 open-telco-rag ask <question>    Ask a question (search + generate)
+open-telco-rag evaluate <corpus> Run evaluation suite
 open-telco-rag info              Show database info
 ```
 
@@ -126,6 +145,7 @@ open-telco-rag ingest oran \
 | `--overlap` | `200` | Overlap between chunks in characters |
 | `--no-resume` | off | Disable resume — re-ingest all files |
 | `--use-marker` | off | Use Datalab Marker API for PDF preprocessing |
+| `--collection` | `source_model` | Override collection name |
 
 ### Marker preprocessing
 
@@ -148,6 +168,21 @@ open-telco-rag ask "What does TS 28.312 define for intent?" \
   --rerank-top-k 5
 ```
 
+### Evaluate options
+
+```bash
+open-telco-rag evaluate 3gpp \
+  --model bge \
+  --db-path chroma_db \
+  --collection 3gpp_r19_bge \
+  --questions-file configs/eval_questions/3gpp.json \
+  --rag-generator openrouter \
+  --rag-generator-model meta-llama/llama-3.3-70b-instruct \
+  --generator openrouter \
+  --generator-model anthropic/claude-sonnet-4.5 \
+  --output results/
+```
+
 ---
 
 ## Python API
@@ -157,7 +192,7 @@ from open_telco_rag import ingest, search, generate
 from open_telco_rag.sources.oran import ORANSource
 from open_telco_rag.embedders.sentense_transformers import SentenceTransformerEmbedder
 from open_telco_rag.stores.chroma import ChromaStore
-from open_telco_rag.generators.claude import ClaudeGenerator
+from open_telco_rag.generators.openrouter import OpenRouterGenerator
 
 # Ingest
 source   = ORANSource()
@@ -170,7 +205,7 @@ ingest(source=source, store=store, embedder=embedder, data_dir="data/oran/")
 results = search("E2 interface service models", store=store, embedder=embedder, top_k=5)
 
 # Generate
-generator = ClaudeGenerator()
+generator = OpenRouterGenerator(model="meta-llama/llama-3.3-70b-instruct")
 answer    = generator.generate("What does WG3 define for the E2 interface?", results)
 print(answer["answer"])
 ```
@@ -232,12 +267,29 @@ open-telco-rag/
 │   ├── generators/
 │   │   ├── claude.py
 │   │   └── openrouter.py
+│   ├── evaluation/           # evaluation framework
+│   │   ├── evaluate.py
+│   │   ├── questions.py
+│   │   ├── results.py
+│   │   └── metrics/
+│   │       ├── generation.py
+│   │       ├── retrieval.py
+│   │       └── ground_truth.py
 │   └── stores/
 │       └── chroma.py
 ├── cli/
 │   └── main.py               # CLI entry point
+├── notebooks/                # quickstart cookbook
+│   ├── 01_oran_quickstart.ipynb
+│   ├── 02_3gpp_quickstart.ipynb
+│   ├── 03_camara_quickstart.ipynb
+│   ├── 04_tmforum_quickstart.ipynb
+│   ├── 05_gsma_quickstart.ipynb
+│   ├── 06_itu_quickstart.ipynb
+│   └── 07_etsi_quickstart.ipynb
 ├── configs/
 │   ├── embedding_models.json
+│   ├── eval_questions/       # evaluation question sets
 │   └── reranker_models.json
 └── pyproject.toml
 ```
@@ -278,7 +330,6 @@ answer = generator.generate(question, results)
 ```
 
 ---
-
 
 ## Contributing
 
