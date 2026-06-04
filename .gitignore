@@ -35,7 +35,6 @@ marker_output
 sources_output.txt
 
 # ── Notebooks & scratch ───────────────────────────────────────────────────────
-#notebooks/
 hf_notebooks/
 *.ipynb
 .ipynb_checkpoints/
