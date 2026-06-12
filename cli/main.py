@@ -38,24 +38,30 @@ def main(argv: list[str] | None = None) -> None:
     # ── search ────────────────────────────────────────────────────────────────
     p_search = sub.add_parser("search", help="Search the vector database")
     p_search.add_argument("query",                                  help="Search query")
-    p_search.add_argument("--source-type", default="oran",         help="Source type")
-    p_search.add_argument("--model",       default="minilm",       help="Embedding model key")
-    p_search.add_argument("--db-path",     default="chroma_db",    help="ChromaDB path")
-    p_search.add_argument("--top-k",       type=int, default=5,    help="Number of results")
-    p_search.add_argument("--rerank",      action="store_true",    help="Enable cross-encoder reranking")
-    p_search.add_argument("--rerank-top-k",type=int, default=5,    help="Chunks to keep after reranking")
-    p_search.add_argument("--collection",  default=None,           help="Override collection name")
+    p_search.add_argument("--source-type",    default="oran",      help="Source type")
+    p_search.add_argument("--model",          default="minilm",    help="Embedding model key")
+    p_search.add_argument("--db-path",        default="chroma_db", help="ChromaDB path")
+    p_search.add_argument("--top-k",          type=int, default=5, help="Number of results")
+    p_search.add_argument("--rerank",         action="store_true", help="Enable reranking")
+    p_search.add_argument("--rerank-top-k",   type=int, default=5, help="Chunks to keep after reranking")
+    p_search.add_argument("--reranker-model", default="ms-marco-minilm",
+                          help="Reranker model key from configs/reranker_models.json "
+                               "(default: ms-marco-minilm, telecom: otel-reranker-0.6b)")
+    p_search.add_argument("--collection",     default=None,        help="Override collection name")
 
     # ── ask ───────────────────────────────────────────────────────────────────
     p_ask = sub.add_parser("ask", help="Ask a question (search + generate)")
     p_ask.add_argument("question",                                   help="Your question")
-    p_ask.add_argument("--source-type", default="oran",             help="Source type")
-    p_ask.add_argument("--model",       default="minilm",           help="Embedding model key")
-    p_ask.add_argument("--db-path",     default="chroma_db",        help="ChromaDB path")
-    p_ask.add_argument("--top-k",       type=int, default=8,        help="Chunks to retrieve")
-    p_ask.add_argument("--rerank",      action="store_true",        help="Enable cross-encoder reranking")
-    p_ask.add_argument("--rerank-top-k",type=int, default=5,        help="Chunks to keep after reranking")
-    p_ask.add_argument("--collection",  default=None,               help="Override collection name")
+    p_ask.add_argument("--source-type",    default="oran",          help="Source type")
+    p_ask.add_argument("--model",          default="minilm",        help="Embedding model key")
+    p_ask.add_argument("--db-path",        default="chroma_db",     help="ChromaDB path")
+    p_ask.add_argument("--top-k",          type=int, default=8,     help="Chunks to retrieve")
+    p_ask.add_argument("--rerank",         action="store_true",     help="Enable reranking")
+    p_ask.add_argument("--rerank-top-k",   type=int, default=5,     help="Chunks to keep after reranking")
+    p_ask.add_argument("--reranker-model", default="ms-marco-minilm",
+                       help="Reranker model key from configs/reranker_models.json "
+                            "(default: ms-marco-minilm, telecom: otel-reranker-0.6b)")
+    p_ask.add_argument("--collection",     default=None,            help="Override collection name")
 
     # ── evaluate ──────────────────────────────────────────────────────────────
     p_eval = sub.add_parser("evaluate", help="Run evaluation suite on a corpus")
@@ -92,11 +98,23 @@ def main(argv: list[str] | None = None) -> None:
                              "If omitted, uses the same as --generator.")
     p_eval.add_argument("--rag-generator-model", default=None,
                         help="Model for RAG answer generation. "
-                             "If omitted, uses the same as --generator-model. "
-                             "Example: use a cheap model for generation and a strong "
-                             "model for metric scoring.")
+                             "If omitted, uses the same as --generator-model.")
     p_eval.add_argument("--debug",          action="store_true",
                         help="Log raw LLM responses for every metric call")
+    p_eval.add_argument("--leaderboard",    default="results/leaderboard.json",
+                        help="Path to leaderboard JSON file (default: results/leaderboard.json).")
+    p_eval.add_argument("--no-leaderboard", action="store_true",
+                        help="Do not update the leaderboard file")
+    p_eval.add_argument("--include-baseline", action="store_true",
+                        help="Run a second pass with no retrieval (LLM knowledge only) "
+                             "and store baseline metrics alongside RAG metrics in the leaderboard")
+    p_eval.add_argument("--rerank",         action="store_true",
+                        help="Enable reranking during evaluation retrieval")
+    p_eval.add_argument("--rerank-top-k",   type=int, default=5,
+                        help="Chunks to keep after reranking (default: 5)")
+    p_eval.add_argument("--reranker-model", default="ms-marco-minilm",
+                        help="Reranker model key from configs/reranker_models.json "
+                             "(default: ms-marco-minilm, telecom: otel-reranker-0.6b)")
 
     # ── info ──────────────────────────────────────────────────────────────────
     p_info = sub.add_parser("info", help="Show database info")
@@ -159,6 +177,12 @@ def _get_store(source_type: str, model_key: str, db_path: str, collection: str =
     return ChromaStore(path=db_path, collection_name=col)
 
 
+def _get_reranker(model_key: str):
+    """Load reranker by key from configs/reranker_models.json."""
+    from open_telco_rag.embedders.reranker import load_reranker
+    return load_reranker(model_key)
+
+
 # ── Command runners ───────────────────────────────────────────────────────────
 
 def _run_ingest(args) -> None:
@@ -203,9 +227,9 @@ def _run_search(args) -> None:
 
     reranker = None
     if args.rerank:
-        from open_telco_rag.embedders.reranker import CrossEncoderReranker
-        reranker = CrossEncoderReranker()
-        print(f"Reranking enabled — retrieving {args.top_k * 3} candidates → top {args.rerank_top_k}")
+        reranker = _get_reranker(args.reranker_model)
+        print(f"Reranking enabled ({args.reranker_model}) — "
+              f"{args.top_k * 3} candidates → top {args.rerank_top_k}")
 
     results = search(
         args.query,
@@ -228,11 +252,11 @@ def _run_search(args) -> None:
             continue
         seen.add(key)
         displayed += 1
-        heading    = r.metadata.get("heading", "")
-        source     = r.metadata.get("source", "")
-        wg         = r.metadata.get("work_group", "")
-        release    = r.metadata.get("release", "")
-        similarity = round(math.exp(-r.distance), 3)
+        heading      = r.metadata.get("heading", "")
+        source       = r.metadata.get("source", "")
+        wg           = r.metadata.get("work_group", "")
+        release      = r.metadata.get("release", "")
+        similarity   = round(math.exp(-r.distance), 3)
         rerank_score = r.metadata.get("rerank_score", "")
         rerank_str   = f" | rerank {rerank_score}" if rerank_score != "" else ""
         print(f"\n--- Result {displayed} | {source}"
@@ -254,9 +278,9 @@ def _run_ask(args) -> None:
 
     reranker = None
     if args.rerank:
-        from open_telco_rag.embedders.reranker import CrossEncoderReranker
-        reranker = CrossEncoderReranker()
-        print(f"Reranking enabled — retrieving {args.top_k * 3} candidates → top {args.rerank_top_k}")
+        reranker = _get_reranker(args.reranker_model)
+        print(f"Reranking enabled ({args.reranker_model}) — "
+              f"{args.top_k * 3} candidates → top {args.rerank_top_k}")
 
     results = search(
         args.question,
@@ -281,10 +305,10 @@ def _run_evaluate(args) -> None:
     embedder   = _get_embedder(args.model)
     output_dir = None if args.no_save else Path(args.output)
 
-    # LLM for evaluation metrics (faithfulness, answer_relevancy, etc.)
+    # LLM for evaluation metrics
     llm_call = make_llm_call(args.generator, args.generator_model)
 
-    # LLM for RAG answer generation — defaults to same as metrics LLM if not set
+    # LLM for RAG answer generation
     rag_generator_name  = args.rag_generator       or args.generator
     rag_generator_model = args.rag_generator_model or args.generator_model
     rag_llm_call = make_llm_call(rag_generator_name, rag_generator_model)
@@ -292,7 +316,7 @@ def _run_evaluate(args) -> None:
     print(f"  Metrics LLM  : {args.generator} / {args.generator_model or 'default'}")
     print(f"  RAG gen LLM  : {rag_generator_name} / {rag_generator_model or 'default'}")
 
-    # ── Load custom questions file if provided ────────────────────────────────
+    # Load custom questions file if provided
     custom_questions = None
     if args.questions_file:
         import json
@@ -308,16 +332,13 @@ def _run_evaluate(args) -> None:
         custom_questions = [EvalQuestion.from_dict(q) for q in items]
         print(f"[INFO] Loaded {len(custom_questions)} questions from {qpath}")
 
-    # ── Resolve corpora ───────────────────────────────────────────────────────
     corpora = SUPPORTED_CORPORA if args.corpus == "all" else [args.corpus]
 
     for corpus in corpora:
-        # collection override applies only when evaluating a single corpus
         collection = args.collection if len(corpora) == 1 else None
-        store      = _get_store(corpus, args.model, args.db_path,
-                                collection=collection)
+        store      = _get_store(corpus, args.model, args.db_path, collection=collection)
 
-        count = store.count()
+        count    = store.count()
         col_name = collection or f"{corpus}_{args.model}"
         if count == 0:
             print(f"\n[SKIP] {corpus.upper()} — collection '{col_name}' "
@@ -326,23 +347,101 @@ def _run_evaluate(args) -> None:
 
         print(f"\n[INFO] {corpus.upper()} — {count:,} chunks in '{col_name}'")
 
-        # use custom questions if provided, else load from corpus JSON
         questions = custom_questions or None
 
-        evaluate_corpus(
-            corpus          = corpus,
-            store           = store,
-            embedder        = embedder,
-            questions       = questions,
-            model           = args.model,
-            top_k           = args.top_k,
-            sim_threshold   = args.threshold,
-            delay           = args.delay,
-            output_dir      = output_dir,
-            llm_call        = llm_call,
-            rag_llm_call    = rag_llm_call,
-            debug           = args.debug,
+        reranker = None
+        if args.rerank:
+            reranker = _get_reranker(args.reranker_model)
+            print(f"  Reranker     : {args.reranker_model} → top {args.rerank_top_k}")
+
+        result, baseline_result = evaluate_corpus(
+            corpus            = corpus,
+            store             = store,
+            embedder          = embedder,
+            questions         = questions,
+            model             = args.model,
+            top_k             = args.top_k,
+            sim_threshold     = args.threshold,
+            delay             = args.delay,
+            output_dir        = output_dir,
+            llm_call          = llm_call,
+            rag_llm_call      = rag_llm_call,
+            include_baseline  = args.include_baseline,
+            reranker          = reranker,
+            rerank_top_k      = args.rerank_top_k,
+            debug             = args.debug,
         )
+
+        if not args.no_leaderboard:
+            _update_leaderboard(
+                leaderboard_path = Path(args.leaderboard),
+                result           = result,
+                baseline_result  = baseline_result,
+                rag_model        = rag_generator_model or "default",
+                evaluator_model  = args.generator_model or "default",
+                corpus           = corpus,
+                collection       = col_name,
+                reranker_model   = args.reranker_model if args.rerank else None,
+            )
+
+
+def _update_leaderboard(
+    leaderboard_path: Path,
+    result,
+    rag_model:        str,
+    evaluator_model:  str,
+    corpus:           str,
+    collection:       str,
+    baseline_result   = None,
+    reranker_model:   str | None = None,
+) -> None:
+    """Append one row to the leaderboard JSON file."""
+    import json
+    from datetime import datetime
+
+    def _avg(r):
+        scores = [r.mean_faithfulness, r.mean_answer_relevancy,
+                  r.mean_similarity, r.mean_context_recall, r.mean_answer_correctness]
+        valid = [s for s in scores if s >= 0]
+        return round(sum(valid) / len(valid), 3) if valid else -1.0
+
+    row = {
+        "timestamp":             datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "rag_model":             rag_model,
+        "evaluator_model":       evaluator_model,
+        "embedder":              result.model,
+        "corpus":                corpus,
+        "collection":            collection,
+        "top_k":                 result.top_k,
+        "n_questions":           result.n_questions,
+        "reranker":              reranker_model or "none",
+        "faithfulness":          round(result.mean_faithfulness,               3),
+        "answer_relevancy":      round(result.mean_answer_relevancy,           3),
+        "mean_similarity":       round(result.mean_similarity,                 3),
+        "context_recall":        round(max(0, result.mean_context_recall),     3),
+        "answer_correctness":    round(max(0, result.mean_answer_correctness), 3),
+        "average":               _avg(result),
+        "bl_faithfulness":       round(baseline_result.mean_faithfulness,               3) if baseline_result else None,
+        "bl_answer_relevancy":   round(baseline_result.mean_answer_relevancy,           3) if baseline_result else None,
+        "bl_context_recall":     round(max(0, baseline_result.mean_context_recall),     3) if baseline_result else None,
+        "bl_answer_correctness": round(max(0, baseline_result.mean_answer_correctness), 3) if baseline_result else None,
+        "bl_average":            _avg(baseline_result) if baseline_result else None,
+    }
+
+    leaderboard_path.parent.mkdir(parents=True, exist_ok=True)
+    rows = []
+    if leaderboard_path.exists():
+        try:
+            rows = json.loads(leaderboard_path.read_text(encoding="utf-8"))
+        except Exception:
+            rows = []
+
+    rows.append(row)
+    leaderboard_path.write_text(
+        json.dumps(rows, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    print(f"\n  Leaderboard updated → {leaderboard_path}  (avg={_avg(result):.3f})")
 
 
 def _run_info(args) -> None:

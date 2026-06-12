@@ -18,5 +18,20 @@
         "model_name": "BAAI/bge-large-en-v1.5",
         "dimensions": 1024,
         "description": "Strong retrieval-focused model — competitive with e5 on technical domains"
+    },
+    "otel-109m": {
+        "model_name": "farbodtavakkoli/OTel-Embedding-109M",
+        "dimensions": 768,
+        "description": "Telecom-domain fine-tuned — 109M params, based on all-mpnet-base-v2"
+    },
+    "otel-300m": {
+        "model_name": "farbodtavakkoli/OTel-Embedding-300M",
+        "dimensions": 1024,
+        "description": "Telecom-domain fine-tuned — 300M params, based on Gemma3-Embedding-300M (recommended)"
+    },
+    "otel-0.6b": {
+        "model_name": "farbodtavakkoli/OTel-Embedding-0.6B",
+        "dimensions": 1024,
+        "description": "Telecom-domain fine-tuned — 0.6B params, highest quality OTel embedder"
     }
 }

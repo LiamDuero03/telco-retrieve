@@ -1,14 +1,32 @@
 {
     "ms-marco-minilm": {
         "model_name": "cross-encoder/ms-marco-MiniLM-L-6-v2",
-        "description": "Fast, lightweight baseline cross-encoder"
+        "description": "Fast, lightweight baseline cross-encoder",
+        "backend": "cross-encoder"
     },
     "ms-marco-large": {
         "model_name": "cross-encoder/ms-marco-MiniLM-L-12-v2",
-        "description": "Larger cross-encoder — better accuracy, slower"
+        "description": "Larger cross-encoder — better accuracy, slower",
+        "backend": "cross-encoder"
     },
     "bge-reranker": {
         "model_name": "BAAI/bge-reranker-large",
-        "description": "Retrieval-optimised reranker — strong on technical domains"
+        "description": "Retrieval-optimised reranker — strong on technical domains",
+        "backend": "cross-encoder"
+    },
+    "otel-reranker-0.6b": {
+        "model_name": "farbodtavakkoli/OTel-Reranker-0.6B",
+        "description": "Telecom-domain reranker — 0.6B params, Qwen3-based (recommended)",
+        "backend": "otel"
+    },
+    "otel-reranker-4b": {
+        "model_name": "farbodtavakkoli/OTel-Reranker-4B",
+        "description": "Telecom-domain reranker — 4B params, higher accuracy",
+        "backend": "otel"
+    },
+    "otel-reranker-8b": {
+        "model_name": "farbodtavakkoli/OTel-Reranker-8B",
+        "description": "Telecom-domain reranker — 8B params, highest accuracy",
+        "backend": "otel"
     }
 }

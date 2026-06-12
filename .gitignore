@@ -70,3 +70,26 @@ scripts/
 open_telco_rag/evaluation/
 
 configs/eval_questions/
+# Utility and test scripts
+run_all_evals.ps1
+test_otel_embeddings.py
+find_models.py
+test_models.py
+preflight_check.py
+add_to_leaderboard.py
+convert_qna.py
+
+# Backup files
+app_0.py
+cli/main_0.py
+
+# QnA datasets
+G-RAG_qna_latest_jsonl.jsonl
+*.jsonl
+
+# Results and leaderboard
+results/
+logs/
+
+# Eval questions (internal)
+configs/eval_questions/

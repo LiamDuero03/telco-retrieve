@@ -17,23 +17,23 @@ Open Telco RAG enables engineers and researchers to ask natural language questio
 
 ```
 open-telco-rag ask "What does O-RAN WG3 define for the E2 interface?" --source-type oran
-open-telco-rag ask "What are the TM Forum L4 autonomy requirements?" --source-type tmforum
 open-telco-rag ask "What does 3GPP TS 28.312 define for intent management?" --source-type 3gpp
+open-telco-rag ask "What are the ETSI ZSM closed-loop automation requirements?" --source-type etsi
 ```
 
 ---
 
 ## Supported Corpora
 
-| Corpus | Source | Documents | Format |
-|--------|--------|-----------|--------|
-| O-RAN Alliance | O-RAN R003–R005, all WGs | PDF, DOCX | `oran` |
-| 3GPP | TSpec-LLM dataset, Rel-18 | Markdown | `3gpp` |
-| ETSI | ENI, ZSM, MEC, NFV, SAI, F5G, RIS | PDF, YAML | `etsi` |
-| ITU-T | 14 active series (G, Y, Q, X, M...) | PDF | `itu` |
-| TM Forum | TMF Open APIs, ODA | DOCX, PDF, YAML, JSON | `tmforum` |
-| CAMARA | Fall25 — 75+ API repos | Markdown, YAML | `camara` |
-| GSMA | OPG, IG, AID, SGP, RCS and more | PDF, DOCX | `gsma` |
+| Corpus | Source | Format | Status |
+|--------|--------|--------|--------|
+| O-RAN Alliance | O-RAN R003–R005, all WGs | PDF, DOCX | ✅ Available |
+| 3GPP | TSpec-LLM dataset, Rel-18 & 19 | Markdown | ✅ Available |
+| ETSI | ENI, ZSM, MEC, NFV, SAI, F5G, RIS | PDF, YAML | ✅ Available |
+| ITU-T | 14 active series (G, Y, Q, X, M…) | PDF | ✅ Available |
+| CAMARA | Fall25 — 75+ API repos | Markdown, YAML | ✅ Available |
+| GSMA | OPG, IG, AID, SGP, RCS and more | PDF, DOCX | ✅ Available |
+| TM Forum | TMF Open APIs, ODA | DOCX, PDF, YAML, JSON | 🔜 Coming soon |
 
 ---
 
@@ -59,8 +59,8 @@ pip install open-telco-rag[local-embed,pdf,docx]
 Create a `.env` file in your project root:
 
 ```bash
-ANTHROPIC_API_KEY=your_key_here       # for answer generation via Claude
-OPENROUTER_API_KEY=your_key_here      # for open-source LLM generation (Llama, Mistral, etc.)
+OPENROUTER_API_KEY=your_key_here      # for LLM generation via OpenRouter (Llama, Claude, GPT-4o, etc.)
+ANTHROPIC_API_KEY=your_key_here       # optional — for direct Claude access
 DATALAB_API_KEY=your_key_here         # optional — for Marker PDF preprocessing
 ```
 
@@ -71,17 +71,19 @@ Download O-RAN specifications from [o-ran.org](https://www.o-ran.org/specificati
 ### 3. Ingest
 
 ```bash
-open-telco-rag ingest oran --model minilm --data data/oran/
+open-telco-rag ingest oran --model bge --data data/oran/
 ```
 
 Available embedding models:
 
 | Key | Model | Dimensions | Notes |
 |-----|-------|------------|-------|
-| `minilm` | all-MiniLM-L6-v2 | 384 | Fast — recommended for development |
+| `minilm` | all-MiniLM-L6-v2 | 384 | Fast — good for development |
 | `mpnet` | all-mpnet-base-v2 | 768 | Balanced quality and speed |
 | `e5` | intfloat/e5-large-v2 | 1024 | High quality — recommended for production |
 | `bge` | BAAI/bge-large-en-v1.5 | 1024 | Strong on technical domains |
+| `otel-109m` | OTel-Embedding-109M | 768 | Telecom-domain fine-tuned — 109M params |
+| `otel-0.6b` | OTel-Embedding-0.6B | 1024 | Telecom-domain fine-tuned — 0.6B params |
 
 ### 4. Search
 
@@ -104,7 +106,7 @@ The Open Telco RAG cookbook is available as a [paper](docs/paper/cookbook.pdf) a
 | Notebook | Corpus |
 |----------|--------|
 | [`01_oran_quickstart.ipynb`](notebooks/01_oran_quickstart.ipynb) | O-RAN Alliance R005 |
-| [`02_3gpp_quickstart.ipynb`](notebooks/02_3gpp_quickstart.ipynb) | 3GPP Release 18 |
+| [`02_3gpp_quickstart.ipynb`](notebooks/02_3gpp_quickstart.ipynb) | 3GPP Release 18 & 19 |
 | [`03_camara_quickstart.ipynb`](notebooks/03_camara_quickstart.ipynb) | CAMARA Fall25 |
 | [`04_tmforum_quickstart.ipynb`](notebooks/04_tmforum_quickstart.ipynb) | TM Forum Open APIs |
 | [`05_gsma_quickstart.ipynb`](notebooks/05_gsma_quickstart.ipynb) | GSMA Open Gateway |
@@ -127,7 +129,7 @@ open-telco-rag info              Show database info
 
 ### Ingest options
 
-```
+```bash
 open-telco-rag ingest oran \
   --data data/oran/ \
   --model bge \
@@ -157,7 +159,7 @@ open-telco-rag ingest etsi --model bge --use-marker --data data/etsi/
 
 Requires `DATALAB_API_KEY` in `.env`. See [datalab.to](https://www.datalab.to) for pricing.
 
-### Ask options
+### Search and Ask options
 
 ```bash
 open-telco-rag ask "What does TS 28.312 define for intent?" \
@@ -165,8 +167,27 @@ open-telco-rag ask "What does TS 28.312 define for intent?" \
   --model bge \
   --top-k 8 \
   --rerank \
+  --reranker-model ms-marco-minilm \
   --rerank-top-k 5
 ```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--top-k` | 5 / 8 | Chunks to retrieve |
+| `--rerank` | off | Enable reranking after retrieval |
+| `--reranker-model` | `ms-marco-minilm` | Reranker key from `configs/reranker_models.json` |
+| `--rerank-top-k` | 5 | Chunks to keep after reranking |
+| `--collection` | `source_model` | Override collection name |
+
+### Reranker models
+
+| Key | Model | Notes |
+|-----|-------|-------|
+| `ms-marco-minilm` | cross-encoder/ms-marco-MiniLM-L-6-v2 | Fast, general-purpose |
+| `ms-marco-large` | cross-encoder/ms-marco-MiniLM-L-12-v2 | Larger, more accurate |
+| `bge-reranker` | BAAI/bge-reranker-large | Strong on technical domains |
+| `otel-reranker-0.6b` | OTel-Reranker-0.6B | Telecom-domain fine-tuned (recommended) |
+| `otel-reranker-4b` | OTel-Reranker-4B | Higher accuracy, requires GPU |
 
 ### Evaluate options
 
@@ -174,25 +195,42 @@ open-telco-rag ask "What does TS 28.312 define for intent?" \
 open-telco-rag evaluate 3gpp \
   --model bge \
   --db-path chroma_db \
-  --collection 3gpp_r19_bge \
-  --questions-file configs/eval_questions/3gpp.json \
+  --collection 3gpp_r19_marker_bge \
+  --questions-file configs/eval_questions/3gpp_r19_qna.json \
   --rag-generator openrouter \
   --rag-generator-model meta-llama/llama-3.3-70b-instruct \
   --generator openrouter \
   --generator-model anthropic/claude-sonnet-4.5 \
+  --top-k 5 \
+  --include-baseline \
   --output results/
 ```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--model` | `minilm` | Embedding model key |
+| `--collection` | `corpus_model` | Override collection name |
+| `--questions-file` | corpus default | Path to QnA JSON file |
+| `--top-k` | 5 | Chunks to retrieve per question |
+| `--rag-generator` | openrouter | LLM provider for answer generation |
+| `--rag-generator-model` | — | Model for answer generation |
+| `--generator` | openrouter | LLM provider for metric scoring |
+| `--generator-model` | — | Model for metric scoring |
+| `--rerank` | off | Enable reranking during evaluation |
+| `--reranker-model` | `ms-marco-minilm` | Reranker model key |
+| `--include-baseline` | off | Run no-retrieval baseline pass |
+| `--leaderboard` | `results/leaderboard.json` | Leaderboard output path |
 
 ---
 
 ## Python API
 
 ```python
-from open_telco_rag import ingest, search, generate
 from open_telco_rag.sources.oran import ORANSource
 from open_telco_rag.embedders.sentense_transformers import SentenceTransformerEmbedder
 from open_telco_rag.stores.chroma import ChromaStore
 from open_telco_rag.generators.openrouter import OpenRouterGenerator
+from open_telco_rag.core.pipeline import ingest, search, generate
 
 # Ingest
 source   = ORANSource()
@@ -206,7 +244,8 @@ results = search("E2 interface service models", store=store, embedder=embedder, 
 
 # Generate
 generator = OpenRouterGenerator(model="meta-llama/llama-3.3-70b-instruct")
-answer    = generator.generate("What does WG3 define for the E2 interface?", results)
+answer    = generate("What does WG3 define for the E2 interface?", results,
+                     generator=generator)
 print(answer["answer"])
 ```
 
@@ -226,15 +265,15 @@ Documents (PDF / DOCX / YAML / Markdown)
         │
         ▼
    Embedder              SentenceTransformerEmbedder (local)
-        │
+        │                general-purpose or OTel telecom-domain models
         ▼
    ChromaDB              persistent vector store
         │
         ▼
-   Search                cosine similarity retrieval + optional reranking
-        │
+   Search                cosine similarity retrieval
+        │                optional: cross-encoder or OTel reranking
         ▼
-   Generator             Claude or OpenRouter LLM
+   Generator             any LLM via OpenRouter or direct API
         │
         ▼
    Answer + sources
@@ -247,27 +286,20 @@ Documents (PDF / DOCX / YAML / Markdown)
 ```
 open-telco-rag/
 ├── open_telco_rag/
-│   ├── types.py              # shared protocols and dataclasses
+│   ├── types.py
 │   ├── core/
-│   │   ├── pipeline.py       # ingest, search, generate
-│   │   ├── chunking.py       # chunk_text, chunk_markdown
-│   │   ├── cleaning.py       # base_clean and helpers
-│   │   └── marker_loader.py  # Datalab Marker API mixin
-│   ├── sources/              # one class per SDO
-│   │   ├── oran.py
-│   │   ├── tgpp.py           # 3GPP
-│   │   ├── etsi.py
-│   │   ├── itu.py
-│   │   ├── tmforum.py
-│   │   ├── camara.py
-│   │   └── gsma.py
+│   │   ├── pipeline.py          # ingest, search, generate
+│   │   ├── chunking.py          # chunk_text, chunk_markdown
+│   │   ├── cleaning.py
+│   │   └── marker_loader.py     # Datalab Marker API mixin
+│   ├── sources/                 # one class per SDO
 │   ├── embedders/
 │   │   ├── sentense_transformers.py
-│   │   └── reranker.py
+│   │   └── reranker.py          # CrossEncoderReranker, OTelReranker
 │   ├── generators/
 │   │   ├── claude.py
 │   │   └── openrouter.py
-│   ├── evaluation/           # evaluation framework
+│   ├── evaluation/
 │   │   ├── evaluate.py
 │   │   ├── questions.py
 │   │   ├── results.py
@@ -278,19 +310,12 @@ open-telco-rag/
 │   └── stores/
 │       └── chroma.py
 ├── cli/
-│   └── main.py               # CLI entry point
-├── notebooks/                # quickstart cookbook
-│   ├── 01_oran_quickstart.ipynb
-│   ├── 02_3gpp_quickstart.ipynb
-│   ├── 03_camara_quickstart.ipynb
-│   ├── 04_tmforum_quickstart.ipynb
-│   ├── 05_gsma_quickstart.ipynb
-│   ├── 06_itu_quickstart.ipynb
-│   └── 07_etsi_quickstart.ipynb
+│   └── main.py
+├── notebooks/                   # quickstart cookbook
 ├── configs/
-│   ├── embedding_models.json
-│   ├── eval_questions/       # evaluation question sets
-│   └── reranker_models.json
+│   ├── embedding_models.json    # embedder registry
+│   ├── reranker_models.json     # reranker registry
+│   └── eval_questions/          # evaluation question sets
 └── pyproject.toml
 ```
 
@@ -300,8 +325,6 @@ open-telco-rag/
 
 ### Adding a new source
 
-Implement the `Source` protocol from `open_telco_rag.types`:
-
 ```python
 from open_telco_rag.types import Source
 from pathlib import Path
@@ -310,23 +333,37 @@ class MySource:
     def supported_extensions(self) -> list[str]:
         return [".pdf"]
 
-    def load(self, path: Path) -> str:
-        ...
-
-    def clean(self, text: str) -> str:
-        ...
+    def load(self, path: Path) -> str: ...
+    def clean(self, text: str) -> str: ...
 
     def metadata(self, path: Path) -> dict:
         return {"source": path.name, "source_type": "my_source"}
 ```
 
-### Using a different LLM
+### Adding a new embedding model
 
-```python
-from open_telco_rag.generators.openrouter import OpenRouterGenerator
+Add an entry to `configs/embedding_models.json`:
 
-generator = OpenRouterGenerator(model="meta-llama/llama-3.3-70b-instruct")
-answer = generator.generate(question, results)
+```json
+"my-model": {
+    "model_name": "org/model-name",
+    "dimensions": 768,
+    "description": "My custom embedding model"
+}
+```
+
+Then use `--model my-model` in any CLI command.
+
+### Adding a new reranker
+
+Add an entry to `configs/reranker_models.json`:
+
+```json
+"my-reranker": {
+    "model_name": "org/reranker-name",
+    "description": "My custom reranker",
+    "backend": "cross-encoder"
+}
 ```
 
 ---
