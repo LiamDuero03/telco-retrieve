@@ -5,7 +5,7 @@
 [![GSMA Open Telco AI](https://img.shields.io/badge/GSMA-Open%20Telco%20AI-red.svg)](https://www.gsma.com/solutions-and-impact/technologies/networks/gsma_resources/open-telco-ai/)
 [![HuggingFace](https://img.shields.io/badge/🤗%20HuggingFace-GSMA-orange.svg)](https://huggingface.co/GSMA)
 
-An open, vendor-neutral RAG pipeline for telecom specifications — covering 7 standards bodies across O-RAN, 3GPP, ETSI, ITU-T, TM Forum, CAMARA, and GSMA.
+An open, vendor-neutral RAG pipeline for telecom specifications — covering 7 standards bodies across O-RAN, 3GPP, ETSI, ITU-T, TM Forum (coming soon), CAMARA, and GSMA.
 
 Part of the [GSMA Open Telco AI Initiative](https://www.gsma.com/solutions-and-impact/technologies/networks/gsma_resources/open-telco-ai/).
 
