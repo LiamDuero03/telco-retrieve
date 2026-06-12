@@ -1,4 +1,4 @@
-# Open Telco RAG
+# Telco Lens
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
@@ -13,7 +13,7 @@ Part of the [GSMA Open Telco AI Initiative](https://www.gsma.com/solutions-and-i
 
 ## Overview
 
-Open Telco RAG enables engineers and researchers to ask natural language questions directly against authoritative telecom standards — with source citations, no hallucination, and full corpus coverage across all major SDOs.
+Telco Lens enables engineers and researchers to ask natural language questions directly against authoritative telecom standards — with source citations, no hallucination, and full corpus coverage across all major SDOs.
 
 ```
 open-telco-rag ask "What does O-RAN WG3 define for the E2 interface?" --source-type oran
@@ -101,7 +101,7 @@ open-telco-rag ask "What interfaces does the Near-RT RIC expose?" --source-type 
 
 ## Cookbook
 
-The Open Telco RAG Cookbook is available as a [Cookbook](https://github.com/Znbne/telcolens-cookbook/blob/master/cookbook.pdf) and as interactive Jupyter notebooks in the [`notebooks/`](notebooks/) directory — one per corpus:
+The Telco Lens Cookbook is available as a [Cookbook](https://github.com/Znbne/telcolens-cookbook/blob/master/cookbook.pdf) and as interactive Jupyter notebooks in the [`notebooks/`](notebooks/) directory — one per corpus:
 
 | Notebook | Corpus |
 |----------|--------|

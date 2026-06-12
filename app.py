@@ -1,10 +1,10 @@
-"""Streamlit web UI for Open Telco RAG."""
+"""Streamlit web UI for TelcoLens."""
 
 import streamlit as st
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Open Telco RAG",
+    page_title="TelcoLens",
     page_icon="📡",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -134,7 +134,7 @@ def _build_generator(llm_model: str):
     from open_telco_rag.generators.openrouter import OpenRouterGenerator
     gen = OpenRouterGenerator(model=llm_model)
     if not hasattr(gen, "site_url"):  gen.site_url  = ""
-    if not hasattr(gen, "site_name"): gen.site_name = "Open Telco RAG"
+    if not hasattr(gen, "site_name"): gen.site_name = "TelcoLens"
     return gen
 
 
@@ -169,7 +169,7 @@ def _render_chunk_cards(results):
 
 _load_env()
 
-st.sidebar.markdown("## 📡 Open Telco RAG")
+st.sidebar.markdown("## 🔭 TelcoLens")
 st.sidebar.caption("v0.1.0")
 st.sidebar.markdown("---")
 
@@ -214,7 +214,7 @@ st.sidebar.markdown("---")
 # ── Cookbook ──────────────────────────────────────────────────────────────────
 st.sidebar.markdown("**📚 Cookbook**")
 st.sidebar.markdown(
-    "[Open Telco RAG Cookbook](https://github.com/Znbne/telcolens-cookbook/blob/master/cookbook.pdf)",
+    "[TelcoLens Cookbook](https://github.com/Znbne/telcolens-cookbook/blob/master/cookbook.pdf)",
     unsafe_allow_html=True,
 )
 
@@ -250,7 +250,7 @@ tab_home, tab_ask, tab_search, tab_ingest, tab_eval, tab_lb, tab_info = st.tabs(
 with tab_home:
     st.markdown("""
 <div style='text-align:center; padding: 2rem 1rem 1rem;'>
-    <div style='font-size:2.8rem; font-weight:700; letter-spacing:-0.5px;'>📡 Open Telco RAG</div>
+    <div style='font-size:2.8rem; font-weight:700; letter-spacing:-0.5px;'>🔭 TelcoLens</div>
     <div style='font-size:1.1rem; color:#666; margin-top:0.5rem; max-width:600px; margin-left:auto; margin-right:auto;'>
         Ask natural language questions directly against authoritative telecom standards —
         with source citations, across 7 standards bodies.
