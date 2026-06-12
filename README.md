@@ -101,7 +101,7 @@ open-telco-rag ask "What interfaces does the Near-RT RIC expose?" --source-type 
 
 ## Cookbook
 
-The Open Telco RAG Cookbook is available as a [Cookbook](docs/paper/cookbook.pdf) and as interactive Jupyter notebooks in the [`notebooks/`](notebooks/) directory — one per corpus:
+The Open Telco RAG Cookbook is available as a [Cookbook](https://github.com/Znbne/telcolens-cookbook/blob/master/cookbook.pdf) and as interactive Jupyter notebooks in the [`notebooks/`](notebooks/) directory — one per corpus:
 
 | Notebook | Corpus |
 |----------|--------|
