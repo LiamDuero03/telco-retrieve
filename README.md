@@ -101,14 +101,14 @@ open-telco-rag ask "What interfaces does the Near-RT RIC expose?" --source-type 
 
 ## Cookbook
 
-The Open Telco RAG cookbook is available as a [paper](docs/paper/cookbook.pdf) and as interactive Jupyter notebooks in the [`notebooks/`](notebooks/) directory — one per corpus:
+The Open Telco RAG Cookbook is available as a [Cookbook](docs/paper/cookbook.pdf) and as interactive Jupyter notebooks in the [`notebooks/`](notebooks/) directory — one per corpus:
 
 | Notebook | Corpus |
 |----------|--------|
 | [`01_oran_quickstart.ipynb`](notebooks/01_oran_quickstart.ipynb) | O-RAN Alliance R005 |
 | [`02_3gpp_quickstart.ipynb`](notebooks/02_3gpp_quickstart.ipynb) | 3GPP Release 18 & 19 |
 | [`03_camara_quickstart.ipynb`](notebooks/03_camara_quickstart.ipynb) | CAMARA Fall25 |
-| [`04_tmforum_quickstart.ipynb`](notebooks/04_tmforum_quickstart.ipynb) | TM Forum Open APIs |
+| `04_tmforum_quickstart.ipynb` | TM Forum Open APIs — 🔜 Coming soon |
 | [`05_gsma_quickstart.ipynb`](notebooks/05_gsma_quickstart.ipynb) | GSMA Open Gateway |
 | [`06_itu_quickstart.ipynb`](notebooks/06_itu_quickstart.ipynb) | ITU-T |
 | [`07_etsi_quickstart.ipynb`](notebooks/07_etsi_quickstart.ipynb) | ETSI ISG groups |
