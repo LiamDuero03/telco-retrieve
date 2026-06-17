@@ -36,7 +36,7 @@ sources_output.txt
 
 # ── Notebooks & scratch ───────────────────────────────────────────────────────
 hf_notebooks/
-*.ipynb
+#*.ipynb
 .ipynb_checkpoints/
 
 # ── IDE ───────────────────────────────────────────────────────────────────────
