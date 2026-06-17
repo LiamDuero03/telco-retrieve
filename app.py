@@ -233,7 +233,10 @@ NOTEBOOKS = [
 NB_BASE = "https://github.com/Znbne/telcolens/blob/main/notebooks"
 
 for name, fname in NOTEBOOKS:
-    st.sidebar.markdown(f"[{name}]({NB_BASE}/{fname})", unsafe_allow_html=True)
+    if fname:
+        st.sidebar.markdown(f"[{name}]({NB_BASE}/{fname})", unsafe_allow_html=True)
+    else:
+        st.sidebar.markdown(f"<span style='color:#aaa'>{name}</span>", unsafe_allow_html=True)
 
 
 
@@ -252,7 +255,7 @@ with tab_home:
 <div style='text-align:center; padding: 2rem 1rem 1rem;'>
     <div style='font-size:2.8rem; font-weight:700; letter-spacing:-0.5px;'>🔭 TelcoLens</div>
     <div style='font-size:1.1rem; color:#666; margin-top:0.5rem; max-width:600px; margin-left:auto; margin-right:auto;'>
-        Ask natural language questions directly against authoritative telecom standards —
+        Ask natural language questions directly against authoritative telecom standards
         with source citations, across 7 standards bodies.
     </div>
 </div>
@@ -263,11 +266,11 @@ with tab_home:
     st.markdown("#### Indexed corpora")
 
     CORPUS_STATS = [
-        ("O-RAN",     "oran",    "📡", "O-RAN Alliance R003–R005",        79555),
-        ("3GPP",      "3gpp",    "📶", "Release 18 & 19",                 501675),
+        ("O-RAN",     "oran",    "📡", "O-RAN Alliance R003–R005",        169130),
+        ("3GPP",      "3gpp",    "📶", "Release 8 through 19",             1642543),
         ("ETSI",      "etsi",    "🇪🇺", "ENI, ZSM, MEC, NFV, SAI, F5G",   984728),
-        ("ITU-T",     "itu",     "🌐", "14 active series (G, Y, Q, X…)",  551965),
-        ("TM Forum",  "tmforum", "🔧", "TMF Open APIs, ODA",              -1),
+        ("ITU-T",     "itu",     "🌐", "All 27 active series",             575762),
+        ("TM Forum",  "tmforum", "🔧", "TMF Open APIs, ODA",              6905),
         ("CAMARA",    "camara",  "🔌", "Fall25 — 75+ API repos",          3919),
         ("GSMA",      "gsma",    "📱", "Open Gateway & security series",  121118),
     ]
@@ -279,8 +282,8 @@ with tab_home:
     # Top metrics row
     m1, m2, m3 = st.columns(3)
     m1.metric("Standards bodies", "7")
-    m2.metric("Total indexed chunks", f"{total_chunks:,}")
-    m3.metric("Embedding models", "4")
+    m2.metric("Total published chunks", "3,504,105")
+    m3.metric("Embedding models", "6")
 
     st.markdown("")
 
@@ -342,7 +345,7 @@ with tab_home:
     st.markdown(
         "<div style='text-align:center; font-size:0.82rem; color:#888;'>"
         "📄 <a href='https://github.com/Znbne/telcolens-cookbook/blob/master/cookbook.pdf' target='_blank'>Cookbook</a> &nbsp;·&nbsp; "
-        "💻 <a href='https://github.com/Znbne/telcolens' target='_blank'>GitHub</a>"
+        "💻 <a href='https://github.com/Znbne/telcolens' target='_blank'>GitHub</a> &nbsp;·&nbsp; 🤗 <a href='https://huggingface.co/datasets/GSMA/telcolens-chunks' target='_blank'>HuggingFace Dataset</a>"
         "</div>",
         unsafe_allow_html=True,
     )

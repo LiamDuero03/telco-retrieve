@@ -46,7 +46,7 @@ hf_notebooks/
 *.swo
 .DS_Store
 Thumbs.db
-app.py
+#app.py
 
 # ── Testing & coverage ────────────────────────────────────────────────────────
 .pytest_cache/
@@ -93,3 +93,11 @@ logs/
 
 # Eval questions (internal)
 configs/eval_questions/
+
+ 
+# HuggingFace export
+hf_dataset/
+hf_dataset_card.md
+export_to_hf.py
+update_manifest.py
+ 

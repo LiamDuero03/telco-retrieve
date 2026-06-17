@@ -1,19 +1,17 @@
-# Telco Lens
+# Open Telco RAG
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![GSMA Open Telco AI](https://img.shields.io/badge/GSMA-Open%20Telco%20AI-red.svg)](https://www.gsma.com/solutions-and-impact/technologies/networks/gsma_resources/open-telco-ai/)
-[![HuggingFace](https://img.shields.io/badge/🤗%20HuggingFace-GSMA-orange.svg)](https://huggingface.co/GSMA)
+[![HuggingFace](https://img.shields.io/badge/🤗%20HuggingFace-GSMA-orange.svg)](https://huggingface.co/datasets/GSMA/telcolens-chunks)
 
-An open, vendor-neutral RAG pipeline for telecom specifications — covering 7 standards bodies across O-RAN, 3GPP, ETSI, ITU-T, TM Forum (coming soon), CAMARA, and GSMA.
-
-Part of the [GSMA Open Telco AI Initiative](https://www.gsma.com/solutions-and-impact/technologies/networks/gsma_resources/open-telco-ai/).
+An open, vendor-neutral RAG pipeline for telecom specifications — covering 7 standards bodies, 3.5M+ chunks across O-RAN, 3GPP, ETSI, ITU-T, TM Forum, CAMARA, and GSMA. Part of the [GSMA Open Telco AI](https://www.gsma.com/solutions-and-impact/technologies/networks/gsma_resources/open-telco-ai/).
 
 ---
 
 ## Overview
 
-Telco Lens enables engineers and researchers to ask natural language questions directly against authoritative telecom standards — with source citations, no hallucination, and full corpus coverage across all major SDOs.
+Open Telco RAG enables engineers and researchers to ask natural language questions directly against authoritative telecom standards — with source citations, no hallucination, and full corpus coverage across all major SDOs.
 
 ```
 open-telco-rag ask "What does O-RAN WG3 define for the E2 interface?" --source-type oran
@@ -28,12 +26,32 @@ open-telco-rag ask "What are the ETSI ZSM closed-loop automation requirements?" 
 | Corpus | Source | Format | Status |
 |--------|--------|--------|--------|
 | O-RAN Alliance | O-RAN R003–R005, all WGs | PDF, DOCX | ✅ Available |
-| 3GPP | TSpec-LLM dataset, Rel-18 & 19 | Markdown | ✅ Available |
+| 3GPP | TSpec-LLM dataset, Rel-8 through Rel-19 | Markdown | ✅ Available |
 | ETSI | ENI, ZSM, MEC, NFV, SAI, F5G, RIS | PDF, YAML | ✅ Available |
-| ITU-T | 14 active series (G, Y, Q, X, M…) | PDF | ✅ Available |
+| ITU-T | All 27 active series (G, Y, Q, X, M…) | PDF | ✅ Available |
 | CAMARA | Fall25 — 75+ API repos | Markdown, YAML | ✅ Available |
 | GSMA | OPG, IG, AID, SGP, RCS and more | PDF, DOCX | ✅ Available |
-| TM Forum | TMF Open APIs, ODA | DOCX, PDF, YAML, JSON | 🔜 Coming soon |
+| TM Forum | TMF Open APIs, ODA Component specs ([tmforum-rand/tmf-otel](https://github.com/tmforum-rand/tmf-otel)) | YAML, JSON | ✅ Available |
+
+---
+
+## Pre-built Dataset
+
+The full indexed corpus — 3.5M+ chunks across all 7 SDOs — is available on HuggingFace:
+
+🤗 **[GSMA/telcolens-chunks](https://huggingface.co/datasets/GSMA/telcolens-chunks)**
+
+Download individual corpora or the full dataset without running ingestion yourself:
+
+```python
+from datasets import load_dataset
+
+# Load one corpus
+ds = load_dataset("GSMA/telcolens-chunks", data_files="etsi.jsonl")
+
+# Load all corpora  
+ds = load_dataset("GSMA/telcolens-chunks")
+```
 
 ---
 
@@ -101,14 +119,14 @@ open-telco-rag ask "What interfaces does the Near-RT RIC expose?" --source-type 
 
 ## Cookbook
 
-The Telco Lens Cookbook is available as a [Cookbook](https://github.com/Znbne/telcolens-cookbook/blob/master/cookbook.pdf) and as interactive Jupyter notebooks in the [`notebooks/`](notebooks/) directory — one per corpus:
+The Open Telco RAG Cookbook is available as a [Cookbook](https://github.com/Znbne/telcolens-cookbook/blob/master/cookbook.pdf) and as interactive Jupyter notebooks in the [`notebooks/`](notebooks/) directory — one per corpus:
 
 | Notebook | Corpus |
 |----------|--------|
 | [`01_oran_quickstart.ipynb`](notebooks/01_oran_quickstart.ipynb) | O-RAN Alliance R005 |
-| [`02_3gpp_quickstart.ipynb`](notebooks/02_3gpp_quickstart.ipynb) | 3GPP Release 18 & 19 |
+| [`02_3gpp_quickstart.ipynb`](notebooks/02_3gpp_quickstart.ipynb) | 3GPP Release 8 through 19 |
 | [`03_camara_quickstart.ipynb`](notebooks/03_camara_quickstart.ipynb) | CAMARA Fall25 |
-| `04_tmforum_quickstart.ipynb` | TM Forum Open APIs — 🔜 Coming soon |
+| [`04_tmforum_quickstart.ipynb`](notebooks/04_tmforum_quickstart.ipynb) | TM Forum Open APIs & ODA Components |
 | [`05_gsma_quickstart.ipynb`](notebooks/05_gsma_quickstart.ipynb) | GSMA Open Gateway |
 | [`06_itu_quickstart.ipynb`](notebooks/06_itu_quickstart.ipynb) | ITU-T |
 | [`07_etsi_quickstart.ipynb`](notebooks/07_etsi_quickstart.ipynb) | ETSI ISG groups |
@@ -376,7 +394,7 @@ Contributions welcome. Please open an issue before submitting a pull request for
 
 ## Acknowledgements
 
-This work is part of the GSMA Open Telco AI Initiative. For more information visit [gsma.com/open-telco-ai](https://www.gsma.com/solutions-and-impact/technologies/networks/gsma_resources/open-telco-ai/).
+This work is part of the GSMA Open Telco AI. For more information visit [gsma.com/open-telco-ai](https://www.gsma.com/solutions-and-impact/technologies/networks/gsma_resources/open-telco-ai/).
 
 ---
 
