@@ -39,7 +39,7 @@ open-telco-rag ask "What are the ETSI ZSM closed-loop automation requirements?" 
 
 ## Pre-built Dataset
 
-The full indexed corpus — 3.5M+ chunks across all 7 SDOs — is available on HuggingFace:
+The full indexed corpus — 4.6M+ chunks across all 7 SDOs — is available on HuggingFace:
 
 🤗 **[GSMA/telcolens-chunks](https://huggingface.co/datasets/GSMA/telcolens-chunks)**
 
