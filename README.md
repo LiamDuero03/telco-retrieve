@@ -1,11 +1,13 @@
-# Open Telco RAG
+# TelcoLens
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![GSMA Open Telco AI](https://img.shields.io/badge/GSMA-Open%20Telco%20AI-red.svg)](https://www.gsma.com/solutions-and-impact/technologies/networks/gsma_resources/open-telco-ai/)
 [![HuggingFace](https://img.shields.io/badge/🤗%20HuggingFace-GSMA-orange.svg)](https://huggingface.co/datasets/GSMA/telcolens-chunks)
 
-An open, vendor-neutral RAG pipeline for telecom specifications, covering 7 standards bodies, 3.5M+ chunks across O-RAN, 3GPP, ETSI, ITU-T, TM Forum, CAMARA, and GSMA. Part of the [GSMA Open Telco AI](https://www.open-telco.ai/).
+An open, vendor-neutral RAG pipeline for telecom specifications — covering 7 standards bodies, 4.6M+ chunks and 1B+ tokens across O-RAN, 3GPP, ETSI, ITU-T, TM Forum, CAMARA, and GSMA.
+
+Part of the [GSMA Open Telco AI](https://www.open-telco.ai/).
 
 ---
 
@@ -37,7 +39,7 @@ open-telco-rag ask "What are the ETSI ZSM closed-loop automation requirements?" 
 
 ## Pre-built Dataset
 
-The full indexed corpus (3.5M+ chunks across all 7 SDOs) is available on HuggingFace:
+The full indexed corpus — 3.5M+ chunks across all 7 SDOs — is available on HuggingFace:
 
 🤗 **[GSMA/telcolens-chunks](https://huggingface.co/datasets/GSMA/telcolens-chunks)**
 
@@ -394,7 +396,7 @@ Contributions welcome. Please open an issue before submitting a pull request for
 
 ## Acknowledgements
 
-This work is part of the GSMA Open Telco AI. For more information visit [gsma.com/open-telco-ai](https://www.open-telco.ai/).
+This work is part of the GSMA Open Telco AI Initiative. For more information visit [open-telco-ai](https://www.open-telco.ai/).
 
 ---
 

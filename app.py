@@ -267,7 +267,7 @@ with tab_home:
 
     CORPUS_STATS = [
         ("O-RAN",     "oran",    "📡", "O-RAN Alliance R003–R005",        169130),
-        ("3GPP",      "3gpp",    "📶", "Release 8 through 19",             1642543),
+        ("3GPP",      "3gpp",    "📶", "Release 8 through 19",             587347),
         ("ETSI",      "etsi",    "🇪🇺", "ENI, ZSM, MEC, NFV, SAI, F5G",   984728),
         ("ITU-T",     "itu",     "🌐", "All 27 active series",             575762),
         ("TM Forum",  "tmforum", "🔧", "TMF Open APIs, ODA",              6905),
@@ -280,10 +280,11 @@ with tab_home:
     total_chunks = sum(s[4] for s in CORPUS_STATS)
 
     # Top metrics row
-    m1, m2, m3 = st.columns(3)
+    m1, m2, m3, m4 = st.columns(4)
     m1.metric("Standards bodies", "7")
-    m2.metric("Total published chunks", "3,504,105")
-    m3.metric("Embedding models", "6")
+    m2.metric("Total published chunks", "4,592,971")
+    m3.metric("Total tokens", "1.09 billion")
+    m4.metric("Embedding models", "6")
 
     st.markdown("")
 
