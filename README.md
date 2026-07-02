@@ -5,7 +5,7 @@
 [![GSMA Open Telco AI](https://img.shields.io/badge/GSMA-Open%20Telco%20AI-red.svg)](https://www.gsma.com/solutions-and-impact/technologies/networks/gsma_resources/open-telco-ai/)
 [![HuggingFace](https://img.shields.io/badge/🤗%20HuggingFace-GSMA-orange.svg)](https://huggingface.co/datasets/GSMA/telcolens-chunks)
 
-An open, vendor-neutral RAG pipeline for telecom specifications — covering 7 standards bodies, 4.6M+ chunks and 1B+ tokens across O-RAN, 3GPP, ETSI, ITU-T, TM Forum, CAMARA, and GSMA.
+An open, vendor-neutral RAG pipeline for telecom specifications, covering 7 standards bodies, 4.6M+ chunks and 1B+ tokens across O-RAN, 3GPP, ETSI, ITU-T, TM Forum, CAMARA, and GSMA.
 
 Part of the [GSMA Open Telco AI](https://www.open-telco.ai/).
 
@@ -13,7 +13,7 @@ Part of the [GSMA Open Telco AI](https://www.open-telco.ai/).
 
 ## Overview
 
-Open Telco RAG enables engineers and researchers to ask natural language questions directly against authoritative telecom standards — with source citations, no hallucination, and full corpus coverage across all major SDOs.
+TelcoLens enables engineers and researchers to ask natural language questions directly against authoritative telecom standards, with source citations, no hallucination, and full corpus coverage across all major SDOs.
 
 ```
 open-telco-rag ask "What does O-RAN WG3 define for the E2 interface?" --source-type oran
@@ -51,7 +51,7 @@ from datasets import load_dataset
 # Load one corpus
 ds = load_dataset("GSMA/telcolens-chunks", data_files="etsi.jsonl")
 
-# Load all corpora  
+# Load all corpora
 ds = load_dataset("GSMA/telcolens-chunks")
 ```
 
@@ -119,9 +119,42 @@ open-telco-rag ask "What interfaces does the Near-RT RIC expose?" --source-type 
 
 ---
 
+## GUI
+
+TelcoLens ships with a Streamlit web UI (`app.py`) with two separate pipelines selectable from the sidebar:
+
+```bash
+streamlit run app.py
+```
+
+### 🔍 RAG pipeline
+| Tab | Purpose |
+|-----|---------|
+| Home | Corpus overview and quick-start guide |
+| Ask | Retrieval + LLM generation with confidence indicator |
+| Search | Pure vector search, no LLM |
+| Ingest | Ingest documents into ChromaDB from the UI |
+| Evaluate | Run the full evaluation suite with live progress |
+| Leaderboard | Compare models, embedders, and corpora |
+| DB info | Inspect ChromaDB collections |
+
+### 🧪 QnA Generation pipeline
+| Tab | Purpose |
+|-----|---------|
+| Generate QnA | Build a generation pipeline (sampling strategy, question types, concurrency, summarization, validation) and generate draft evaluation questions |
+| Review QnA | Review each draft question against its source chunk text, open the source document or SDO portal, approve / correct / reject, and merge into the eval set |
+
+The QnA Generation pipeline requires [telco-qna-generation](https://github.com/Znbne/telco-qna-generation) to be installed:
+
+```bash
+pip install -e ../telco-qna-generation
+```
+
+---
+
 ## Cookbook
 
-The Open Telco RAG Cookbook is available as a [Cookbook](https://github.com/Znbne/telcolens-cookbook/blob/master/cookbook.pdf) and as interactive Jupyter notebooks in the [`notebooks/`](notebooks/) directory — one per corpus:
+The Open Telco RAG Cookbook is available as a [PDF](https://github.com/Znbne/telcolens-cookbook/blob/master/cookbook.pdf) and as interactive Jupyter notebooks in the [`notebooks/`](notebooks/) directory — one per corpus:
 
 | Notebook | Corpus |
 |----------|--------|
@@ -305,6 +338,7 @@ Documents (PDF / DOCX / YAML / Markdown)
 
 ```
 open-telco-rag/
+├── app.py                       # Streamlit GUI (RAG + QnA Generation pipelines)
 ├── open_telco_rag/
 │   ├── types.py
 │   ├── core/
@@ -335,7 +369,7 @@ open-telco-rag/
 ├── configs/
 │   ├── embedding_models.json    # embedder registry
 │   ├── reranker_models.json     # reranker registry
-│   └── eval_questions/          # evaluation question sets
+│   └── eval_questions/          # evaluation question sets per corpus
 └── pyproject.toml
 ```
 
@@ -385,6 +419,14 @@ Add an entry to `configs/reranker_models.json`:
     "backend": "cross-encoder"
 }
 ```
+
+---
+
+## Related
+
+- [telco-qna-generation](https://github.com/Znbne/telco-qna-generation) — synthetic QnA generation toolkit for building evaluation datasets
+- [GSMA/telcolens-chunks](https://huggingface.co/datasets/GSMA/telcolens-chunks) — 4.6M chunks, 1.09B tokens across 7 SDOs
+- [telcolens-cookbook](https://github.com/Znbne/telcolens-cookbook) — worked examples per corpus
 
 ---
 
