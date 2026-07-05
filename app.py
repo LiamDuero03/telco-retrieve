@@ -505,17 +505,40 @@ if is_rag:
                     st.error(f"Error: {e}")
         elif search_btn:
             st.warning("Please enter a query.")
-
-    # ── INGEST ───────────────────────────────────────────────────────────────
+            
+# ── INGEST ───────────────────────────────────────────────────────────────
     with tab_ingest:
         col_i1, col_i2 = st.columns(2)
         with col_i1:
-            data_dir   = st.text_input("Data directory", value=f"data/{source_type}")
-            chunk_size = st.number_input("Chunk size", 128, 4096, 1024, 128)
+            data_dir = st.text_input("Data directory", value=f"data/{source_type}")
+            # Import our Strategy Enum to populate options
+            from open_telco_rag.core.chunking import ChunkingStrategy
+            
+            strategy_choices = [s.value for s in ChunkingStrategy]
+            selected_strategy = st.selectbox(
+                "Chunking Strategy", 
+                options=strategy_choices, 
+                index=strategy_choices.index("text")  # default baseline
+            )
+            
+            # Context-aware size label based on strategy choice
+            if selected_strategy == "fixed_tokens":
+                chunk_size = st.number_input("Chunk size (Tokens)", 64, 2048, 512, 64)
+            else:
+                chunk_size = st.number_input("Chunk size (Characters)", 128, 4096, 1024, 128)
+                
         with col_i2:
             ingest_collection = st.text_input("Collection name",
                                               placeholder=f"{source_type}_{model_key}")
-            overlap = st.number_input("Overlap", 0, 512, 200, 32)
+            
+            # Context-aware overlap label
+            if selected_strategy == "fixed_tokens":
+                overlap = st.number_input("Overlap (Tokens)", 0, 256, 50, 10)
+            elif selected_strategy in ["llm_aided", "information_nuggets", "hierarchical"]:
+                overlap = st.number_input("Overlap", 0, 512, 0, 32, disabled=True, help="Not utilized by this strategy")
+            else:
+                overlap = st.number_input("Overlap (Characters)", 0, 512, 200, 32)
+                
         col_i3, col_i4 = st.columns(2)
         with col_i3:
             use_marker = st.checkbox("Use Marker API (better PDF quality)")
@@ -525,22 +548,58 @@ if is_rag:
 
         if ingest_btn:
             col_name  = ingest_collection.strip() or f"{source_type}_{model_key}"
-            log_lines = [f"Ingesting {source_type.upper()} documents",
-                         f"  Data dir:   {data_dir}", f"  Model:      {model_key}",
-                         f"  Collection: {col_name}",
-                         f"  PDF loader: {'Marker API' if use_marker else 'pypdf (default)'}",""]
+            log_lines = [
+                f"Ingesting {source_type.upper()} documents",
+                f"  Data dir:   {data_dir}", 
+                f"  Model:      {model_key}",
+                f"  Collection: {col_name}",
+                f"  Strategy:   {selected_strategy}",
+                f"  PDF loader: {'Marker API' if use_marker else 'pypdf (default)'}",
+                ""
+            ]
             log_box = st.empty()
             log_box.markdown("<div class='log-box'>" + "\n".join(log_lines) + "Running…</div>",
                              unsafe_allow_html=True)
             try:
                 from open_telco_rag.core.pipeline import ingest
                 from open_telco_rag.stores.chroma import ChromaStore
+                
                 src      = _get_source(source_type, use_marker=use_marker)
                 embedder = _get_embedder(model_key)
                 store    = ChromaStore(path=db_path, collection_name=col_name)
-                stats = ingest(source=src, store=store, embedder=embedder,
-                               data_dir=data_dir, chunk_size=chunk_size,
-                               overlap=overlap, resume=not no_resume)
+                
+                # Setup kwargs mapping configuration dynamically
+                chunk_kwargs = {"strategy": selected_strategy}
+                
+                # Safely map parameters over to match signature types in core/chunking.py
+                if selected_strategy == "fixed_tokens":
+                    chunk_kwargs["chunk_tokens"] = chunk_size
+                    chunk_kwargs["overlap_tokens"] = overlap
+                elif selected_strategy == "hierarchical":
+                    chunk_kwargs["parent_size"] = chunk_size
+                    chunk_kwargs["child_size"] = chunk_size // 4  # proportional child target
+                elif selected_strategy in ["llm_aided", "information_nuggets"]:
+                    # Grab global workspace client context if one exists
+                    if "llm_client" in st.session_state:
+                        chunk_kwargs["llm_client"] = st.session_state["llm_client"]
+                    else:
+                        # Instantiate temporary raw client instance if your layout hasn't cached it
+                        from open_telco_rag.core.pipeline import get_llm_client # Adjust to matches your real client builder import path
+                        chunk_kwargs["llm_client"] = get_llm_client()
+                else:
+                    chunk_kwargs["chunk_size"] = chunk_size
+                    chunk_kwargs["overlap"] = overlap
+
+                # Pass chunk_kwargs to your underlying engine runtime execution block
+                stats = ingest(
+                    source=src, 
+                    store=store, 
+                    embedder=embedder,
+                    data_dir=data_dir, 
+                    resume=not no_resume,
+                    **chunk_kwargs
+                )
+                
                 log_lines += [f"Files processed: {stats.files_processed}",
                               f"Chunks stored:   {stats.chunks_stored}",
                               f"Skipped:         {stats.skipped_files}",

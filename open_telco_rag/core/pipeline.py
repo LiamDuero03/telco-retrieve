@@ -8,7 +8,7 @@ import os
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 
 from dotenv import load_dotenv
@@ -23,16 +23,15 @@ load_dotenv()
 # ── Ingest ────────────────────────────────────────────────────────────────────
 
 def ingest(
-    source:     Source,
+    source:      Source,
     store:      VectorStore,
     embedder:   Embedder,
     data_dir:   str | Path,
-    chunk_size: int  = 1024,
-    overlap:    int  = 200,
     min_length: int  = 100,
     batch_size: int  = 64,
     resume:     bool = True,
     log_dir:    str | Path = "logs",
+    **chunk_kwargs: Any,
 ) -> IngestStats:
     """Scan files, clean, chunk, embed and store."""
 
@@ -105,25 +104,32 @@ def ingest(
             continue
 
         # ── Chunk ─────────────────────────────────────────────────────────────
-        # Routing:
-        #   .md / .yaml / .yml          → chunk_markdown (always)
-        #   .pdf / .docx  + use_marker  → chunk_markdown (Marker output is MD)
-        #   .pdf / .docx  + no marker   → chunk_text     (pypdf raw text)
+        # Modified to use the dynamic chunking strategy interface passed via **chunk_kwargs
         try:
-            from open_telco_rag.core.chunking import chunk_text, chunk_markdown
+            from open_telco_rag.core.chunking import chunk_document, ChunkingStrategy
             source_type_str = source.__class__.__name__.lower().replace("source", "")
 
             is_native_markdown = file_path.suffix.lower() in [".md", ".yaml", ".yml"]
             is_marker_output   = use_marker and file_path.suffix.lower() in [".pdf", ".docx"]
 
-            if is_native_markdown or is_marker_output:
-                chunks = chunk_markdown(text, chunk_size=chunk_size,
-                                        source_type=source_type_str)
-            else:
-                chunks = chunk_text(text, chunk_size=chunk_size, overlap=overlap,
-                                    source_type=source_type_str)
+            # Local runtime copy of runtime kwargs to prevent mutating shared state
+            active_kwargs = chunk_kwargs.copy()
+            active_kwargs["source_type"] = source_type_str
 
+            # Fall back to structural text/markdown overrides ONLY if the user selected the baseline path.
+            # Otherwise, respect the exact strategy chosen from the Streamlit UI.
+            user_strategy = active_kwargs.get("strategy", "text")
+
+            if user_strategy in ["text", "markdown"]:
+                if is_native_markdown or is_marker_output:
+                    active_kwargs["strategy"] = ChunkingStrategy.MARKDOWN
+                else:
+                    active_kwargs["strategy"] = ChunkingStrategy.TEXT
+
+            # Execute the orchestrated master strategy chunker
+            chunks = chunk_document(text=text, **active_kwargs)
             chunks = [c for c in chunks if len(c.text.strip()) >= min_length]
+
         except Exception as e:
             print(f"  ERROR chunking: {e}")
             stats.error_files += 1
@@ -145,10 +151,20 @@ def ingest(
                 texts  = [c.text for c in batch]
                 ids    = [f"{rel}::{embedder.model_key}::{batch_start + j}"
                         for j, c in enumerate(batch)]
-                metas  = [{**meta, "heading": c.heading or "",
+                
+                # Merge custom metadata (like hierarchical parent links) alongside standard parameters
+                metas  = []
+                for j, c in enumerate(batch):
+                    base_meta = {
+                        **meta, 
+                        "heading": c.heading or "",
                         "chunk_index": batch_start + j,
-                        "source_type": c.source_type}
-                        for j, c in enumerate(batch)]
+                        "source_type": c.source_type
+                    }
+                    if hasattr(c, 'metadata') and c.metadata:
+                        base_meta.update(c.metadata)
+                    metas.append(base_meta)
+
                 embeds = embedder.embed(texts)
                 store.add(ids=ids, embeddings=embeds, documents=texts, metadatas=metas)
                 stats.chunks_stored += len(batch)
@@ -181,8 +197,6 @@ def ingest(
     print(f"{'='*60}")
 
     return stats
-
-
 # ── Search ────────────────────────────────────────────────────────────────────
 
 def search(
