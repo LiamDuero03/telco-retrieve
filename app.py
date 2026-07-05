@@ -505,33 +505,46 @@ if is_rag:
                     st.error(f"Error: {e}")
         elif search_btn:
             st.warning("Please enter a query.")
-            
+
 # ── INGEST ───────────────────────────────────────────────────────────────
+   # ── INGEST ───────────────────────────────────────────────────────────────
     with tab_ingest:
+        col_i0_1, col_i0_2 = st.columns(2)
+        with col_i0_1:
+            # 1. Add a dynamic dropdown to select the source standard format type
+            selected_source_type = st.selectbox(
+                "Document Source Type",
+                options=["3gpp", "oran", "camara", "tmforum", "gsma", "itu", "etsi"],
+                index=0,
+                help="Selects the parsing class and expected file formats."
+            )
+        with col_i0_2:
+            # Mirror the legacy model key display if handled dynamically elsewhere
+            st.text(f"Active Model: {model_key}")
+
         col_i1, col_i2 = st.columns(2)
         with col_i1:
-            data_dir = st.text_input("Data directory", value=f"data/{source_type}")
-            # Import our Strategy Enum to populate options
-            from open_telco_rag.core.chunking import ChunkingStrategy
+            # Use the newly selected source type dropdown variable for the path
+            data_dir = st.text_input("Data directory", value=f"data/{selected_source_type}")
             
+            from open_telco_rag.core.chunking import ChunkingStrategy
             strategy_choices = [s.value for s in ChunkingStrategy]
             selected_strategy = st.selectbox(
                 "Chunking Strategy", 
                 options=strategy_choices, 
-                index=strategy_choices.index("text")  # default baseline
+                index=strategy_choices.index("text")
             )
             
-            # Context-aware size label based on strategy choice
             if selected_strategy == "fixed_tokens":
                 chunk_size = st.number_input("Chunk size (Tokens)", 64, 2048, 512, 64)
             else:
                 chunk_size = st.number_input("Chunk size (Characters)", 128, 4096, 1024, 128)
                 
         with col_i2:
+            # Dynamically switch the collection placeholder based on selection
             ingest_collection = st.text_input("Collection name",
-                                              placeholder=f"{source_type}_{model_key}")
+                                              placeholder=f"{selected_source_type}_{model_key}")
             
-            # Context-aware overlap label
             if selected_strategy == "fixed_tokens":
                 overlap = st.number_input("Overlap (Tokens)", 0, 256, 50, 10)
             elif selected_strategy in ["llm_aided", "information_nuggets", "hierarchical"]:
@@ -547,9 +560,10 @@ if is_rag:
         ingest_btn = st.button("Run ingest ▶", type="primary")
 
         if ingest_btn:
-            col_name  = ingest_collection.strip() or f"{source_type}_{model_key}"
+            # Update variable references down inside execution blocks to use selected_source_type
+            col_name  = ingest_collection.strip() or f"{selected_source_type}_{model_key}"
             log_lines = [
-                f"Ingesting {source_type.upper()} documents",
+                f"Ingesting {selected_source_type.upper()} documents",
                 f"  Data dir:   {data_dir}", 
                 f"  Model:      {model_key}",
                 f"  Collection: {col_name}",
@@ -564,33 +578,29 @@ if is_rag:
                 from open_telco_rag.core.pipeline import ingest
                 from open_telco_rag.stores.chroma import ChromaStore
                 
-                src      = _get_source(source_type, use_marker=use_marker)
+                # Pass dropdown type selection safely to factory logic
+                src      = _get_source(selected_source_type, use_marker=use_marker)
                 embedder = _get_embedder(model_key)
                 store    = ChromaStore(path=db_path, collection_name=col_name)
                 
-                # Setup kwargs mapping configuration dynamically
                 chunk_kwargs = {"strategy": selected_strategy}
                 
-                # Safely map parameters over to match signature types in core/chunking.py
                 if selected_strategy == "fixed_tokens":
                     chunk_kwargs["chunk_tokens"] = chunk_size
                     chunk_kwargs["overlap_tokens"] = overlap
                 elif selected_strategy == "hierarchical":
                     chunk_kwargs["parent_size"] = chunk_size
-                    chunk_kwargs["child_size"] = chunk_size // 4  # proportional child target
+                    chunk_kwargs["child_size"] = chunk_size // 4
                 elif selected_strategy in ["llm_aided", "information_nuggets"]:
-                    # Grab global workspace client context if one exists
                     if "llm_client" in st.session_state:
                         chunk_kwargs["llm_client"] = st.session_state["llm_client"]
                     else:
-                        # Instantiate temporary raw client instance if your layout hasn't cached it
-                        from open_telco_rag.core.pipeline import get_llm_client # Adjust to matches your real client builder import path
+                        from open_telco_rag.core.pipeline import get_llm_client
                         chunk_kwargs["llm_client"] = get_llm_client()
                 else:
                     chunk_kwargs["chunk_size"] = chunk_size
                     chunk_kwargs["overlap"] = overlap
 
-                # Pass chunk_kwargs to your underlying engine runtime execution block
                 stats = ingest(
                     source=src, 
                     store=store, 
