@@ -1,0 +1,105 @@
+{
+  "corpus": "3gpp",
+  "model": "bge",
+  "top_k": 5,
+  "timestamp": "20260605_102112",
+  "n_questions": 5,
+  "mean_faithfulness": 0.6833333333333333,
+  "mean_answer_relevancy": 0.732172520922816,
+  "mean_similarity": 0.672788,
+  "mean_source_coverage": 1.0,
+  "mean_context_recall": 0.34,
+  "mean_answer_correctness": 0.5533799487015502,
+  "question_results": [
+    {
+      "question": "During MGW bypass, which SIP messages and SDP-related procedures are handled by the GMSC-S?",
+      "corpus": "3gpp",
+      "answer": "During MGW bypass, the GMSC-S (GMSC Server) handles the following SIP messages and SDP-related procedures:\n\n* The GMSC-S relays the SDP media lines for codecs and RTP Telephony Event in the SDP offers and answers transparently between the external SIP-I network and the 3GPP CS CN.\n* The GMSC-S sets SIP headers (e.g. contact, via) in forwarded SIP messages consistent with earlier settings during the dialogue.\n* The GMSC-S performs SIP proxy procedures, similar to those specified in IETF RFC 3261, with the exception of setting SIP headers.\n* The GMSC-S transparently relays bearer related information (e.g. connection addresses) from the preceding/succeeding nodes.\n\nNote that the GMSC-S does not manipulate the bearer during MGW bypass, and the MGW selection procedures are not applicable in this scenario.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 5,
+      "faithfulness": 0.9166666666666666,
+      "answer_relevancy": 0.9294633364430492,
+      "mean_similarity": 0.68708,
+      "min_similarity": 0.6774,
+      "max_similarity": 0.6931,
+      "source_coverage": 1,
+      "context_recall": 0.2,
+      "answer_correctness": 0.4331053472476379,
+      "error": ""
+    },
+    {
+      "question": "What is the first call-controlmessage sent by the UE in the Basic Mobile Originating Call sequence?",
+      "corpus": "3gpp",
+      "answer": "The first call-control message sent by the UE in the Basic Mobile Originating Call sequence is 'CM service req'.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 5,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9685910856919291,
+      "mean_similarity": 0.65086,
+      "min_similarity": 0.6362,
+      "max_similarity": 0.6728,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.37530316103854555,
+      "error": ""
+    },
+    {
+      "question": "What information is used as the destination address for subsequent downlink packets when IuUP support is enabled?",
+      "corpus": "3gpp",
+      "answer": "The source IP address and UDP Port of the IuUP Init packet received from the radio access network.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 5,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.8115665666932522,
+      "mean_similarity": 0.64138,
+      "min_similarity": 0.6101,
+      "max_similarity": 0.7104,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.99999999995,
+      "error": ""
+    },
+    {
+      "question": "What H.248 commands are exchanged between the MSC-S and MGW during the initial context management phase of an originating call over A interface user plane IP?",
+      "corpus": "3gpp",
+      "answer": "The context provided does not explicitly mention the H.248 commands exchanged between the MSC-S and MGW during the initial context management phase of an originating call over A interface user plane IP. However, it does mention the Add.req and Add.resp commands in the sequence diagram, and MOD.request and MOD.reply commands in the context (C1) management section. \n\nAccording to the 3GPP and MEGACO/H.248 standards, the Add command is used to add a context or modify an existing context, and the Modify command (MOD) is used to modify the properties of a context. \n\nTherefore, based on the information provided and the standards, the H.248 commands exchanged between the MSC-S and MGW during the initial context management phase are likely Add and Modify (MOD) commands, but the exact commands and their parameters are not fully specified in the provided context.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 5,
+      "faithfulness": 0.5,
+      "answer_relevancy": 0.9512416157858499,
+      "mean_similarity": 0.6930000000000001,
+      "min_similarity": 0.6821,
+      "max_similarity": 0.7089,
+      "source_coverage": 1,
+      "context_recall": 0.5,
+      "answer_correctness": 0.6362449363186935,
+      "error": ""
+    },
+    {
+      "question": "What bearer-related action does the GMSC server request from MGWa before forwarding the INVITE to the MSC server?",
+      "corpus": "3gpp",
+      "answer": "The context does not provide information about the GMSC server requesting a bearer-related action from MGW A before forwarding the INVITE to the MSC server. The provided context only mentions the GMSC server requesting the MGW to establish a bearer to the given destination MGW, but it does not specify that this request is made to MGW A before forwarding the INVITE to the MSC server. Therefore, the answer is: The information is not in the context.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 5,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.69162,
+      "min_similarity": 0.6776,
+      "max_similarity": 0.6996,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.3222462989528738,
+      "error": ""
+    }
+  ]
+}

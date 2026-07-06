@@ -1,0 +1,117 @@
+{
+  "exported_at": "2026-06-18 00:00",
+  "total_chunks": 4592971,
+  "total_tokens": 1093139833,
+  "corpora": [
+    {
+      "corpus": "camara",
+      "collection": "camara_minilm",
+      "db_path": "chroma_db",
+      "chunks": 3919,
+      "tokens": 329891,
+      "source": "CAMARA Fall25, 75+ API repos",
+      "format": "Markdown, YAML",
+      "file": "camara.jsonl",
+      "status": "available"
+    },
+    {
+      "corpus": "oran",
+      "collection": "oran_minilm",
+      "db_path": "chroma_db",
+      "chunks": 169130,
+      "tokens": 39082078,
+      "source": "O-RAN Alliance R003-R005, all WGs",
+      "format": "PDF, DOCX",
+      "file": "oran.jsonl",
+      "status": "available"
+    },
+    {
+      "corpus": "gsma",
+      "collection": "gsma_minilm",
+      "db_path": "chroma_db",
+      "chunks": 121118,
+      "tokens": 25917174,
+      "source": "GSMA OPG, IG, AID, SGP, RCS and more",
+      "format": "PDF, DOCX",
+      "file": "gsma.jsonl",
+      "status": "available"
+    },
+    {
+      "corpus": "etsi",
+      "collection": "etsi_minilm",
+      "db_path": "chroma_db",
+      "chunks": 984728,
+      "tokens": 351174519,
+      "source": "ETSI ENI, ZSM, MEC, NFV, SAI, F5G, RIS",
+      "format": "PDF",
+      "file": "etsi.jsonl",
+      "status": "available"
+    },
+    {
+      "corpus": "itu",
+      "collection": "itu_minilm",
+      "db_path": "chroma_db",
+      "chunks": 575762,
+      "tokens": 225939029,
+      "source": "ITU-T, all 27 active series (G, Y, Q, X, M...)",
+      "format": "PDF",
+      "file": "itu.jsonl",
+      "status": "available"
+    },
+    {
+      "corpus": "tmforum",
+      "collection": "tmforum_minilm",
+      "db_path": "chroma_db",
+      "chunks": 6905,
+      "tokens": 1421823,
+      "source": "TM Forum tmf-otel, TMF Open APIs and ODA Component specs",
+      "format": "OpenAPI YAML/JSON",
+      "file": "tmforum.jsonl",
+      "status": "available"
+    },
+    {
+      "corpus": "3gpp_r15_r19",
+      "collection": "3gpp_raw_minilm",
+      "db_path": "chroma_db",
+      "chunks": 1140868,
+      "tokens": 199374639,
+      "source": "3GPP Release 15 through 19, TSpec-LLM pre-cleaned Markdown",
+      "format": "Markdown (TSpec-LLM)",
+      "file": "3gpp_r15_r19.jsonl",
+      "status": "available"
+    },
+    {
+      "corpus": "3gpp_r8_r14",
+      "collection": "3gpp_r8_r14_minilm",
+      "db_path": "chroma_db",
+      "chunks": 1088866,
+      "tokens": 169630058,
+      "source": "3GPP Release 8 through 14, TSpec-LLM pre-cleaned Markdown",
+      "format": "Markdown (TSpec-LLM)",
+      "file": "3gpp_r8_r14.jsonl",
+      "status": "available"
+    },
+    {
+      "corpus": "3gpp_r19_raw_bge",
+      "collection": "3gpp_r19_raw_bge",
+      "db_path": "chroma_db",
+      "chunks": 119847,
+      "tokens": 26678685,
+      "source": "3GPP Release 19, TSpec-LLM Markdown, BGE embedder",
+      "format": "Markdown (TSpec-LLM)",
+      "file": "3gpp_r19_raw_bge.jsonl",
+      "status": "available"
+    },
+    {
+      "corpus": "3gpp_r19_marker_bge",
+      "collection": "3gpp_r19_marker_bge",
+      "db_path": "chroma_db_r19_marker",
+      "chunks": 381828,
+      "tokens": 53591937,
+      "source": "3GPP Release 19, Marker-converted PDF, BGE embedder",
+      "format": "PDF via Datalab Marker API",
+      "file": "3gpp_r19_marker_bge.jsonl",
+      "status": "available"
+    }
+  ]
+}

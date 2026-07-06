@@ -1,0 +1,131 @@
+{
+  "corpus": "itu",
+  "model": "minilm",
+  "top_k": 5,
+  "timestamp": "20260410_102406",
+  "n_questions": 5,
+  "mean_keyword_score": 0.7333333333333333,
+  "mean_faithfulness": 0.49683522531819746,
+  "mean_answer_relevancy": 0.8085353488665655,
+  "mean_similarity": 0.17157236576080323,
+  "mean_source_coverage": 2.6,
+  "canonical_hit_rate": 1.0,
+  "mean_coverage_ratio": 0.0,
+  "mean_context_recall": -1.0,
+  "mean_answer_correctness": -1.0,
+  "question_results": [
+    {
+      "question": "What does ITU-T Y.3172 define about machine learning in future networks?",
+      "corpus": "itu",
+      "answer": "## ITU-T Y.3172: Machine Learning in Future Networks\n\nITU-T Y.3172, titled **\"Architectural framework for machine learning in future networks including IMT-2020\"** (published 06/2019), defines the following key terms and concepts:\n\n### Core Definitions\n\n1. **Machine Learning (ML):** Processes that enable computational systems to understand data and gain knowledge from it without necessarily being explicitly programmed.\n\n2. **Machine Learning Function Orchestrator (MLFO):** A logical node with functionalities that manage and orchestrate the nodes in a machine learning pipeline.\n\n3. **Machine Learning Model:** A model created by applying machine learning techniques to data to learn from, used to generate predictions (e.g., regression, classification, clustering) on new (untrained) data.\n\n4. **Machine Learning Pipeline:** A set of logical nodes, each with specific functionalities, that can be combined to form a machine learning application in a telecommunication network.\n\n5. **Machine Learning Overlay:** A loosely coupled deployment model of ML functionalities whose integration and management with network functions are standardised, aimed at minimising interdependencies through standard interfaces.\n\n6. **Machine Learning Sandbox:** An environment in which ML models can be trained, tested, and their effects on the network evaluated.\n\n7. **Machine Learning Underlay Network:** A telecommunication network and its related network functions which interfaces with corresponding machine learning overlays (e.g., an IMT-2020 network).",
+      "sources": [
+        "T-REC-Y.3173-202002-I!!PDF-E.pdf",
+        "T-REC-Y.3172-201906-I!!PDF-E.pdf",
+        "T-REC-Y.Sup96-202511-I!!PDF-E.pdf",
+        "T-REC-Y.3176-202009-I!!PDF-E.pdf"
+      ],
+      "chunks_used": 5,
+      "keyword_score": 0.6666666666666666,
+      "faithfulness": 0.6111111111111112,
+      "answer_relevancy": 0.788813615695104,
+      "mean_similarity": 0.28799875974655154,
+      "min_similarity": 0.24454200267791748,
+      "max_similarity": 0.40150028467178345,
+      "source_coverage": 4,
+      "canonical_hit": 1,
+      "coverage_ratio": 0.0,
+      "context_recall": -1.0,
+      "answer_correctness": -1.0,
+      "error": ""
+    },
+    {
+      "question": "What are the intelligence levels defined in ITU-T Y.3173?",
+      "corpus": "itu",
+      "answer": "## Intelligence Levels Defined in ITU-T Y.3173\n\nAccording to the context, ITU-T Y.3173 defines **two distinct sets** of intelligence levels:\n\n---\n\n### 1. Network Intelligence Capability Levels (Per-Dimension)\nThese are identified in **increasing order of intelligence** (per ML-Int-level-002):\n\n| Level | Description |\n|-------|-------------|\n| **Human** | Process performed fully by a human being |\n| **Human and System** | Process performed automatically by the system in at least one scenario, or according to human-defined rules |\n| **System** | Process performed automatically by the system in all scenarios, using system-defined/learned rules |\n\n---\n\n### 2. Overall Network Intelligence Levels (L0\u2013L5)\nThese are the final network-level classifications (per ML-Int-level-003):\n\n| Level | Name |\n|-------|------|\n| **L0** | Manual Network Operation |\n| **L1** | Assisted Network Operation |\n| **L2** | Preliminary Intelligence |\n| **L3** | Intermediate Intelligence |\n| **L4** | Advanced Intelligence |\n| **L5** | Full Intelligence |\n\n---\n\n### Determination Method\n- The **per-dimension level** is the **highest** L0\u2013L5 level matching the capability level for that dimension.\n- The **overall network intelligence level** is the **minimum** across all per-dimension levels (ML-Int-level-004 and ML-Int-level-005).",
+      "sources": [
+        "T-REC-Y.3173-202002-I!!PDF-E.pdf"
+      ],
+      "chunks_used": 5,
+      "keyword_score": 0.6,
+      "faithfulness": 0.29411764705882354,
+      "answer_relevancy": 0.8267687630513031,
+      "mean_similarity": 0.10809229612350464,
+      "min_similarity": 0.04272705316543579,
+      "max_similarity": 0.14750981330871582,
+      "source_coverage": 1,
+      "canonical_hit": 1,
+      "coverage_ratio": 0.0,
+      "context_recall": -1.0,
+      "answer_correctness": -1.0,
+      "error": ""
+    },
+    {
+      "question": "What does Y.3176 specify for ML-based network operation?",
+      "corpus": "itu",
+      "answer": "Based on the context provided, **Y.3176 is not mentioned or referenced** in any of the provided excerpts.\n\nThe context covers:\n- **ITU-T Y.3173** (02/2020) \u2014 network intelligence level evaluation\n- **ITU-T Y.3172** (06/2019) \u2014 ML architecture framework, including ML intent, MLFO, ML pipeline nodes, reference points, and declarative specifications\n\nThere is a brief reference to **[b-ITU-T Y.3174]** regarding data handling functions, but no mention of Y.3176 whatsoever.\n\nI cannot answer what Y.3176 specifies for ML-based network operation based solely on the provided context.",
+      "sources": [
+        "T-REC-Y.3173-202002-I!!PDF-E.pdf",
+        "T-REC-Y.3176-202009-I!!PDF-E.pdf",
+        "T-REC-Y.3172-201906-I!!PDF-E.pdf"
+      ],
+      "chunks_used": 5,
+      "keyword_score": 0.6,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.834577769376004,
+      "mean_similarity": 0.13997068405151367,
+      "min_similarity": 0.11595773696899414,
+      "max_similarity": 0.21387380361557007,
+      "source_coverage": 3,
+      "canonical_hit": 1,
+      "coverage_ratio": 0.0,
+      "context_recall": -1.0,
+      "answer_correctness": -1.0,
+      "error": ""
+    },
+    {
+      "question": "What is the ITU-T machine learning standardisation roadmap?",
+      "corpus": "itu",
+      "answer": "## ITU-T Machine Learning Standardisation Roadmap\n\nBased on the provided context, **ITU-T Y Supplement 96 (11/2025)** constitutes the ITU-T Machine Learning Standardisation Roadmap. Here is a precise technical description of its content and purpose:\n\n---\n\n### Definition and Scope\n\nThe roadmap provides the **standardisation roadmap for machine learning (ML) in the field of information and communication technology (ICT)**. It was developed by **ITU-T Study Group 13** and approved on **6 November 2025**.\n\n---\n\n### Key Components\n\nThe roadmap addresses four specific subjects:\n\n1. **Overview of ML** from the perspective of standards development\n2. **ML-related activities** in Standards Development Organizations (SDOs)\n3. **Existing standards and standards under development**\n4. **Standardisation gap analysis**\n\n---\n\n### Structure and Classification\n\nThe roadmap classifies ML standardisation work items into key **\"Topics\"** from two perspectives:\n- **Types of standards**\n- **Industrial domain**\n\nA single standard work item can encompass **multiple topics**.\n\n---\n\n### SDOs Covered\n\nThe roadmap documents ML standardisation activities across multiple SDOs, including:\n- **ITU-T** (SG13, SG12, and others)\n- **ISO/IEC JTC 1**\n- **IEEE**\n- **W3C**\n\n---\n\n### Important Qualification\n\nThe document is explicitly stated to be an **informative publication only**. Mandatory provisions are outside its scope, and it should only be **referenced bibliographically** in ITU-T Recommendations.",
+      "sources": [
+        "T-REC-Y.Sup96-202511-I!!PDF-E.pdf",
+        "T-REC-Y.3176-202009-I!!PDF-E.pdf"
+      ],
+      "chunks_used": 5,
+      "keyword_score": 1.0,
+      "faithfulness": 0.5789473684210527,
+      "answer_relevancy": 0.8255074494265373,
+      "mean_similarity": 0.2437753915786743,
+      "min_similarity": 0.16225701570510864,
+      "max_similarity": 0.2725445032119751,
+      "source_coverage": 2,
+      "canonical_hit": 1,
+      "coverage_ratio": 0.0,
+      "context_recall": -1.0,
+      "answer_correctness": -1.0,
+      "error": ""
+    },
+    {
+      "question": "How does ITU-T define the functional architecture for AI in networks?",
+      "corpus": "itu",
+      "answer": "## ITU-T Functional Architecture for AI in Networks\n\nBased on the provided context, ITU-T defines the functional architecture for AI/ML in networks through **ITU-T Y.3172**, which establishes a **Machine Learning Overlay** architecture. The key architectural components are as follows:\n\n---\n\n### 1. Core Architectural Concept: ML Overlay\n\nThe architecture is based on a **loosely coupled deployment model** where:\n- The **ML overlay** contains ML functionalities with standardised interfaces to network functions\n- The **ML underlay network** is the underlying telecommunication network (e.g., IMT-2020) whose network functions interface with the ML overlay\n- This separation **minimises interdependencies** between ML functionalities and network functions, allowing **parallel evolution** of both\n\n---\n\n### 2. Key Functional Components\n\n| Component | Definition |\n|-----------|------------|\n| **MLFO** (ML Function Orchestrator) | Logical node that manages and orchestrates nodes within the ML pipeline |\n| **ML Pipeline** | Set of logical nodes with specific functionalities combined to form an ML application |\n| **ML Sandbox** | Environment for training, testing ML models and evaluating network effects |\n\n---\n\n### 3. Orchestration Mechanism\n\nThe **MLFO** is the central orchestration entity that:\n- Parses **ML intent** (declarative specification of the ML underlay)\n- Instantiates **ML pipeline nodes**\n- Configures monitoring reports across pipeline nodes\n- Uses **reference point 7** to trigger the orchestrator for instantiating required ML functions\n- Responds to operator queries on **network intelligence levels**\n\n---\n\n### 4. Intelligence Level Evaluation\n\nITU-T Y.3173 complements Y.3172 by providing a **framework for evaluating network intelligence levels**, which is:\n- Compatible with **TMF autonomous network levels** (L0\u2013L5)\n- Aligned with **ETSI ISG ENI categories** (Category 0\u20135) from a technical standpoint\n- Operated through the **multi-level ML pipeline architecture** to enable **closed-loop automation** across and per domain\n\n---\n\n> **Note:** The context does not provide the complete detailed functional architecture diagram or all reference points. For full architectural specifications, direct reference to ITU-T Y.3172 and Y.3173 is required.",
+      "sources": [
+        "T-REC-Y.3173-202002-I!!PDF-E.pdf",
+        "T-REC-Y.Sup96-202511-I!!PDF-E.pdf",
+        "T-REC-Y.3172-201906-I!!PDF-E.pdf"
+      ],
+      "chunks_used": 5,
+      "keyword_score": 0.8,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.7670091467838791,
+      "mean_similarity": 0.07802469730377197,
+      "min_similarity": 0.011631786823272705,
+      "max_similarity": 0.19891393184661865,
+      "source_coverage": 3,
+      "canonical_hit": 1,
+      "coverage_ratio": 0.0,
+      "context_recall": -1.0,
+      "answer_correctness": -1.0,
+      "error": ""
+    }
+  ]
+}

@@ -1,0 +1,105 @@
+{
+  "corpus": "oran",
+  "model": "minilm",
+  "top_k": 5,
+  "timestamp": "20260602_144514",
+  "n_questions": 5,
+  "mean_faithfulness": 0.0,
+  "mean_answer_relevancy": 0.0,
+  "mean_similarity": 0.38916,
+  "mean_source_coverage": 1.0,
+  "mean_context_recall": 0.0,
+  "mean_answer_correctness": 0.2722057095804772,
+  "question_results": [
+    {
+      "question": "During MGW bypass, which SIP messages and SDP-related procedures are handled by the GMSC-S?",
+      "corpus": "3gpp",
+      "answer": "The provided context does not contain information about MGW bypass, SIP messages, or SDP-related procedures handled by the GMSC-S. The context appears to be related to 3GPP procedures for 5G networks, specifically focusing on X2 and F1 message flows for various procedures such as SN release, measurement gap coordination, and master node to gNB change, but it does not mention MGW bypass or SIP/SDP procedures. Therefore, the answer to the question cannot be determined from the given context.",
+      "sources": [
+        "O-RAN.WG5.TS.C.1-R005-v17.00.docx"
+      ],
+      "chunks_used": 5,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.38976,
+      "min_similarity": 0.3841,
+      "max_similarity": 0.3951,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.28051657376031935,
+      "error": ""
+    },
+    {
+      "question": "What is the first call-controlmessage sent by the UE in the Basic Mobile Originating Call sequence?",
+      "corpus": "3gpp",
+      "answer": "The answer is not in the context. The provided context does not mention the Basic Mobile Originating Call sequence or the first call-control message sent by the UE in such a sequence. It primarily discusses UE Context Release and Modification procedures, and Initial Registration Request procedures, without detailing the specifics of call setup sequences.",
+      "sources": [
+        "O-RAN.WG5.TS.IOT.0-R005-v15.00.docx"
+      ],
+      "chunks_used": 5,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.38438,
+      "min_similarity": 0.3696,
+      "max_similarity": 0.3998,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.27281553546346343,
+      "error": ""
+    },
+    {
+      "question": "What information is used as the destination address for subsequent downlink packets when IuUP support is enabled?",
+      "corpus": "3gpp",
+      "answer": "The provided context does not contain information about the destination address for subsequent downlink packets when IuUP support is enabled. The context primarily discusses the timing relations and reference points for uplink and downlink C-Plane and U-Plane messages, particularly in the context of non-PRACH channels and DMRS-BF, but does not mention IuUP or the specifics of destination addressing for downlink packets. Therefore, the answer to the question cannot be determined from the given context.",
+      "sources": [
+        "O-RAN.WG4.TS.CUS.0-R005-v20.00.docx"
+      ],
+      "chunks_used": 2,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.3989,
+      "min_similarity": 0.3702,
+      "max_similarity": 0.4276,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.2895720293739346,
+      "error": ""
+    },
+    {
+      "question": "What H.248 commands are exchanged between the MSC-S and MGW during the initial context management phase of an originating call over A interface user plane IP?",
+      "corpus": "3gpp",
+      "answer": "The provided context does not mention H.248 commands, MSC-S, MGW, or the initial context management phase of an originating call over A interface user plane IP. Therefore, I must answer: The information is not in the context.",
+      "sources": [
+        "O-RAN.WG5.TS.IOT.0-R005-v15.00.docx"
+      ],
+      "chunks_used": 5,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.39264,
+      "min_similarity": 0.3913,
+      "max_similarity": 0.3955,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.16818349275637468,
+      "error": ""
+    },
+    {
+      "question": "What bearer-related action does the GMSC server request from MGWa before forwarding the INVITE to the MSC server?",
+      "corpus": "3gpp",
+      "answer": "The context provided does not mention the GMSC server, MGWa, or the MSC server. It only discusses bearer type changes between SN terminated split bearers and SN terminated MCG bearers, initiated by either the MN (Mobile Node) or the SN (Secondary Node), and PSCell changes using SRB1 for RRC Reconfiguration. \n\nTherefore, the answer to the question is: This information is not in the context.",
+      "sources": [
+        "O-RAN.WG5.TS.C.1-R005-v17.00.docx"
+      ],
+      "chunks_used": 5,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.38012,
+      "min_similarity": 0.3689,
+      "max_similarity": 0.3971,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.3499409165482939,
+      "error": ""
+    }
+  ]
+}

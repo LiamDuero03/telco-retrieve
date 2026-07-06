@@ -1,0 +1,1869 @@
+{
+  "corpus": "3gpp",
+  "model": "bge",
+  "top_k": 10,
+  "timestamp": "20260609_163931",
+  "n_questions": 103,
+  "mean_faithfulness": 0.572468290819916,
+  "mean_answer_relevancy": 0.6359033747261259,
+  "mean_similarity": 0.6562169902912621,
+  "mean_source_coverage": 1.0,
+  "mean_context_recall": 0.6142394822006473,
+  "mean_answer_correctness": 0.6038384892044264,
+  "question_results": [
+    {
+      "question": "During MGW bypass, which SIP messages and SDP-related procedures are handled by the GMSC-S?",
+      "corpus": "3gpp",
+      "answer": "During MGW bypass, the GMSC-S handles the following SIP messages and SDP-related procedures:\n\n1. Relaying SDP media lines for codecs and RTP Telephony Event in the SDP offers and answers transparently between the external SIP-I network and the 3GPP CS CN.\n2. Sending and receiving SDP offers and answers, including relaying bearer related information (e.g. connection addresses) from the preceding/succeeding nodes.\n3. Sending and receiving SIP INVITE requests with SDP, including the initial SIP-I SDP offer with an unspecified connection address and \"preconditions are not met\" indication.\n4. Sending and receiving SIP UPDATE requests with SDP.\n5. Sending and receiving SIP 183 Progress messages with SDP.\n6. Sending and receiving SIP PRACK requests.\n\nNote that the GMSC-S does not manipulate the bearer and does not insert a MGW in the bearer path during the call establishment when MGW bypass is applied. The GMSC-S sets SIP headers (e.g. contact, via) in forwarded SIP messages consistent with earlier settings during the dialogue.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.9476799380226913,
+      "mean_similarity": 0.66764,
+      "min_similarity": 0.643,
+      "max_similarity": 0.6931,
+      "source_coverage": 1,
+      "context_recall": 0.6,
+      "answer_correctness": 0.8437937238701401,
+      "error": ""
+    },
+    {
+      "question": "What is the first call-controlmessage sent by the UE in the Basic Mobile Originating Call sequence?",
+      "corpus": "3gpp",
+      "answer": "The first call-control message sent by the UE in the Basic Mobile Originating Call sequence is 'CM service req'.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9685910856919291,
+      "mean_similarity": 0.63762,
+      "min_similarity": 0.6226,
+      "max_similarity": 0.6728,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.37530316103854555,
+      "error": ""
+    },
+    {
+      "question": "What information is used as the destination address for subsequent downlink packets when IuUP support is enabled?",
+      "corpus": "3gpp",
+      "answer": "The source IP address and UDP Port of the IuUP Init packet received from the radio access network.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.8055535540667956,
+      "mean_similarity": 0.61958,
+      "min_similarity": 0.5938,
+      "max_similarity": 0.7104,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.99999999995,
+      "error": ""
+    },
+    {
+      "question": "What H.248 commands are exchanged between the MSC-S and MGW during the initial context management phase of an originating call over A interface user plane IP?",
+      "corpus": "3gpp",
+      "answer": "The H.248 commands exchanged between the MSC-S and MGW during the initial context management phase of an originating call over A interface user plane IP are MOD.request and MOD.reply. \n\nSpecifically, the sequence is as follows:\n- MSC-S sends MOD.request (T2) to MGW.\n- MGW responds with MOD.reply (T2).\n- MSC-S sends MOD.request (T1) to MGW.\n- MGW responds with MOD.reply (T1).\n\nThese commands are used for context management, including reserving the RTP connection point, changing the through-connection, activating the interworking function, and activating the voice processing function.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.6,
+      "answer_relevancy": 0.9291772327539981,
+      "mean_similarity": 0.67685,
+      "min_similarity": 0.6566,
+      "max_similarity": 0.7089,
+      "source_coverage": 1,
+      "context_recall": 0.5,
+      "answer_correctness": 0.6534370546243244,
+      "error": ""
+    },
+    {
+      "question": "What bearer-related action does the GMSC server request from MGWa before forwarding the INVITE to the MSC server?",
+      "corpus": "3gpp",
+      "answer": "The GMSC server requests the MGWa to perform an \"Add.request($)\" action, which is a bearer-related action to establish a bearer connection. This is indicated by the message \"GMSC-S->>MGWa: Add.request($), Context ($), 1\" in the sequence diagram.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.25,
+      "answer_relevancy": 0.8725872604094577,
+      "mean_similarity": 0.68048,
+      "min_similarity": 0.6655,
+      "max_similarity": 0.6996,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.5858412781132535,
+      "error": ""
+    },
+    {
+      "question": "What Notify.Request messages does the MGW send to the MSC-S when it detects the start and end of a DTMF digit?",
+      "corpus": "3gpp",
+      "answer": "The MGW sends two Notify.Request messages to the MSC-S: \n\n1. Notify.Request [Report DTMF, start tone, Digit] when it detects the start of a DTMF digit, \n2. Notify.Request [Report DTMF, end tone, Digit] when it detects the end of a DTMF digit.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9019934652064063,
+      "mean_similarity": 0.70446,
+      "min_similarity": 0.6905,
+      "max_similarity": 0.7256,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.8909606312272027,
+      "error": ""
+    },
+    {
+      "question": "Which procedures can the 'Change Flow Direction' procedure be combined with?",
+      "corpus": "3gpp",
+      "answer": "The context does not provide information about a 'Change Flow Direction' procedure or its possible combinations with other procedures. Therefore, I must answer: The information is not in the context.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.49702999999999997,
+      "min_similarity": 0.4908,
+      "max_similarity": 0.5046,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.30191742225872276,
+      "error": ""
+    },
+    {
+      "question": "What information is stored in the UE context during a successful initial context setup for NR V2X services?",
+      "corpus": "3gpp",
+      "answer": "The information stored in the UE context during a successful initial context setup for NR V2X services includes:\n\n1. NR V2X Services Authorization information\n2. NR UE Sidelink Aggregate Maximum Bit Rate\n3. PC5 QoS Parameters \n\nThese are stored in the UE context and used for the concerned UE's sidelink communication in network scheduled mode for NR V2X services.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.8639616616468991,
+      "mean_similarity": 0.64529,
+      "min_similarity": 0.6219,
+      "max_similarity": 0.7638,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.783631745461003,
+      "error": ""
+    },
+    {
+      "question": "What action does the NG-RAN node take if the *Mobile IAB Authorized* IE is set to 'not authorized' for a mobile IAB-MT?",
+      "corpus": "3gpp",
+      "answer": "If the *Mobile IAB Authorized* IE is set to \"not authorized\" for a mobile IAB-MT, the NG-RAN node shall, if supported, initiate actions to ensure that the mobile IAB-node will not serve any UE(s).",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9320083796898747,
+      "mean_similarity": 0.6836,
+      "min_similarity": 0.6488,
+      "max_similarity": 0.7494,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.938215128237606,
+      "error": ""
+    },
+    {
+      "question": "What is the ProcedureCode for the HandoverSuccess procedure?",
+      "corpus": "3gpp",
+      "answer": "The ProcedureCode for the HandoverSuccess procedure is 49, as indicated in the table:\n\n| id-handoverSuccess | ProcedureCode ::= 49 |\n\nAdditionally, it is also mentioned in another table as:\n\n| id-handoverSuccess | ProcedureCode ::= 29 | \n\nHowever, the correct answer is 49, as per the latest table.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.2,
+      "answer_relevancy": 0.938673824825979,
+      "mean_similarity": 0.66004,
+      "min_similarity": 0.6432,
+      "max_similarity": 0.7025,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.3741801929206468,
+      "error": ""
+    },
+    {
+      "question": "What actions does the AMF take upon receiving an NG RESET message from the NG-RAN node?",
+      "corpus": "3gpp",
+      "answer": "Upon receiving an NG RESET message from the NG-RAN node, the AMF shall release all allocated resources on NG related to the UE association(s) indicated explicitly or implicitly in the NG RESET message and remove the NGAP ID for the indicated UE associations. After releasing the resources, the AMF shall respond with the NG RESET ACKNOWLEDGE message.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9312698183536785,
+      "mean_similarity": 0.72972,
+      "min_similarity": 0.6869,
+      "max_similarity": 0.7738,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.8413933977645591,
+      "error": ""
+    },
+    {
+      "question": "What does the RAT Restriction Information IE indicate when a bit is set to '1'?",
+      "corpus": "3gpp",
+      "answer": "The provided context does not explicitly state what the RAT-RestrictionInformation IE indicates when a bit is set to '1'. The description of the RAT-RestrictionInformation is given as `RAT-RestrictionInformation BIT STRING (SIZE(8, ...))`, but the meaning of each bit is not defined in the given context. \n\nHowever, there is a description of a similar concept in the context, which is the PLMN-RAT-Usage-Control AVP, where each bit set to '1' indicates a potential restriction subjected to the serving PLMN operator policy. But this is not directly related to the RAT-RestrictionInformation IE.\n\nTherefore, based on the provided context, the answer is: The context does not provide a clear indication of what the RAT Restriction Information IE indicates when a bit is set to '1'.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.60305,
+      "min_similarity": 0.5804,
+      "max_similarity": 0.647,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.33601767260924925,
+      "error": ""
+    },
+    {
+      "question": "What does the Source Transport Layer Address IE identify in the Source NG-RAN Node to Target NG-RAN Node Transparent Container?",
+      "corpus": "3gpp",
+      "answer": "The context does not explicitly state what the Source Transport Layer Address IE identifies. It only mentions that if this IE is included within the Source NG-RAN Node to Target NG-RAN Node Transparent Container IE of the HANDOVER REQUEST message, the target NG-RAN node shall, if supported, store this information and use it as part of its ACL functionality configuration actions for direct data forwarding.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.71127,
+      "min_similarity": 0.6733,
+      "max_similarity": 0.7422,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.3906210554581596,
+      "error": ""
+    },
+    {
+      "question": "What does a bit set to '1' in the Update Feedback bitmap indicate?",
+      "corpus": "3gpp",
+      "answer": "The answer is not in the context.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.55518,
+      "min_similarity": 0.5508,
+      "max_similarity": 0.5668,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.2522577500151052,
+      "error": ""
+    },
+    {
+      "question": "What does the measurement 'Number of Active UEs per QCI' include?",
+      "corpus": "3gpp",
+      "answer": "The measurement 'Number of Active UEs per QCI' includes UEs for which there is buffered data for the UL for DRBs, or there is buffered data for the DL for DRBs, or both. This means it counts UEs that have data queued for transmission in either the uplink, downlink, or both, for a specific QCI.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9116734608724558,
+      "mean_similarity": 0.69735,
+      "min_similarity": 0.6638,
+      "max_similarity": 0.7337,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.9031724066803963,
+      "error": ""
+    },
+    {
+      "question": "What is the reference point for successful reception in the Scheduled IP Throughput in DL measurement?",
+      "corpus": "3gpp",
+      "answer": "The reference point for successful reception in the Scheduled IP Throughput in DL measurement is the MAC lower SAP.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.9368698941448536,
+      "mean_similarity": 0.62736,
+      "min_similarity": 0.6123,
+      "max_similarity": 0.6549,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.38189010131630646,
+      "error": ""
+    },
+    {
+      "question": "What does the uplink PDCP Packet Delay measurement per QCI capture?",
+      "corpus": "3gpp",
+      "answer": "The uplink PDCP Packet Delay measurement per QCI is not explicitly defined in the provided context. However, the context does provide information on the \"UL PDCP Packet Delay per QCI\" in section 4.2.1.1, but it only mentions the objective of the measurement, which is to measure Excess Packet Delay Ratio in Layer PDCP for QoS verification of MDT, without providing further details on what the measurement captures. \n\nTherefore, based on the provided context, the answer is: The context does not provide a clear definition of what the uplink PDCP Packet Delay measurement per QCI captures.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.67785,
+      "min_similarity": 0.6614,
+      "max_similarity": 0.7205,
+      "source_coverage": 1,
+      "context_recall": 0.3333333333333333,
+      "answer_correctness": 0.3648801641165301,
+      "error": ""
+    },
+    {
+      "question": "How is the uplink PDCP SDU queuing delay reported by the UE?",
+      "corpus": "3gpp",
+      "answer": "The UE reports the uplink PDCP SDU queuing delay as the ratio of SDUs exceeding the configured delay threshold and the total number of SDUs received by the UE during the measurement period. This reported excess PDCP queuing delay ratio is mapped to 32 levels with uniform quantization in the log domain, as defined in Table 4.2.1.1.1-1.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.925292584339057,
+      "mean_similarity": 0.67419,
+      "min_similarity": 0.6633,
+      "max_similarity": 0.7319,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.7082027606654653,
+      "error": ""
+    },
+    {
+      "question": "What event triggers the MMTel Enabler Server to notify the DCH Application of an MDC2 media request?",
+      "corpus": "3gpp",
+      "answer": "The event that triggers the MMTel Enabler Server to notify the DCH Application of an MDC2 media request is when the NEF notifies the MMTel Enabler Server of the new IMS session event for the media changes related to the DCH Application, as stated in step 3 of the information flows in section 8.4.5.2. \n\nThis notification is a result of the user sending a request, via the 5GC and IMS, to add DCH media for a specific DCH Application, as stated in step 1 of the information flows in section 8.4.5.2.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.4,
+      "answer_relevancy": 0.9584605410429697,
+      "mean_similarity": 0.6658499999999999,
+      "min_similarity": 0.6251,
+      "max_similarity": 0.7308,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.8112518074999195,
+      "error": ""
+    },
+    {
+      "question": "How does the MMTel Enabler Server handle call control requests from multiple Application Servers?",
+      "corpus": "3gpp",
+      "answer": "The MMTel Enabler Server handles call control requests from multiple Application Servers by providing call control handling consolidation and coordination. It subscribes to call events on DCSF/IMS core on behalf of multiple Application Servers and makes call control handling decisions based on service policy and service priority. The MMTel Enabler Server then forwards the final call control request from the Application Servers (or permitted Application Servers in conflict scenarios) to the DCSF/IMS core network. Additionally, it can merge same control commands, reject call control requests from certain Application Servers with low priority when conflicts happen, or decide the call control request sequence.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9481896999676525,
+      "mean_similarity": 0.71684,
+      "min_similarity": 0.6596,
+      "max_similarity": 0.8488,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.8383262133072447,
+      "error": ""
+    },
+    {
+      "question": "Which reference point connects the 3GPP network system to the MMTel Enabler Server in both PLMN operator domains?",
+      "corpus": "3gpp",
+      "answer": "The reference point that connects the 3GPP network system to the MMTel Enabler Server in both PLMN operator domains is **N33/ DC4/ MDC2/ MDC3/ OSA API**.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.931889245957137,
+      "mean_similarity": 0.70521,
+      "min_similarity": 0.6478,
+      "max_similarity": 0.7713,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.3880286052730211,
+      "error": ""
+    },
+    {
+      "question": "How does the UE handle an Intra N1 mode NAS transparent container with an invalid NAS COUNT or unverified NAS MAC during N1 mode to N1 mode handover?",
+      "corpus": "3gpp",
+      "answer": "The UE shall discard the content of the received Intra N1 mode NAS transparent container IE, continue to use the current 5G NAS security context, and inform the lower layers that the received Intra N1 mode NAS transparent container is invalid.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9011872044645179,
+      "mean_similarity": 0.67705,
+      "min_similarity": 0.6378,
+      "max_similarity": 0.7503,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.9414184686000855,
+      "error": ""
+    },
+    {
+      "question": "Which events trigger access control checks in 5GMM-CONNECTED mode over 3GPP access?",
+      "corpus": "3gpp",
+      "answer": "The events that trigger access control checks in 5GMM-CONNECTED mode over 3GPP access are events 1) to 8) defined in subclause 4.5.1. \n\nHowever, if the UE stores operator-defined access category definitions valid in the selected PLMN or the RPLMN, or valid in the selected SNPN or RSNPN, then access control in 5GMM-CONNECTED mode will only be performed for the events 1) to 8) defined in subclause 4.5.1. \n\nAdditionally, specific events that trigger access control checks are not explicitly listed in the provided context, but subclause 4.5.1 is referenced, which implies that the list of events can be found there. \n\nIt is also mentioned that certain events such as MO-MMTEL-voice-call-started indication, MO-MMTEL-video-call-started indication, MO-SMSoIP-attempt-started indication, MO-IMS-registration-related-signalling-started indication, and others are handled differently, with some being allowed to proceed without access control checks. \n\nTherefore, the specific events that trigger access control checks in 5GMM-CONNECTED mode over 3GPP access are events 1) to 8) in subclause 4.5.1, with certain exceptions and special handling for specific events.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.4166666666666667,
+      "answer_relevancy": 0.9370829365563932,
+      "mean_similarity": 0.62399,
+      "min_similarity": 0.6148,
+      "max_similarity": 0.6479,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.3379033179082345,
+      "error": ""
+    },
+    {
+      "question": "What does the UE do with stored allowed NSSAI and partially allowed NSSAI when it receives a new configured NSSAI with the Configuration update indication set to 'registration requested'?",
+      "corpus": "3gpp",
+      "answer": "According to the context, when the UE receives a new configured NSSAI with the Configuration update indication set to 'registration requested', the UE shall:\n\n* delete any stored allowed NSSAI and partially allowed NSSAI for this PLMN or SNPN, \n* and, if available, the stored mapped S-NSSAI(s) for the allowed NSSAI, \nif the UE received the new configured NSSAI for this PLMN or SNPN and the Configuration update indication IE with the Registration requested bit set to \"registration requested\", in the same CONFIGURATION UPDATE COMMAND message but without any new allowed NSSAI for this PLMN or SNPN included.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.892185249527588,
+      "mean_similarity": 0.69696,
+      "min_similarity": 0.6758,
+      "max_similarity": 0.7152,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.9002319072553207,
+      "error": ""
+    },
+    {
+      "question": "How does the UE handle a running disaster roaming wait range timer after being switched off and on again?",
+      "corpus": "3gpp",
+      "answer": "When the UE is switched off with a running disaster roaming wait range timer and then switched on again with the same USIM, the UE shall behave as follows:\n\n- Let $t_1$ be the time remaining for the timer for disaster roaming wait range timeout at switch off and let $t$ be the time elapsed between switch off and switch on. \n- If $t_1$ is greater than $t$, then the timer shall be restarted with the value $t_1 - t$.\n- If $t_1$ is equal to or less than $t$, then the timer need not be restarted.\n- If the UE is not capable of determining $t$, then the UE shall restart the timer with the value $t_1$.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9423113867437426,
+      "mean_similarity": 0.66186,
+      "min_similarity": 0.6189,
+      "max_similarity": 0.7966,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.8779600399877201,
+      "error": ""
+    },
+    {
+      "question": "When does the AMF assign a new 5G-GUTI to a UE?",
+      "corpus": "3gpp",
+      "answer": "The AMF assigns a new 5G-GUTI to a UE during a successful registration procedure for periodic registration update. Additionally, the AMF may assign a new 5G-GUTI at any time for a particular UE by performing the generic UE configuration update procedure. \n\nSpecifically, the AMF shall send a new 5G-GUTI to the UE in the following scenarios:\n- Upon receiving a Registration Request message of type \"initial registration\" or \"mobility registration update\" from a UE.\n- Upon receiving a Registration Request message of type \"periodic registration update\" from a UE, the AMF should send a new 5G-GUTI to the UE.\n- Upon receiving a Service Request message sent by the UE in response to a Paging message.\n- When the UE is in CM-IDLE state with suspend indication and the AMF receives an indication from the lower layers that the RRC connection has been resumed in response to a Paging message. \n\nNote that the AMF may also re-assign a new 5G-GUTI to the UE at any time.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.875,
+      "answer_relevancy": 0.9021581998309246,
+      "mean_similarity": 0.71236,
+      "min_similarity": 0.681,
+      "max_similarity": 0.7788,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.7107957872851413,
+      "error": ""
+    },
+    {
+      "question": "What state does the UE enter if it is camped on a cell in the registration area but the current TAI is not in the list of 'allowed tracking areas'?",
+      "corpus": "3gpp",
+      "answer": "The UE enters the state 5GMM-REGISTERED.NON-ALLOWED-SERVICE.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.6714443329331269,
+      "mean_similarity": 0.66862,
+      "min_similarity": 0.6538,
+      "max_similarity": 0.7286,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.99999999995,
+      "error": ""
+    },
+    {
+      "question": "What interfaces connect the EPC/PS Core / RAN to the IM CN subsystem in the IMS-based PSS and MBMS architecture?",
+      "corpus": "3gpp",
+      "answer": "The interfaces that connect the EPC/PS Core / RAN to the IM CN subsystem in the IMS-based PSS and MBMS architecture are Gm (SIP) and Gmb interfaces.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9280854113771962,
+      "mean_similarity": 0.67334,
+      "min_similarity": 0.645,
+      "max_similarity": 0.7277,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.9615527031641564,
+      "error": ""
+    },
+    {
+      "question": "What is the role of the SCF in service authorization during session initiation and modification?",
+      "corpus": "3gpp",
+      "answer": "The SCF performs service authorization procedures to check the service rights of the requested service (e.g. MBMS service, MBMS download service, PSS service) according to the user subscription information. Specifically, the SCF examines the SDP parameters in the SDP offer, such as the \"a=mbms_service\" or \"a=mbms_download_service\" parameter, to determine the channel the UE intends to join and checks if the UE is allowed to join that channel. If the UE is not allowed, the SCF answers with a 403 error code. The SCF also checks the c-line(s) to determine if it is a multicast session and if it corresponds to the \"mbms_service\" or \"mbms_download_service\" parameter. \n\nIn addition, during session modification, the SCF performs service authorization procedures to check the service rights of the requested MBMS download service according to the user subscription information. If the MBMS download service is not available for the UE, the session modification is rejected and the old PSS download session is maintained. \n\nThe SCF also supports procedures specified in TS 24.229 applicable to an AS acting as a terminating UA, and performs service authorization procedures as per clause 10.4. \n\nNote that the exact details of the service authorization procedures may vary depending on the specific service and scenario, but the general role of the SCF in service authorization is to check the user's subscription information and ensure that the requested service is allowed.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.9130434782608695,
+      "answer_relevancy": 0.7448716190541457,
+      "mean_similarity": 0.62938,
+      "min_similarity": 0.6129,
+      "max_similarity": 0.6475,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.9036900694814987,
+      "error": ""
+    },
+    {
+      "question": "What is the value of the 'media' field in the 'm' line for the RTSP content control channel in the SDP offer?",
+      "corpus": "3gpp",
+      "answer": "The value of the 'media' field in the 'm' line for the RTSP content control channel in the SDP offer is not explicitly stated in the provided context. However, based on the information provided for the HTTP download channel and the media plane control channel, it can be inferred that the 'media' field for the RTSP content control channel should also be set to \"application\", as this is a common value for non-RTP media types. \n\nBut since it's not explicitly mentioned for RTSP, the answer should be: The information is not in the context.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.6503099999999999,
+      "min_similarity": 0.6372,
+      "max_similarity": 0.6729,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.3721931044934998,
+      "error": ""
+    },
+    {
+      "question": "How does the UE initiate switching from MBMS to PSS streaming?",
+      "corpus": "3gpp",
+      "answer": "The UE initiates switching from MBMS to PSS streaming by issuing a SIP Re-INVITE. An SDP offer and Request-URI shall be included according to clause 8.2.3.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9509879858802849,
+      "mean_similarity": 0.68423,
+      "min_similarity": 0.642,
+      "max_similarity": 0.7423,
+      "source_coverage": 1,
+      "context_recall": 0.6666666666666666,
+      "answer_correctness": 0.7971000218355883,
+      "error": ""
+    },
+    {
+      "question": "When is the GAA/GBA Bootstrapping procedure initiated in MBMS and combined PSS/MBMS services?",
+      "corpus": "3gpp",
+      "answer": "The GAA/GBA Bootstrapping procedure is initiated by the UE after a successful IMS registration and Service discovery in MBMS-only and combined PSS/MBMS service offerings.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.8674618549524352,
+      "mean_similarity": 0.62308,
+      "min_similarity": 0.6016,
+      "max_similarity": 0.6827,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.8255531525479654,
+      "error": ""
+    },
+    {
+      "question": "What ensures consistent NAF key derivation in the UE and BSF during MBMS User Service Registration?",
+      "corpus": "3gpp",
+      "answer": "The use of the FQDN of the SCF (acting as a NAF) in the service protection description, instead of the FQDN of the BM-SC, ensures consistent NAF key derivation in the UE and BSF during MBMS User Service Registration, as the FQDN of the NAF is used as input in NAF key derivation.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.8087726715451992,
+      "mean_similarity": 0.6574300000000001,
+      "min_similarity": 0.6439,
+      "max_similarity": 0.6782,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.8952303636266566,
+      "error": ""
+    },
+    {
+      "question": "What does the BM-SC do upon receiving a valid HTTP POST message for MBMS User Service Registration?",
+      "corpus": "3gpp",
+      "answer": "The BM-SC checks that the HTTP POST is valid, and extracts the request for further processing. As the HTTP POST message came from SCF with asserted identitie(s), the BM-SC does not need to authenticate the UE as the UE has been authenticated by the IMS. Also, the HTTP POST message implicitly indicates to the BM-SC that the SCF has authorized the UE to register to the indicated MBMS User Service(s).",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.8403997767945858,
+      "mean_similarity": 0.65558,
+      "min_similarity": 0.6492,
+      "max_similarity": 0.6646,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.3470311202330411,
+      "error": ""
+    },
+    {
+      "question": "What triggers the SCF to run the GBA usage procedure with the BSF during MBMS User Service De-registration?",
+      "corpus": "3gpp",
+      "answer": "The SCF is triggered to run the GBA usage procedure with the BSF during MBMS User Service De-registration in the following cases:\n\n1. If there is no B-TID stored for the UE.\n2. If the received B-TID is different than the one stored for the UE.\n3. If the received B-TID is not valid.\n4. If the SCF desires the UE to make a new GBA bootstrapping.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.6,
+      "answer_relevancy": 0.969605831961644,
+      "mean_similarity": 0.61272,
+      "min_similarity": 0.5966,
+      "max_similarity": 0.6558,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.7681655378234082,
+      "error": ""
+    },
+    {
+      "question": "How is the Service Profile used during bookmark retrieval in session establishment?",
+      "corpus": "3gpp",
+      "answer": "The Service Profile is used during bookmark retrieval in session establishment as follows: \n\nThe SCF sends an XCAP GET request to the Service Profile (step 3 in Figure 29) to retrieve the bookmark. The Service Profile then returns the bookmark in an HTTP 200 OK response (step 4 in Figure 29) to the SCF. \n\nThis is part of the bookmark retrieval procedure during a PSS session establishment process, as depicted in clause 12.2.2 and Figure 29.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9220177494441645,
+      "mean_similarity": 0.61922,
+      "min_similarity": 0.5597,
+      "max_similarity": 0.7027,
+      "source_coverage": 1,
+      "context_recall": 0.5,
+      "answer_correctness": 0.6067584118406855,
+      "error": ""
+    },
+    {
+      "question": "What SIP message is used to initiate the session transfer from UE-1 to UE-2 in push mode?",
+      "corpus": "3gpp",
+      "answer": "The SIP REFER request is used to initiate the session transfer from UE-1 to UE-2 in push mode.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9297983240842397,
+      "mean_similarity": 0.65848,
+      "min_similarity": 0.6488,
+      "max_similarity": 0.6787,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.70704957526565,
+      "error": ""
+    },
+    {
+      "question": "What message does the HLRA send to DESTINATION NETWORK B after receiving TC-END from VLRA in the CCBS Suspend Invocation?",
+      "corpus": "3gpp",
+      "answer": "The HLRA sends a TC-CONTINUE SCCP message to DESTINATION NETWORK B after receiving TC-END from VLRA in the CCBS Suspend Invocation. This message is associated with the CcbsSuspend (note 1) label.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9349717015169093,
+      "mean_similarity": 0.67286,
+      "min_similarity": 0.6348,
+      "max_similarity": 0.726,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.821633816950598,
+      "error": ""
+    },
+    {
+      "question": "What is the only applicable value for the 'securityMethods' attribute when publishing a management service?",
+      "corpus": "3gpp",
+      "answer": "The context does not provide information about the only applicable value for the 'securityMethods' attribute when publishing a management service. The context mentions that for AEFs defined by 3GPP interacting with API invokers via CAPIF-2e, at least one of the \"securityMethods\" attribute within this data type or the \"securityMethods\" attribute within the \"interfaceDescriptions\" attribute shall be present, but it does not specify a single applicable value.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.5648,
+      "min_similarity": 0.5571,
+      "max_similarity": 0.5833,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.3068583965901605,
+      "error": ""
+    },
+    {
+      "question": "What is the consequence of the HLR A receiving a called party subaddress in the CCBS-Feature parameter?",
+      "corpus": "3gpp",
+      "answer": "The consequence of the HLR A receiving a called party subaddress in the CCBS-Feature parameter is that the HLR shall add two octets to the ISDN-SubaddressString received from the VLR to ensure correct encoding of this information on the SSAP interface.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.943814381498115,
+      "mean_similarity": 0.63909,
+      "min_similarity": 0.5973,
+      "max_similarity": 0.7486,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.4060993387038491,
+      "error": ""
+    },
+    {
+      "question": "Which feature-capability indicator does the ATCF insert into the Feature-Caps header field when all MSC servers support PS to CS SRVCC for calls in the alerting phase?",
+      "corpus": "3gpp",
+      "answer": "The feature-capability indicator that the ATCF inserts into the Feature-Caps header field when all MSC servers support PS to CS SRVCC for calls in the alerting phase is: g.3gpp.srvcc-alerting.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9663759495057561,
+      "mean_similarity": 0.74127,
+      "min_similarity": 0.7171,
+      "max_similarity": 0.7723,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.8832391018858718,
+      "error": ""
+    },
+    {
+      "question": "What SIP response does the SCC AS send if it cannot uniquely associate a SIP INVITE request with a previously established SIP dialog?",
+      "corpus": "3gpp",
+      "answer": "The SCC AS sends a SIP 480 (Temporarily Unavailable) response to reject the SIP INVITE request relating to the access transfer and does not process the remaining steps.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.7580807753774758,
+      "mean_similarity": 0.69927,
+      "min_similarity": 0.6843,
+      "max_similarity": 0.7255,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.8716446084023113,
+      "error": ""
+    },
+    {
+      "question": "Which condition causes the SCC AS to apply PS to CS SRVCC procedures for a call in the alerting phase?",
+      "corpus": "3gpp",
+      "answer": "The condition that causes the SCC AS to apply PS to CS SRVCC procedures for a call in the alerting phase is when the Contact header field of the SIP INVITE request routed to the SCC AS due to a STN-SR includes the g.3gpp.srvcc-alerting media feature tag, and there are one or more dialogs supporting sessions with speech media component or speech media and video media components existing for the served user identified in the transferable set in the P-Asserted-Identity header field.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.959128665902559,
+      "mean_similarity": 0.70397,
+      "min_similarity": 0.682,
+      "max_similarity": 0.7733,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.7593334100363187,
+      "error": ""
+    },
+    {
+      "question": "What SIP response does the SCC AS send if it cannot uniquely associate a SIP INVITE request with an early dialog?",
+      "corpus": "3gpp",
+      "answer": "SIP 480 (Temporarily Unavailable) response.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.7227796609602294,
+      "mean_similarity": 0.7134199999999999,
+      "min_similarity": 0.6994,
+      "max_similarity": 0.7264,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.9732849037299027,
+      "error": ""
+    },
+    {
+      "question": "Which SIP header fields are mandatory in a REFER request for CS to PS SRVCC?",
+      "corpus": "3gpp",
+      "answer": "The context does not explicitly state which SIP header fields are mandatory in a REFER request for CS to PS SRVCC. However, based on the provided information, the following SIP header fields are mentioned in the context of a REFER request for PS to CS SRVCC, which may be relevant:\n\n1. Refer-Sub header field with value \"false\"\n2. Supported header field with value \"norefersub\"\n3. Refer-To header field containing the additional transferred session SCC AS URI for PS to CS SRVCC\n\nNote that the context does not provide a clear answer to the question, and the mentioned header fields are related to PS to CS SRVCC, not CS to PS SRVCC. Therefore, the answer is not explicitly stated in the context.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.70517,
+      "min_similarity": 0.6872,
+      "max_similarity": 0.7369,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.7945091231345685,
+      "error": ""
+    },
+    {
+      "question": "To what value must the MSC server set the Request-URI during a PS to CS SRVCC access transfer?",
+      "corpus": "3gpp",
+      "answer": "The MSC server shall set the Request-URI to the STN-SR for the session with speech media component to be transferred.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.8176956323758168,
+      "mean_similarity": 0.6291,
+      "min_similarity": 0.614,
+      "max_similarity": 0.6469,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.9116346545722831,
+      "error": ""
+    },
+    {
+      "question": "Which state does the MSC server enter after receiving a SIP 200 (OK) response when the MSC server assisted mid-call feature is not applied?",
+      "corpus": "3gpp",
+      "answer": "The MSC server enters the \"active\" (N10) state after receiving a SIP 200 (OK) response when the MSC server assisted mid-call feature is not applied.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.8793002546000798,
+      "mean_similarity": 0.69091,
+      "min_similarity": 0.6786,
+      "max_similarity": 0.7249,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.8478179202979421,
+      "error": ""
+    },
+    {
+      "question": "What SIP message does the MSC server send in response to a CC CONNECT message while in the 'call received' state during SRVCC?",
+      "corpus": "3gpp",
+      "answer": "The MSC server sends a SIP INFO request in response to a CC CONNECT message while in the 'call received' state during SRVCC.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9437170037854022,
+      "mean_similarity": 0.70312,
+      "min_similarity": 0.6887,
+      "max_similarity": 0.727,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.5478447369099309,
+      "error": ""
+    },
+    {
+      "question": "Which state does the MSC server enter when the state-info XML element is 'early' and the direction is 'initiator'?",
+      "corpus": "3gpp",
+      "answer": "The context does not explicitly state which state the MSC server enters when the state-info XML element is 'early' and the direction is 'initiator'. \n\nHowever, according to the context, when the MSC server receives a SIP INFO request with the state-info XML element containing \"early\" and the direction XML element containing \"initiator\", it is related to the PS to CS access transfer for calls in alerting phase or pre-alerting phase, but the specific state is not mentioned in this case. \n\nOn the other hand, when the state-info XML element is 'early' and the direction is 'receiver', the MSC server enters the \"active\" (N10) state as mentioned in NOTE 3. \n\nAlso, when the state-info XML element is 'pre-alerting' and the direction is 'initiator', the MSC server enters the state \"Mobile originating call proceeding\" (N3). \n\nAnd when the state-info XML element is 'pre-alerting' and the direction is 'receiver', the MSC server enters the state \"Call present\" (N6). \n\nBut the specific state when the state-info XML element is 'early' and the direction is 'initiator' is not explicitly mentioned in the context.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.59869,
+      "min_similarity": 0.5788,
+      "max_similarity": 0.6442,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.3081746141961923,
+      "error": ""
+    },
+    {
+      "question": "What capability is indicated by the g.3gpp.cs2ps-srvcc media feature tag in the Contact header field?",
+      "corpus": "3gpp",
+      "answer": "The g.3gpp.cs2ps-srvcc media feature tag in the Contact header field indicates support of the CS to PS single radio voice call continuity (SRVCC) as specified in 3GPP TS 24.237.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.8,
+      "answer_relevancy": 0.889363791578378,
+      "mean_similarity": 0.7004,
+      "min_similarity": 0.6782,
+      "max_similarity": 0.7317,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.8757490274121107,
+      "error": ""
+    },
+    {
+      "question": "What does the Request-URI contain in the SIP INVITE request during PS-CS access transfer?",
+      "corpus": "3gpp",
+      "answer": "The Request-URI contains the ATU-STI for CS to PS SRVCC associated with the transferred call.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.8575451574066092,
+      "mean_similarity": 0.6703600000000001,
+      "min_similarity": 0.6606,
+      "max_similarity": 0.6787,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.2939480962288941,
+      "error": ""
+    },
+    {
+      "question": "What does the Record-Route header field added by the P-CSCF in a SIP INVITE request ensure?",
+      "corpus": "3gpp",
+      "answer": "The Record-Route header field added by the P-CSCF in a SIP INVITE request ensures that the P-CSCF is in the path for subsequent requests in the dialog, allowing it to release the session if needed. \n\nAdditionally, it allows the P-CSCF to receive subsequent in-dialog requests, as the Record-Route header field values are used to build the Route header field for in-dialog requests. \n\nThe P-CSCF's own SIP URI is added to the top of the list of Record-Route header fields, which can be in the format of either the P-CSCF FQDN that resolves to its IP address or the P-CSCF IP address, and includes the port number where the P-CSCF awaits subsequent requests. \n\nThis is done to ensure that the P-CSCF remains in the signaling path for the duration of the dialog.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.4,
+      "answer_relevancy": 0.9145320649566923,
+      "mean_similarity": 0.72063,
+      "min_similarity": 0.7016,
+      "max_similarity": 0.7411,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.5782359709067069,
+      "error": ""
+    },
+    {
+      "question": "What does the 'Replaces' header in a SIP INVITE request indicate during PS-PS access transfer?",
+      "corpus": "3gpp",
+      "answer": "The 'Replaces' header in a SIP INVITE request indicates a request for service control transfer from the Source Access Leg to the Target Access Leg, and is used to replace the pre-established session. It contains the dialog identifier of the session to be transferred.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.8486523338706585,
+      "mean_similarity": 0.65838,
+      "min_similarity": 0.634,
+      "max_similarity": 0.6777,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.7371367684986503,
+      "error": ""
+    },
+    {
+      "question": "What does the Contact header field containing the g.3gpp.mid-call media feature tag indicate?",
+      "corpus": "3gpp",
+      "answer": "The Contact header field containing the g.3gpp.mid-call media feature tag indicates that the function sending the SIP message supports the MSC server assisted mid-call feature.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.5,
+      "answer_relevancy": 0.8954765787319889,
+      "mean_similarity": 0.67074,
+      "min_similarity": 0.6519,
+      "max_similarity": 0.7081,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.8719377298000305,
+      "error": ""
+    },
+    {
+      "question": "What is the directionality of media offered in the SDP of a SIP INVITE request for the MSC server assisted mid-call feature?",
+      "corpus": "3gpp",
+      "answer": "The directionality of the media offered in the SDP of a SIP INVITE request for the MSC server assisted mid-call feature depends on the directionality used by the SC UE. \n\nIf the directionality used by the SC UE is \"sendrecv\" or \"sendonly\", the directionality of the media offered in the SDP is \"sendonly\". \n\nIf the directionality used by the SC UE is \"recvonly\" or \"inactive\", the directionality of the media offered in the SDP is \"inactive\".",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9143854279465896,
+      "mean_similarity": 0.69678,
+      "min_similarity": 0.6853,
+      "max_similarity": 0.7248,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.648053394803348,
+      "error": ""
+    },
+    {
+      "question": "What is the first message sent by SC UE A to the MSC Server to initiate PS to CS access transfer?",
+      "corpus": "3gpp",
+      "answer": "The context does not provide the first message sent by SC UE A to the MSC Server to initiate PS to CS access transfer. The sequence diagram provided in the context shows the interaction between UE, MSC Server, I/S-CSCF, and SCC AS, but it does not specify the first message sent by the SC UE to the MSC Server. \n\nHowever, according to the sequence diagram, the process starts with an INVITE from SCC AS to I/S-CSCF, and then the I/S-CSCF sends an INVITE to the MSC Server, which in turn sends an INVITE to the UE. The UE responds with a Provisional Response to the MSC Server. But it does not explicitly state the first message sent by the SC UE to the MSC Server to initiate the PS to CS access transfer. \n\nTherefore, the answer is not in the context.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.6853,
+      "min_similarity": 0.6712,
+      "max_similarity": 0.6992,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.27602471220484265,
+      "error": ""
+    },
+    {
+      "question": "What triggers the PS to CS SRVCC procedure in the example flow?",
+      "corpus": "3gpp",
+      "answer": "The PS to CS SRVCC procedure is triggered by measurement reports sent from the UE to E-UTRAN, based on which the source E-UTRAN decides to initiate the handover to CS access.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.7864557266515928,
+      "mean_similarity": 0.65155,
+      "min_similarity": 0.6242,
+      "max_similarity": 0.6763,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.8425213732598171,
+      "error": ""
+    },
+    {
+      "question": "What does the Contact field contain for the PS to CS SRVCC procedure?",
+      "corpus": "3gpp",
+      "answer": "The context does not provide information about the Contact field for the PS to CS SRVCC procedure.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.63272,
+      "min_similarity": 0.6186,
+      "max_similarity": 0.6746,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.22581807767633477,
+      "error": ""
+    },
+    {
+      "question": "What feature tag is included in the Contact header field for PS to CS SRVCC in the alerting phase?",
+      "corpus": "3gpp",
+      "answer": "The feature tag included in the Contact header field for PS to CS SRVCC in the alerting phase is \"g.3gpp.srvcc-alerting\".",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9745226729502697,
+      "mean_similarity": 0.68638,
+      "min_similarity": 0.6692,
+      "max_similarity": 0.7065,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.9091409073444172,
+      "error": ""
+    },
+    {
+      "question": "What does the P-Asserted-Identity header field in the SIP INVITE request represent during PS to CS SRVCC?",
+      "corpus": "3gpp",
+      "answer": "The P-Asserted-Identity header field in the SIP INVITE request represents the public user identity of the remote user. However, in situations where presentation of the remote user's public identity is restricted or the user does not subscribe to the OIP or TIP service, the P-Asserted-Identity header field with a public user identity may not be delivered to the MSC server in the SIP 2xx response to the SIP INVITE due to STN-SR or the SIP INVITE request transferring additional session. \n\nIn the context of PS to CS SRVCC, if a P-Asserted-Identity header field was saved, the SCC AS shall include the P-Asserted-Identity header field with the identity of the remote user saved, along with the Privacy header field, if available, when sending a SIP 2xx response to a SIP INVITE request due to PS to CS STN. \n\nIt can also be set to the C-MSISDN previously received from the SCC AS and associated with the registration path of the SIP INVITE request due to STI-rSR, when the ATCF acts as B2BUA upon receiving the terminating SIP INVITE request for CS. \n\nIn general, the P-Asserted-Identity header field is used to assert the identity of a user, and its value can vary depending on the specific use case and the information available to the SCC AS or ATCF.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.9369958331819254,
+      "mean_similarity": 0.7543500000000001,
+      "min_similarity": 0.7266,
+      "max_similarity": 0.777,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.27145224606532625,
+      "error": ""
+    },
+    {
+      "question": "What does the ATCF replace the Request-URI with when forwarding a SIP INVITE request to the SCC AS during PS to CS SRVCC?",
+      "corpus": "3gpp",
+      "answer": "The context does not provide information on what the ATCF replaces the Request-URI with when forwarding a SIP INVITE request to the SCC AS during PS to CS SRVCC.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.73627,
+      "min_similarity": 0.7264,
+      "max_similarity": 0.758,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.2506430182039808,
+      "error": ""
+    },
+    {
+      "question": "What does the MSC Server include in the Route header field of a SIP INVITE request during PS to CS SRVCC?",
+      "corpus": "3gpp",
+      "answer": "The context does not provide a direct answer to what the MSC Server includes in the Route header field of a SIP INVITE request during PS to CS SRVCC. \n\nHowever, it is mentioned in the context that the ATCF management URI received in the application/vnd.3gpp.srvcc-ext+xml MIME body of the SIP REFER request and \"lr\" URI parameter is included in the topmost Route header field (point E.a), but this is in the context of the MSC server supporting CS to PS SRVCC and the SIP REFER request, not a SIP INVITE request during PS to CS SRVCC.\n\nTherefore, the answer is not in the context.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.70966,
+      "min_similarity": 0.6998,
+      "max_similarity": 0.7233,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.39027829739250114,
+      "error": ""
+    },
+    {
+      "question": "What information does the Feature-Caps header field contain in a SIP 200 (OK) response during PS to CS SRVCC?",
+      "corpus": "3gpp",
+      "answer": "The Feature-Caps header field in a SIP 200 (OK) response during PS to CS SRVCC contains the g.3gpp.srvcc feature-capability indicator, and if certain conditions are met, it may also contain the g.3gpp.mid-call media feature tag. Additionally, if the SCC AS supports PS to CS SRVCC with the MSC server assisted mid-call feature, the Feature-Caps header field may contain the g.3gpp.mid-call feature-capability indicator. \n\nHowever, in the context of a SIP 200 (OK) response to the SIP INVITE request transferring additional session, the Feature-Caps header field contains the g.3gpp.ti feature-capability indicator with the value of the g.3gpp.ti media feature tag in the Contact header field received in the source access leg of the determined additional dialog being transferred. \n\nIn the context of a SIP 180 (Ringing) response to the SIP INVITE request due to static STI, the Feature-Caps header field contains the g.3gpp.cs2ps-drvcc-alerting feature-capability indicator and possibly the g.3gpp.cs2ps-drvcc-orig-pre-alerting feature-capability indicator if the SCC AS supports PS to CS dual radio access transfer for originating calls in pre-alerting phase. \n\nIt is also mentioned that the Feature-Caps header field may contain other indicators such as g.3gpp.atcf, g.3gpp.atcf-mgmt-uri, g.3gpp.atcf-path, and g.3gpp.cs2ps-srvcc, but these are not specifically related to the SIP 200 (OK) response during PS to CS SRVCC. \n\nTherefore, the exact information contained in the Feature-Caps header field depends on the specific scenario and context.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.9432160537332264,
+      "mean_similarity": 0.68903,
+      "min_similarity": 0.6701,
+      "max_similarity": 0.7185,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.6893383261031989,
+      "error": ""
+    },
+    {
+      "question": "What values can the <state-info> element have in PS to CS SRVCC for calls in the alerting phase?",
+      "corpus": "3gpp",
+      "answer": "The <state-info> element can have the values specified in Table D.2.3-1 for state-info-values. However, the exact values are not provided in the given context. It is mentioned that the <state-info> element indicates the state of the dialog and is modeled on the FSM described in IETF RFC 4235, but the specific values for PS to CS SRVCC for calls in the alerting phase are not listed. \n\nIt is mentioned in the context that the <state-info> element can contain \"pre-alerting\" for PS to CS SRVCC for terminating calls in pre-alerting phase, and it is also mentioned that the session can be in the \"pre-alerting phase\", \"alerting phase\", or a \"confirmed dialog\". But the exact values that the <state-info> element can have are specified in Table D.2.3-1, which is not provided in the given context.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.656,
+      "min_similarity": 0.6418,
+      "max_similarity": 0.6879,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.28792558199433393,
+      "error": ""
+    },
+    {
+      "question": "How does an SC UE indicate support for dynamic STN during PS to CS dual radio access transfer?",
+      "corpus": "3gpp",
+      "answer": "The provided context does not contain information on how an SC UE indicates support for dynamic STN during PS to CS dual radio access transfer. The answer to this question is not available within the given context.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.61266,
+      "min_similarity": 0.6091,
+      "max_similarity": 0.6194,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.3083750517410388,
+      "error": ""
+    },
+    {
+      "question": "What does the SC UE include in the Contact header field of the initial SIP INVITE request for PS to CS dual radio access transfer with the MSC server assisted mid-call feature?",
+      "corpus": "3gpp",
+      "answer": "The context does not provide information on what the SC UE includes in the Contact header field of the initial SIP INVITE request for PS to CS dual radio access transfer with the MSC server assisted mid-call feature. \n\nHowever, according to subclause 9.5, when the MSC server sends a SIP INVITE request due to STN, it includes the g.3gpp.mid-call media feature tag in the Contact header field. But this is for the MSC server, not the SC UE.\n\nFor the SC UE, according to the provided context, when the SC UE supports the MSC server assisted mid-call feature and receives a SIP INVITE request with the g.3gpp.mid-call feature-capability indicator, it includes the g.3gpp.mid-call media feature tag in the Contact header field of the SIP 2xx response, not in the initial SIP INVITE request. \n\nTherefore, the answer to the question is not explicitly provided in the given context.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.72475,
+      "min_similarity": 0.7023,
+      "max_similarity": 0.8,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.37025901805397404,
+      "error": ""
+    },
+    {
+      "question": "How does the ATCF indicate support for PS to CS SRVCC to the SC UE?",
+      "corpus": "3gpp",
+      "answer": "The context does not provide information on how the ATCF indicates support for PS to CS SRVCC to the SC UE. \n\nHowever, it does mention that an ATCF can indicate support of the PS to CS SRVCC with the MSC server assisted mid-call feature by inclusion of the g.3gpp.mid-call feature-capability indicator in the Feature-Caps header field, with the g.3gpp.atcf feature-capability indicator, in the SIP REGISTER request that created the binding of the SC UE (NOTE 1 in section 12.3.5). \n\nBut this is related to the ATCF indicating support to the SCC AS, not directly to the SC UE. The context does not provide information on how the ATCF indicates support for PS to CS SRVCC directly to the SC UE.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.70533,
+      "min_similarity": 0.6839,
+      "max_similarity": 0.7623,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.38010418235803944,
+      "error": ""
+    },
+    {
+      "question": "What does the SCC AS include in SIP 1xx and SIP 2xx responses when it receives a SIP INVITE request containing the g.3gpp.dynamic-stn media feature tag?",
+      "corpus": "3gpp",
+      "answer": "The context does not mention the SCC AS including anything specific in SIP 1xx and SIP 2xx responses when it receives a SIP INVITE request containing the g.3gpp.dynamic-stn media feature tag. \n\nHowever, it does mention that if the SC UE supports the use of dynamic STN, the SC UE shall include the g.3gpp.dynamic-stn media feature tag in the Contact header field of SIP 1xx and SIP 2xx responses. \n\nAdditionally, it mentions that when sending SIP 1xx response or SIP 2xx response to the SIP INVITE request towards the served user, the SCC AS shall populate the SIP response with certain headers, but this is not specifically related to the g.3gpp.dynamic-stn media feature tag. \n\nIt also mentions that if the SCC AS supports the use of dynamic STN according to operator policy, the SCC AS shall include an E.164 number as the dynamic STN for this session and include this dynamic STN in the g.3gpp.dynamic-stn feature-capability indicator in a Feature-Caps header field in the SIP INVITE request. \n\nBut the specific action of the SCC AS when receiving a SIP INVITE request containing the g.3gpp.dynamic-stn media feature tag is not clearly stated in the provided context.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.74109,
+      "min_similarity": 0.7233,
+      "max_similarity": 0.7734,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.3860075744641293,
+      "error": ""
+    },
+    {
+      "question": "What action does the NG-RAN node take if the No PDU Session Indication IE is present in the HANDOVER REQUEST message?",
+      "corpus": "3gpp",
+      "answer": "If the *No PDU Session Indication* IE is contained in the HANDOVER REQUEST message, the target NG-RAN node shall, if supported, consider the UE (or mobile IAB-MT) as not having any PDU sessions activated, ignore the *PDU Session Resources To Be Setup List* IE (or *PDU Session Resource Setup List* IE), and shall not take any action with respect to PDU session setup. \n\nAdditionally, the source NG-RAN node (or AMF) shall, if supported, ignore the *PDU Session Resources Admitted To Be Added List* IE (or *PDU Session Resources Admitted List* IE) in the HANDOVER REQUEST ACKNOWLEDGE message.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.7,
+      "answer_relevancy": 0.9025836902098767,
+      "mean_similarity": 0.72348,
+      "min_similarity": 0.7021,
+      "max_similarity": 0.7576,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.7729318168561485,
+      "error": ""
+    },
+    {
+      "question": "What happens if the Supported TA List IE is included in the RAN CONFIGURATION UPDATE message?",
+      "corpus": "3gpp",
+      "answer": "If the Supported TA List IE is included in the RAN CONFIGURATION UPDATE message, the AMF/MME shall overwrite the whole list of supported TAs and the corresponding list of supported slices for each TA, and use them for subsequent registration area management of the UE. The AMF/MME may also take the Tracking Area contained in the Supported TA List IE into account to optimize signaling towards this RAN node.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.7743336687810776,
+      "mean_similarity": 0.62968,
+      "min_similarity": 0.6093,
+      "max_similarity": 0.6834,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.6272890953022761,
+      "error": ""
+    },
+    {
+      "question": "What action does the AMF take after receiving an NG RESET message from the NG-RAN node?",
+      "corpus": "3gpp",
+      "answer": "At reception of the NG RESET message, the AMF shall release all allocated resources on NG related to the UE association(s) indicated explicitly or implicitly in the NG RESET message and remove the NGAP ID for the indicated UE associations.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.8934409175082975,
+      "mean_similarity": 0.72166,
+      "min_similarity": 0.6848,
+      "max_similarity": 0.7697,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.907178412092173,
+      "error": ""
+    },
+    {
+      "question": "What happens to the Old AMF IE if the Extended Old AMF IE is present?",
+      "corpus": "3gpp",
+      "answer": "The context does not provide information about what happens to the Old AMF IE if the Extended Old AMF IE is present.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.56189,
+      "min_similarity": 0.5571,
+      "max_similarity": 0.5725,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.38234660453316033,
+      "error": ""
+    },
+    {
+      "question": "Under what condition does the NR UE Sidelink Aggregate Maximum Bit Rate IE apply?",
+      "corpus": "3gpp",
+      "answer": "The NR UE Sidelink Aggregate Maximum Bit Rate IE applies only if the UE is authorized for NR V2X services.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9724854820987203,
+      "mean_similarity": 0.74679,
+      "min_similarity": 0.7263,
+      "max_similarity": 0.7649,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.9039376350793171,
+      "error": ""
+    },
+    {
+      "question": "What is the criticality of the Security Key IE in the UE CONTEXT MODIFICATION REQUEST message?",
+      "corpus": "3gpp",
+      "answer": "The criticality of the Security Key IE in the UE CONTEXT MODIFICATION REQUEST message is not specified in the provided context. The context only provides information about the UE CONTEXT MODIFICATION RESPONSE and UE CONTEXT MODIFICATION FAILURE messages, but not the UE CONTEXT MODIFICATION REQUEST message. Therefore, the answer is: The information is not available in the context.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.63927,
+      "min_similarity": 0.6311,
+      "max_similarity": 0.6533,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.24678565057205565,
+      "error": ""
+    },
+    {
+      "question": "What is the direction of the HANDOVER REQUEST message?",
+      "corpus": "3gpp",
+      "answer": "The direction of the HANDOVER REQUEST message is MME \u2192 eNB.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9266278054912759,
+      "mean_similarity": 0.63696,
+      "min_similarity": 0.6303,
+      "max_similarity": 0.6513,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.2938996182800986,
+      "error": ""
+    },
+    {
+      "question": "What happens if the Management Based MDT PLMN Modification List IE is present in the PATH SWITCH REQUEST ACKNOWLEDGE message?",
+      "corpus": "3gpp",
+      "answer": "If the Management Based MDT PLMN Modification List IE is present in the PATH SWITCH REQUEST ACKNOWLEDGE message, the NG-RAN node shall, if supported, use it to overwrite any previously stored management based MDT PLMN list information in the UE context and use the received information to allow subsequent selection of the UE for management based MDT defined in TS 32.422.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9074091722562861,
+      "mean_similarity": 0.64959,
+      "min_similarity": 0.628,
+      "max_similarity": 0.715,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.35783198592889714,
+      "error": ""
+    },
+    {
+      "question": "What happens if the NB-IoT Paging DRX IE is present in the PAGING message?",
+      "corpus": "3gpp",
+      "answer": "If the NB-IoT Paging DRX IE is included in the PAGING message, the eNB shall use it according to TS 36.304 [20].",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9028752521535964,
+      "mean_similarity": 0.68971,
+      "min_similarity": 0.6655,
+      "max_similarity": 0.7205,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.35522385686831137,
+      "error": ""
+    },
+    {
+      "question": "What happens to the Supported TA List IE if the A-IoT Support IE is present and set to 'A-IoT only'?",
+      "corpus": "3gpp",
+      "answer": "The Supported TA List IE is ignored if the A-IoT Support IE is present and set to \"A-IoT only\".",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9305040568476151,
+      "mean_similarity": 0.58408,
+      "min_similarity": 0.5554,
+      "max_similarity": 0.6446,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.763224966573646,
+      "error": ""
+    },
+    {
+      "question": "What is the criticality if the Supported TA List IE is missing in the RAN CONFIGURATION UPDATE message?",
+      "corpus": "3gpp",
+      "answer": "The criticality of the Supported TA List IE is YES, and the assigned criticality is reject. \n\nTherefore, if the Supported TA List IE is missing in the RAN CONFIGURATION UPDATE message, the message will be rejected.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.6666666666666666,
+      "answer_relevancy": 0.9488747972603998,
+      "mean_similarity": 0.62575,
+      "min_similarity": 0.6151,
+      "max_similarity": 0.6571,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.8117264711780845,
+      "error": ""
+    },
+    {
+      "question": "What happens if the Extended Backup AMF Name IE is present in the AMF CONFIGURATION UPDATE message?",
+      "corpus": "3gpp",
+      "answer": "If the Extended Backup AMF Name IE is present in the AMF STATUS INDICATION message (not AMF CONFIGURATION UPDATE), the NG-RAN node shall, if supported, perform AMF reselection considering the AMF as indicated by the Extended Backup AMF Name IE. \n\nHowever, in the context of the AMF CONFIGURATION UPDATE message, there is no mention of the Extended Backup AMF Name IE. The Extended Backup AMF Name IE is mentioned in the context of the Served GUAMI List IE and the Unavailable GUAMI List IE, where it is stated that if the Extended Backup AMF Name IE is present, the Backup AMF Name IE shall be ignored. \n\nTherefore, based on the provided context, the answer to what happens if the Extended Backup AMF Name IE is present in the AMF CONFIGURATION UPDATE message is not explicitly stated.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.5714285714285714,
+      "answer_relevancy": 0.9141971204555827,
+      "mean_similarity": 0.61942,
+      "min_similarity": 0.5838,
+      "max_similarity": 0.6553,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.7221609977756829,
+      "error": ""
+    },
+    {
+      "question": "When is the DL Available Bitrate Report Thresholds IE required to be present?",
+      "corpus": "3gpp",
+      "answer": "The context does not explicitly state when the DL Available Bitrate Report Thresholds IE is required to be present. It provides information on the IE's structure, semantics, and usage in various procedures, but it does not specify the conditions under which the IE must be included. Therefore, the answer is not available in the provided context.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.6698,
+      "min_similarity": 0.6212,
+      "max_similarity": 0.7442,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.35405302318341253,
+      "error": ""
+    },
+    {
+      "question": "What is the maximum number of TAIs that can be included in the TAI List for RRC Inactive?",
+      "corpus": "3gpp",
+      "answer": "The maximum number of TAIs that can be included in the TAI List for RRC Inactive is defined by the value of \"maxnoofTAIforInactive\", which is 16.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.8566355272292224,
+      "mean_similarity": 0.54344,
+      "min_similarity": 0.5191,
+      "max_similarity": 0.6439,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.7491724743539637,
+      "error": ""
+    },
+    {
+      "question": "What happens if the NR NTN TAI Information IE is present in NR user location information?",
+      "corpus": "3gpp",
+      "answer": "The TAI in the User Location Information IE shall be ignored if the LTE NTN TAI Information IE is present.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.877675845145894,
+      "mean_similarity": 0.61075,
+      "min_similarity": 0.5988,
+      "max_similarity": 0.6385,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.8512019872216445,
+      "error": ""
+    },
+    {
+      "question": "When is the Maximum Data Burst Volume IE included in the Dynamic 5QI Descriptor?",
+      "corpus": "3gpp",
+      "answer": "The Maximum Data Burst Volume IE is included in the Dynamic 5QI Descriptor if the Delay Critical IE is set to \"delay critical\". This is stated in the context: \"This IE shall be included if the <i>Delay Critical</i> IE is set to 'delay critical' and shall be ignored otherwise.\" and also in NOTE 1 and NOTE 2.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.6666666666666666,
+      "answer_relevancy": 0.9765378862312718,
+      "mean_similarity": 0.65206,
+      "min_similarity": 0.6408,
+      "max_similarity": 0.6658,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.8633753989981858,
+      "error": ""
+    },
+    {
+      "question": "What is the maximum number of Candidate Relay UEs in the Candidate Relay UE Information List?",
+      "corpus": "3gpp",
+      "answer": "The context does not provide information about the maximum number of Candidate Relay UEs in the Candidate Relay UE Information List.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.62153,
+      "min_similarity": 0.6163,
+      "max_similarity": 0.6355,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.1623842408854856,
+      "error": ""
+    },
+    {
+      "question": "When must the Location Reporting Reference ID to be Cancelled IE be present?",
+      "corpus": "3gpp",
+      "answer": "The context does not provide information on when the \"Location Reporting Reference ID to be Cancelled IE\" must be present. The context only mentions the \"Location Reporting Reference ID\" IE and its semantics description, but does not mention a \"Location Reporting Reference ID to be Cancelled IE\". Therefore, the answer is: This information is not in the context.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.62151,
+      "min_similarity": 0.5965,
+      "max_similarity": 0.675,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.3153607487918062,
+      "error": ""
+    },
+    {
+      "question": "What does the Receive Status of UL PDCP SDUs IE indicate when its bit value is 1?",
+      "corpus": "3gpp",
+      "answer": "The context does not provide information about the \"Receive Status of UL PDCP SDUs IE\". It mentions \"D1 UL PDCP Delay Result Ind\" which is indicated by the Spare bit in the New IE Flags Octet, but it does not provide information about what it indicates when its bit value is 1. \n\nHowever, according to the context, Bit 0 of New IE Flags Octet in UL PDU SESSION INFORMATION (PDU Type 1) indicates if the D1 UL PDCP Delay Result Ind is present (1) or not (0). \n\nTherefore, the answer to the question is: The context does not provide information about the \"Receive Status of UL PDCP SDUs IE\", but it does provide information about the \"D1 UL PDCP Delay Result Ind\" which is indicated by a bit value of 1, meaning it is present.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.64711,
+      "min_similarity": 0.6304,
+      "max_similarity": 0.6823,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.3566173441585298,
+      "error": ""
+    },
+    {
+      "question": "What does the Receive Status of UL PDCP SDUs IE indicate when its bit value is 0?",
+      "corpus": "3gpp",
+      "answer": "The context does not provide information on the specific meaning of a bit value of 0 for the Receive Status of UL PDCP SDUs IE. The context only mentions that the Receive Status of UL PDCP SDUs IE is used to indicate the missing and received uplink SDUs, but it does not provide a detailed description of the bit values. Therefore, the answer is: The context does not provide this information.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.63301,
+      "min_similarity": 0.6209,
+      "max_similarity": 0.6554,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.34400191760525756,
+      "error": ""
+    },
+    {
+      "question": "What does the first bit in the Measurements to Activate bitmap indicate in MDT Configuration-NR?",
+      "corpus": "3gpp",
+      "answer": "The first bit in the Measurements to Activate bitmap indicates whether M1 configuration is to be present or not. According to the context, \"This IE shall be present if the Measurements to Activate IE has the first bit set to '1'.\" This refers to the m1Configuration in the ImmediateMDT-NR and mlthresholdEventA2 in the MDT-Configuration. \n\nIn other words, if the first bit is set to 1, it means that M1 configuration (e.g., event-triggered reporting) is activated.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.5,
+      "answer_relevancy": 0.7932158845841203,
+      "mean_similarity": 0.59703,
+      "min_similarity": 0.5777,
+      "max_similarity": 0.6403,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.6898702957767944,
+      "error": ""
+    },
+    {
+      "question": "What is the maximum number of Cell IDs that can be subject to MDT scope?",
+      "corpus": "3gpp",
+      "answer": "The context provided does not contain information about the maximum number of Cell IDs that can be subject to MDT scope. Therefore, the answer to this question cannot be determined from the given context.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.50296,
+      "min_similarity": 0.4998,
+      "max_similarity": 0.5064,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.26037980965263025,
+      "error": ""
+    },
+    {
+      "question": "What happens if the Extended Report Interval IE is present in M1 Periodic Reporting?",
+      "corpus": "3gpp",
+      "answer": "The context does not specify what happens if the Extended Report Interval IE is present in M1 Periodic Reporting. The presence of ExtendedReportIntervalMDT is mentioned in M1PeriodicReporting-ExtIEs, but its effect or behavior is not described in the provided context.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.57827,
+      "min_similarity": 0.5638,
+      "max_similarity": 0.605,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.377881840636926,
+      "error": ""
+    },
+    {
+      "question": "When is the Measurement Configuration Application Layer ID IE present?",
+      "corpus": "3gpp",
+      "answer": "The context does not explicitly state when the Measurement Configuration Application Layer ID IE is present. It only mentions that \"A measurement configuration application layer ID conveyed in the RRC signalling is used to identify the application layer measurement configuration and report between the gNB and the UE.\" \n\nTherefore, the answer is: The context does not provide information on when the Measurement Configuration Application Layer ID IE is present.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.63287,
+      "min_similarity": 0.6155,
+      "max_similarity": 0.6791,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.2760560190597211,
+      "error": ""
+    },
+    {
+      "question": "When is the Re-establishment Cell CGI IE present in the HO Report?",
+      "corpus": "3gpp",
+      "answer": "The Re-establishment Cell CGI IE is present in the HO Report when the Handover Report Type IE is set to the value \"HO to wrong cell\".",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.8961864830057099,
+      "mean_similarity": 0.56188,
+      "min_similarity": 0.5504,
+      "max_similarity": 0.5743,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.9262926528764389,
+      "error": ""
+    },
+    {
+      "question": "What is the maximum number of cells that can be reported in the Inter-system Resource Status Report?",
+      "corpus": "3gpp",
+      "answer": "The maximum number of cells that can be reported in the Inter-system Resource Status Report is given by the value of \"maxCellReport\" which is 9 for both E-UTRAN and NG-RAN. \n\nNote that \"maxnoofReportedCells\" is used in the context, but its value is not explicitly provided. However, based on the table provided at the beginning of the context, \"maxCellReport\" is defined as the maximum number of cells that can be reported with one message, and its value is 9. \n\nTherefore, the answer is 9.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.5,
+      "answer_relevancy": 0.8839452554366362,
+      "mean_similarity": 0.5953200000000001,
+      "min_similarity": 0.5865,
+      "max_similarity": 0.6099,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.2536091305010511,
+      "error": ""
+    },
+    {
+      "question": "When is the PDU Session Aggregate Maximum Bit Rate IE present in the PDU Session Resource Setup Request Transfer?",
+      "corpus": "3gpp",
+      "answer": "The PDU Session Aggregate Maximum Bit Rate IE is present in the PDU Session Resource Setup Request Transfer when at least one Non-GBR QoS Flow has been setup, as indicated by the presence of the PDU Session Resource Aggregate Maximum Bitrate IE in the PDU Session Resources To Be Setup List.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.9823756340858097,
+      "mean_similarity": 0.69619,
+      "min_similarity": 0.6716,
+      "max_similarity": 0.7241,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.6767715142608353,
+      "error": ""
+    },
+    {
+      "question": "What is the criticality of the Redundant UL NG-U UP TNL Information IE in the PDU Session Resource Modify Request Transfer?",
+      "corpus": "3gpp",
+      "answer": "The criticality of the Redundant UL NG-U UP TNL Information IE is \"ignore\" as per the provided table.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.8132588769402457,
+      "mean_similarity": 0.69848,
+      "min_similarity": 0.679,
+      "max_similarity": 0.7314,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.8075269423918925,
+      "error": ""
+    },
+    {
+      "question": "What is the structure of an NGAP InitiatingMessage?",
+      "corpus": "3gpp",
+      "answer": "The structure of an NGAP InitiatingMessage is defined as a SEQUENCE with the following components:\n\n1. procedureCode: NGAP-ELEMENTARY-PROCEDURE.&procedureCode {{NGAP-ELEMENTARY-PROCEDURES}}\n2. criticality: NGAP-ELEMENTARY-PROCEDURE.&criticality ({(NGAP-ELEMENTARY-PROCEDURES){@procedureCode}})\n3. value: NGAP-ELEMENTARY-PROCEDURE.&InitiatingMessage ({(NGAP-ELEMENTARY-PROCEDURES){@procedureCode}})",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9379122499314527,
+      "mean_similarity": 0.61946,
+      "min_similarity": 0.5999,
+      "max_similarity": 0.678,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.8306249061364583,
+      "error": ""
+    },
+    {
+      "question": "What are the mandatory IEs in the InitialContextSetupFailure message?",
+      "corpus": "3gpp",
+      "answer": "The mandatory IEs in the InitialContextSetupFailure message are:\n\n1. id-AMF-UE-NGAP-ID\n2. id-RAN-UE-NGAP-ID\n3. id-Cause \n\nThese IEs are mandatory as indicated by the presence 'M' in the context.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.8333333333333334,
+      "answer_relevancy": 0.9166000726974536,
+      "mean_similarity": 0.61365,
+      "min_similarity": 0.5936,
+      "max_similarity": 0.6607,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.8438960812038325,
+      "error": ""
+    },
+    {
+      "question": "What are the mandatory IEs in the UEContextReleaseRequest message?",
+      "corpus": "3gpp",
+      "answer": "The mandatory IEs in the UEContextReleaseRequest message are:\n\n1. id-AMF-UE-NGAP-ID\n2. id-RAN-UE-NGAP-ID\n3. id-Cause \n\nThese IEs are defined in the UEContextReleaseRequest-IEs with PRESENCE mandatory.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9098752214515535,
+      "mean_similarity": 0.64822,
+      "min_similarity": 0.624,
+      "max_similarity": 0.6844,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.8334658331167786,
+      "error": ""
+    },
+    {
+      "question": "What are the mandatory IEs in the HandoverNotify message?",
+      "corpus": "3gpp",
+      "answer": "The mandatory IEs in the HandoverNotify message are:\n\n1. id-MME-UE-S1AP-ID\n2. id-eNB-UE-S1AP-ID\n3. id-EUTRAN-CGI\n4. id-TAI \n\nThese IEs are mandatory as indicated by the \"PRESENCE mandatory\" and \"CRITICALITY reject\" in the HandoverNotifyIEs definition.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.5714285714285714,
+      "answer_relevancy": 0.9153029824288575,
+      "mean_similarity": 0.64632,
+      "min_similarity": 0.6378,
+      "max_similarity": 0.6557,
+      "source_coverage": 1,
+      "context_recall": 0.3333333333333333,
+      "answer_correctness": 0.29504855833667376,
+      "error": ""
+    },
+    {
+      "question": "What are the mandatory IEs in the HandoverCancel message?",
+      "corpus": "3gpp",
+      "answer": "The mandatory IEs in the HandoverCancel message are:\n\n1. id-sourceNG-RANnodeUEXnAPID (NG-RANnodeUEXnAPID type)\n2. id-Cause (Cause type)\n\nNote: These IEs are specified in the HandoverCancel-IEs XNAP-PROTOCOL-IEs definition.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.8659418658877097,
+      "mean_similarity": 0.62796,
+      "min_similarity": 0.6158,
+      "max_similarity": 0.6438,
+      "source_coverage": 1,
+      "context_recall": 0.3333333333333333,
+      "answer_correctness": 0.47685391991869586,
+      "error": ""
+    },
+    {
+      "question": "What are the mandatory IEs in the DownlinkRANStatusTransfer message?",
+      "corpus": "3gpp",
+      "answer": "The context does not provide information about the mandatory IEs in the DownlinkRANStatusTransfer message. The provided context mentions the DownlinkRANStatusTransfer message in a table (9.2.3.14), but it does not specify the mandatory IEs for this message.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.62062,
+      "min_similarity": 0.611,
+      "max_similarity": 0.6536,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.3255988131498403,
+      "error": ""
+    },
+    {
+      "question": "What is the range of values for QosMonitoringReportingFrequency?",
+      "corpus": "3gpp",
+      "answer": "The context does not provide a specific range of values for QosMonitoringReportingFrequency. It only mentions that the Reporting frequency can be \"periodic\" or \"event triggered\". Therefore, the answer is: The range of values for QosMonitoringReportingFrequency is not specified in the provided context.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 10,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.61851,
+      "min_similarity": 0.609,
+      "max_similarity": 0.6421,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.23980399117155168,
+      "error": ""
+    }
+  ]
+}
