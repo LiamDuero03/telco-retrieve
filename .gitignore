@@ -22,6 +22,7 @@ env/
 data/
 download/
 data_processed/
+experiment_outputs/
 
 # ── Pipeline runtime outputs ──────────────────────────────────────────────────
 chroma_db/
@@ -53,6 +54,8 @@ Thumbs.db
 htmlcov/
 # Download scripts (contain local paths, not part of published package)
 download/
+sweep_ingestions.py
+view_my_chunks.py
 
 # Local utility scripts
 convert_qna.py
