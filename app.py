@@ -507,7 +507,6 @@ if is_rag:
             st.warning("Please enter a query.")
 
 # ── INGEST ───────────────────────────────────────────────────────────────
-   # ── INGEST ───────────────────────────────────────────────────────────────
     with tab_ingest:
         col_i0_1, col_i0_2 = st.columns(2)
         with col_i0_1:

@@ -107,6 +107,7 @@ def ingest(
         # Modified to use the dynamic chunking strategy interface passed via **chunk_kwargs
         try:
             from open_telco_rag.core.chunking import chunk_document, ChunkingStrategy
+            from open_telco_rag.core.enrichment import enrich_chunks
             source_type_str = source.__class__.__name__.lower().replace("source", "")
 
             is_native_markdown = file_path.suffix.lower() in [".md", ".yaml", ".yml"]
@@ -126,9 +127,32 @@ def ingest(
                 else:
                     active_kwargs["strategy"] = ChunkingStrategy.TEXT
 
+            # Extract our new enrichment parameter if it was passed through **chunk_kwargs
+            enrichment_strategy = active_kwargs.pop("enrichment", "none")
+            enrichment_model    = active_kwargs.pop("enrichment_model", "google/qwen-2.5-coder-32b") # <-- Capture it here
+
             # Execute the orchestrated master strategy chunker
             chunks = chunk_document(text=text, **active_kwargs)
             chunks = [c for c in chunks if len(c.text.strip()) >= min_length]
+
+            if enrichment_strategy and enrichment_strategy != "none" and chunks:
+                meta = source.metadata(file_path)
+                
+                # Setup LLM Client dynamically if the LLM metadata strategy is requested
+                llm_client = None
+                if enrichment_strategy == "llm_metadata":
+                    from open_telco_rag.generators.openrouter import OpenRouterGenerator
+                    llm_client = OpenRouterGenerator(model=enrichment_model) 
+
+                chunks = enrich_chunks(
+                    chunks=chunks,
+                    strategy=enrichment_strategy,
+                    llm_client=llm_client,
+                    source_document=meta.get("source", file_path.name),
+                    release=meta.get("release", "unknown_release"),
+                    series=meta.get("series", "unknown_series"),
+                    model_name=enrichment_model 
+                )
 
         except Exception as e:
             print(f"  ERROR chunking: {e}")

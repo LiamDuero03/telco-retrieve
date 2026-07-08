@@ -34,6 +34,13 @@ def main(argv: list[str] | None = None) -> None:
                           help="Use Marker API for PDF conversion (better table/structure quality). "
                                "Requires DATALAB_API_KEY in .env. "
                                "Recommended for ETSI and TM Forum corpora.")
+    p_ingest.add_argument("--enrichment",
+                          choices=["none", "llm_metadata", "acronym_expansion", "metadata_tagging"],
+                          default="none",
+                          help="Select a metadata/content enrichment strategy to apply before embedding generation.")
+    p_ingest.add_argument("--enrichment-model",
+                          default="google/qwen-2.5-coder-32b",
+                          help="The LLM model string to use when running an LLM-based enrichment strategy.")
 
     # ── search ────────────────────────────────────────────────────────────────
     p_search = sub.add_parser("search", help="Search the vector database")
@@ -189,6 +196,8 @@ def _run_ingest(args) -> None:
     from open_telco_rag.core.pipeline import ingest
 
     use_marker = getattr(args, "use_marker", False)
+    enrichment = getattr(args, "enrichment", "none")
+    enrichment_model = getattr(args, "enrichment_model", "google/qwen-2.5-coder-32b")
     source     = _get_source(args.source_type, use_marker=use_marker)
     embedder   = _get_embedder(args.model)
     store      = _get_store(args.source_type, args.model, args.db_path,
@@ -200,6 +209,8 @@ def _run_ingest(args) -> None:
     print(f"  Model:      {args.model}")
     print(f"  Collection: {store.collection_name}")
     print(f"  PDF loader: {'Marker API (high-quality)' if use_marker else 'pypdf (default)'}")
+    print(f"  Enrichment: {enrichment.upper()}")  
+    print(f"  Enrichment: {enrichment.upper()} ({enrichment_model})")
 
     stats = ingest(
         source     = source,
@@ -209,6 +220,8 @@ def _run_ingest(args) -> None:
         chunk_size = args.chunk_size,
         overlap    = args.overlap,
         resume     = not args.no_resume,
+        enrichment = enrichment,
+        enrichment_model = enrichment_model,
     )
 
     print(f"\nFiles processed: {stats.files_processed}")
