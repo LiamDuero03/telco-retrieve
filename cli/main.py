@@ -41,6 +41,10 @@ def main(argv: list[str] | None = None) -> None:
     p_ingest.add_argument("--enrichment-model",
                           default="google/qwen-2.5-coder-32b",
                           help="The LLM model string to use when running an LLM-based enrichment strategy.")
+    p_ingest.add_argument("--strategy",
+                          choices=["markdown", "text", "fixed_tokens", "hierarchical", "llm_aided", "information_nuggets"],
+                          default="text",
+                          help="The underlying text segmentation or semantic chunking methodology to apply.")
 
     # ── search ────────────────────────────────────────────────────────────────
     p_search = sub.add_parser("search", help="Search the vector database")
@@ -198,6 +202,7 @@ def _run_ingest(args) -> None:
     use_marker = getattr(args, "use_marker", False)
     enrichment = getattr(args, "enrichment", "none")
     enrichment_model = getattr(args, "enrichment_model", "google/qwen-2.5-coder-32b")
+    strategy = getattr(args, "strategy", "text")
     source     = _get_source(args.source_type, use_marker=use_marker)
     embedder   = _get_embedder(args.model)
     store      = _get_store(args.source_type, args.model, args.db_path,
@@ -211,6 +216,7 @@ def _run_ingest(args) -> None:
     print(f"  PDF loader: {'Marker API (high-quality)' if use_marker else 'pypdf (default)'}")
     print(f"  Enrichment: {enrichment.upper()}")  
     print(f"  Enrichment: {enrichment.upper()} ({enrichment_model})")
+    print(f"  Strategy:   {strategy.upper()}")
 
     stats = ingest(
         source     = source,
@@ -222,6 +228,7 @@ def _run_ingest(args) -> None:
         resume     = not args.no_resume,
         enrichment = enrichment,
         enrichment_model = enrichment_model,
+        strategy   = strategy,
     )
 
     print(f"\nFiles processed: {stats.files_processed}")

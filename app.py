@@ -510,7 +510,6 @@ if is_rag:
     with tab_ingest:
         col_i0_1, col_i0_2 = st.columns(2)
         with col_i0_1:
-            # 1. Add a dynamic dropdown to select the source standard format type
             selected_source_type = st.selectbox(
                 "Document Source Type",
                 options=["3gpp", "oran", "camara", "tmforum", "gsma", "itu", "etsi"],
@@ -518,12 +517,10 @@ if is_rag:
                 help="Selects the parsing class and expected file formats."
             )
         with col_i0_2:
-            # Mirror the legacy model key display if handled dynamically elsewhere
             st.text(f"Active Model: {model_key}")
 
         col_i1, col_i2 = st.columns(2)
         with col_i1:
-            # Use the newly selected source type dropdown variable for the path
             data_dir = st.text_input("Data directory", value=f"data/{selected_source_type}")
             
             from open_telco_rag.core.chunking import ChunkingStrategy
@@ -540,7 +537,6 @@ if is_rag:
                 chunk_size = st.number_input("Chunk size (Characters)", 128, 4096, 1024, 128)
                 
         with col_i2:
-            # Dynamically switch the collection placeholder based on selection
             ingest_collection = st.text_input("Collection name",
                                               placeholder=f"{selected_source_type}_{model_key}")
             
@@ -550,6 +546,29 @@ if is_rag:
                 overlap = st.number_input("Overlap", 0, 512, 0, 32, disabled=True, help="Not utilized by this strategy")
             else:
                 overlap = st.number_input("Overlap (Characters)", 0, 512, 200, 32)
+
+        # ── NEW: ENRICHMENT UI FIELD CONFIGURATIONS ───────────────────────
+        st.markdown("##### Chunk Enrichment (Pre-Embedding Process)")
+        col_en1, col_en2 = st.columns(2)
+        with col_en1:
+            selected_enrichment = st.selectbox(
+                "Enrichment Strategy",
+                options=["none", "llm_metadata", "acronym_expansion", "metadata_tagging"],
+                index=0,
+                help="Appends additional domain context, vocabulary mappings, or file system markers before text is embedded."
+            )
+        with col_en2:
+            selected_enrichment_model = st.selectbox(
+                "Enrichment Model (If LLM strategy chosen)",
+                options=[
+                    "google/qwen-2.5-coder-32b", 
+                    "google/qwen-2.5-flash", 
+                    "anthropic/claude-sonnet-4.5", 
+                    "meta-llama/llama-3.3-70b-instruct"
+                ],
+                index=0
+            )
+        # ──────────────────────────────────────────────────────────────────
                 
         col_i3, col_i4 = st.columns(2)
         with col_i3:
@@ -559,7 +578,6 @@ if is_rag:
         ingest_btn = st.button("Run ingest ▶", type="primary")
 
         if ingest_btn:
-            # Update variable references down inside execution blocks to use selected_source_type
             col_name  = ingest_collection.strip() or f"{selected_source_type}_{model_key}"
             log_lines = [
                 f"Ingesting {selected_source_type.upper()} documents",
@@ -567,6 +585,7 @@ if is_rag:
                 f"  Model:      {model_key}",
                 f"  Collection: {col_name}",
                 f"  Strategy:   {selected_strategy}",
+                f"  Enrichment: {selected_enrichment.upper()}", # Log enrichment choice
                 f"  PDF loader: {'Marker API' if use_marker else 'pypdf (default)'}",
                 ""
             ]
@@ -577,12 +596,16 @@ if is_rag:
                 from open_telco_rag.core.pipeline import ingest
                 from open_telco_rag.stores.chroma import ChromaStore
                 
-                # Pass dropdown type selection safely to factory logic
                 src      = _get_source(selected_source_type, use_marker=use_marker)
                 embedder = _get_embedder(model_key)
                 store    = ChromaStore(path=db_path, collection_name=col_name)
                 
-                chunk_kwargs = {"strategy": selected_strategy}
+                # Load existing keyword arguments for chunker routing
+                chunk_kwargs = {
+                    "strategy": selected_strategy,
+                    "enrichment": selected_enrichment,             # <-- Pass Strategy Down
+                    "enrichment_model": selected_enrichment_model   # <-- Pass Model Down
+                }
                 
                 if selected_strategy == "fixed_tokens":
                     chunk_kwargs["chunk_tokens"] = chunk_size
@@ -594,8 +617,8 @@ if is_rag:
                     if "llm_client" in st.session_state:
                         chunk_kwargs["llm_client"] = st.session_state["llm_client"]
                     else:
-                        from open_telco_rag.core.pipeline import get_llm_client
-                        chunk_kwargs["llm_client"] = get_llm_client()
+                        from open_telco_rag.generators.openrouter import OpenRouterGenerator
+                        chunk_kwargs["llm_client"] = OpenRouterGenerator(model=selected_enrichment_model)
                 else:
                     chunk_kwargs["chunk_size"] = chunk_size
                     chunk_kwargs["overlap"] = overlap
