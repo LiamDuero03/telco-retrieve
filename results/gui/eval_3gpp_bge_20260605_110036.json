@@ -1,0 +1,105 @@
+{
+  "corpus": "3gpp",
+  "model": "bge",
+  "top_k": 5,
+  "timestamp": "20260605_110036",
+  "n_questions": 5,
+  "mean_faithfulness": 0.7428571428571429,
+  "mean_answer_relevancy": 0.9107372120276246,
+  "mean_similarity": 0.672788,
+  "mean_source_coverage": 1.0,
+  "mean_context_recall": 0.8666666666666667,
+  "mean_answer_correctness": 0.43247463791398594,
+  "question_results": [
+    {
+      "question": "During MGW bypass, which SIP messages and SDP-related procedures are handled by the GMSC-S?",
+      "corpus": "3gpp",
+      "answer": "During MGW bypass, the GMSC-S handles the call control signaling without any associated MGW by transparently relaying bearer-related information, including SDP offers and answers, between the ingress and egress signaling paths. The GMSC-S does not manipulate the bearer, and therefore, it passes the SDP media lines for codecs and RTP Telephony Event transparently. The GMSC-S also sets SIP headers (e.g., contact, via) in forwarded SIP messages consistent with earlier settings during the dialogue.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 5,
+      "faithfulness": 0.7142857142857143,
+      "answer_relevancy": 0.864028617858311,
+      "mean_similarity": 0.68708,
+      "min_similarity": 0.6774,
+      "max_similarity": 0.6931,
+      "source_coverage": 1,
+      "context_recall": 0.3333333333333333,
+      "answer_correctness": 0.330298637119849,
+      "error": ""
+    },
+    {
+      "question": "What is the first call-controlmessage sent by the UE in the Basic Mobile Originating Call sequence?",
+      "corpus": "3gpp",
+      "answer": "The first call-control message sent by the UE in the Basic Mobile Originating Call sequence is 'CM service req'.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 5,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9586008513977812,
+      "mean_similarity": 0.65086,
+      "min_similarity": 0.6362,
+      "max_similarity": 0.6728,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.37530316103854555,
+      "error": ""
+    },
+    {
+      "question": "What information is used as the destination address for subsequent downlink packets when IuUP support is enabled?",
+      "corpus": "3gpp",
+      "answer": "The destination address for subsequent downlink packets when IuUP support is enabled is the source IP address and UDP Port of the IuUP Init packet received from the radio access network.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 5,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9433879330821743,
+      "mean_similarity": 0.64138,
+      "min_similarity": 0.6101,
+      "max_similarity": 0.7104,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.7802438107079193,
+      "error": ""
+    },
+    {
+      "question": "What H.248 commands are exchanged between the MSC-S and MGW during the initial context management phase of an originating call over A interface user plane IP?",
+      "corpus": "3gpp",
+      "answer": "The context provided does not specify the H.248 commands exchanged between the MSC-S and MGW during the initial context management phase of an originating call over A interface user plane IP. Therefore, I cannot provide an answer to this question based on the given context.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 5,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.914904872611416,
+      "mean_similarity": 0.6930000000000001,
+      "min_similarity": 0.6821,
+      "max_similarity": 0.7089,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.30848990843364693,
+      "error": ""
+    },
+    {
+      "question": "What bearer-related action does the GMSC server request from MGWa before forwarding the INVITE to the MSC server?",
+      "corpus": "3gpp",
+      "answer": "The GMSC server requests MGW A to establish a bearer to the given destination MGW and to notify when the bearer is established using the Establish Bearer procedure.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 5,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.8727637851884404,
+      "mean_similarity": 0.69162,
+      "min_similarity": 0.6776,
+      "max_similarity": 0.6996,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.3680376722699688,
+      "error": ""
+    }
+  ]
+}

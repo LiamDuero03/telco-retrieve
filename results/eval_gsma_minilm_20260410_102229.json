@@ -1,0 +1,129 @@
+{
+  "corpus": "gsma",
+  "model": "minilm",
+  "top_k": 5,
+  "timestamp": "20260410_102229",
+  "n_questions": 5,
+  "mean_keyword_score": 0.6,
+  "mean_faithfulness": 0.7266017316017316,
+  "mean_answer_relevancy": 0.879045612156568,
+  "mean_similarity": 0.3506646227836609,
+  "mean_source_coverage": 2.2,
+  "canonical_hit_rate": 1.0,
+  "mean_coverage_ratio": 0.0,
+  "mean_context_recall": -1.0,
+  "mean_answer_correctness": -1.0,
+  "question_results": [
+    {
+      "question": "What is the GSMA Open Gateway and how does it relate to CAMARA?",
+      "corpus": "gsma",
+      "answer": "## GSMA Open Gateway and its Relationship to CAMARA\n\n### GSMA Open Gateway\n\nBased on the provided context, the **GSMA Open Gateway** is an initiative within the telecommunications industry that aims to:\n\n- Provide **unified and standardised service delivery and management** across mobile network operators (MNOs)\n- Enhance **interoperability** between operators and channel partners\n- Streamline **service management**\n- Foster **innovation through standardised APIs**\n- Ensure a **seamless and consistent user experience** across diverse networks\n\nThe **GSMA Open Gateway Platform** is specifically defined as a **deployment option of the GSMA Operator Platform**, serving stakeholders including MNOs, service aggregators, and technology partners.\n\n---\n\n### Relationship to CAMARA\n\nThe context references CAMARA in two specific technical contexts:\n\n1. **API Functional Scope (CAMARA Conformance)** \u2014 listed as a Minimum Viable Product requirement (Section 7.1), indicating that deployed APIs must conform to CAMARA specifications.\n2. **CAMARA ID management** \u2014 referenced in the context of telco routing, where CAMARA identifier schemes are used within HTTP requests to resolve the target End User Operator.\n\n---\n\n### Important Caveat\n\nThe provided context does **not fully define** the CAMARA project itself or detail the complete nature of the relationship between the two initiatives. A comprehensive answer would require additional context beyond what has been supplied.",
+      "sources": [
+        "OPG.10 v2.0 Open Gateway Technical Realisation Guidelines.docx",
+        "WA.101 v1.2.docx"
+      ],
+      "chunks_used": 5,
+      "keyword_score": 0.8,
+      "faithfulness": 0.7857142857142857,
+      "answer_relevancy": 0.9403078415946945,
+      "mean_similarity": 0.40203540325164794,
+      "min_similarity": 0.36093008518218994,
+      "max_similarity": 0.41433846950531006,
+      "source_coverage": 2,
+      "canonical_hit": 1,
+      "coverage_ratio": 0.0,
+      "context_recall": -1.0,
+      "answer_correctness": -1.0,
+      "error": ""
+    },
+    {
+      "question": "How does GSMA OPG.10 describe the alignment between Open Gateway and TM Forum?",
+      "corpus": "gsma",
+      "answer": "## Alignment Between Open Gateway and TM Forum per the Provided Context\n\nBased solely on the context provided, the document makes only a **limited and specific reference** to TM Forum alignment:\n\n> *\"An Open Gateway (OGW) platform exposes **Service APIs** (defined by CAMARA), **Operate APIs** (defined by TM Forum) and possibly other APIs so third-party services can consume them in a secure, consistent and monetisable way.\"*\n\nThis is the **only statement** in the provided context that describes the relationship between the Open Gateway Platform and TM Forum. It establishes that:\n\n- **TM Forum defines the Operate APIs** exposed by the OGW platform\n- **CAMARA defines the Service APIs**\n- Both API sets are exposed alongside potentially other APIs for third-party consumption\n\n---\n\n**Important caveat:** The question specifically asks about **GSMA OPG.10**, but the provided context does not identify itself as OPG.10, nor does it contain any detailed technical content specifically describing the broader alignment framework between Open Gateway and TM Forum beyond the single reference above.\n\nTo provide a complete and precise answer about OPG.10's full treatment of TM Forum alignment, the actual OPG.10 document content would be required, which is **not present in the provided context**.",
+      "sources": [
+        "OPG.10 v2.0 Open Gateway Technical Realisation Guidelines.docx"
+      ],
+      "chunks_used": 5,
+      "keyword_score": 0.8,
+      "faithfulness": 0.18181818181818182,
+      "answer_relevancy": 0.7440235557708984,
+      "mean_similarity": 0.19460725784301758,
+      "min_similarity": 0.18569493293762207,
+      "max_similarity": 0.20305931568145752,
+      "source_coverage": 1,
+      "canonical_hit": 1,
+      "coverage_ratio": 0.0,
+      "context_recall": -1.0,
+      "answer_correctness": -1.0,
+      "error": ""
+    },
+    {
+      "question": "What are the GSMA fraud and security specifications?",
+      "corpus": "gsma",
+      "answer": "## GSMA Fraud and Security Specifications\n\nBased on the context provided, **the specific list of GSMA fraud and security specifications is not detailed in the provided context**.\n\nThe context only references:\n\n- **GSMA AA.34** - Policy and Procedures (governing development and maintenance of Permanent Reference Documents)\n- **GSMA AA.35** - Procedures for Industry Specifications\n- A **5G Security document** (covering features such as:\n  - Unified Authentication Framework & Access-Agnostic Authentication\n  - Primary and Secondary Authentication\n  - Increased Home Control\n  - Enhanced Subscriber Privacy\n  - RAN Security / Security for Integrated Access and Backhaul in EN-DC)\n- **GSMA Security Requirements** (Version 1.0, 27 January 2025, Non-Confidential)\n- **MDSCert (Mobile Device Security Certification Scheme)** documentation\n\nThe context does **not** provide a comprehensive catalogue or index of GSMA fraud and security specifications. To obtain the full list, you would need to refer to the GSMA's official documentation portal or the relevant sections (e.g., Section 1.4 References) of the full documents, which are not included in the provided context.",
+      "sources": [
+        "FS.40 v3.0.docx",
+        "FS.56 v1.0.docx",
+        "FS.53 v1.0.docx"
+      ],
+      "chunks_used": 5,
+      "keyword_score": 0.4,
+      "faithfulness": 0.8571428571428571,
+      "answer_relevancy": 0.9143485465588239,
+      "mean_similarity": 0.41609877347946167,
+      "min_similarity": 0.4008147120475769,
+      "max_similarity": 0.4399561882019043,
+      "source_coverage": 3,
+      "canonical_hit": 1,
+      "coverage_ratio": 0.0,
+      "context_recall": -1.0,
+      "answer_correctness": -1.0,
+      "error": ""
+    },
+    {
+      "question": "What does the GSMA define for network API monetisation?",
+      "corpus": "gsma",
+      "answer": "Based on the provided context, **the GSMA does not explicitly define a framework specifically labeled as \"network API monetisation\"** in the excerpts given.\n\nHowever, the context does describe several functions within the **API Management** and **API Gateway** functional layers that are directly relevant to monetisation capabilities, including:\n\n- **API Subscription management** \u2013 controlling access to APIs on a subscription basis\n- **API Usage management** \u2013 tracking how APIs are consumed\n- **API SLA management** \u2013 managing service level agreements\n- **Plan control** \u2013 enforcing usage plans\n- **API Usage Data Generation** \u2013 generating data records of API usage\n- **API Metrics Generation** \u2013 producing metrics on API consumption\n- **Usage throttling / Rate limiting** \u2013 controlling consumption rates\n\nThese functions collectively provide the **technical building blocks** that would underpin API monetisation, but the context does not use the term \"monetisation\" explicitly, nor does it define a dedicated monetisation framework or model.\n\nThe context also references **GSMA PRD OPG.02** as a relevant document where some of the harmonised architecture aspects may need to be reflected, which could contain more specific monetisation guidance \u2014 but that document's content is **not included in the provided context**.\n\nTo get a precise answer on GSMA's definition of network API monetisation, the full content of **OPG.02** would need to be consulted.",
+      "sources": [
+        "RCC.14 v12.0.docx",
+        "OPG.10 v2.0 Open Gateway Technical Realisation Guidelines.docx",
+        "OPG.03 v4.0 SBI-NR APIs.docx"
+      ],
+      "chunks_used": 5,
+      "keyword_score": 0.4,
+      "faithfulness": 0.875,
+      "answer_relevancy": 0.9032320541783969,
+      "mean_similarity": 0.264048433303833,
+      "min_similarity": 0.248701810836792,
+      "max_similarity": 0.28316551446914673,
+      "source_coverage": 3,
+      "canonical_hit": 1,
+      "coverage_ratio": 0.0,
+      "context_recall": -1.0,
+      "answer_correctness": -1.0,
+      "error": ""
+    },
+    {
+      "question": "How does GSMA define roaming and interconnect security requirements?",
+      "corpus": "gsma",
+      "answer": "## GSMA Roaming and Interconnect Security Requirements\n\nBased on the context provided, the documents reference roaming and interconnect security topics, but **the detailed definitional content of these requirements is not included in the provided context** \u2014 only the table of contents entries are present.\n\nHowever, the following relevant structural elements can be identified from the context:\n\n### From the 5G Security Features Document, the following roaming security topics are listed:\n\n- **Section 2.8 - Roaming Security**, which covers:\n  - **2.8.1** Roaming interfaces between PLMNs\n  - **2.8.2** Secure Edge Protection Proxy (SEPP)\n\n### From the 5G Roaming Guidelines Document, the following relevant sections are listed:\n\n- **Section 6** - Roaming interfaces\n- **Section 8** - Agreements\n- **Section 9** - Security and Signaling\n\n### Key Technical Element Identifiable from Context:\n\nThe **SEPP (Secure Edge Protection Proxy)** is explicitly cited as a security mechanism for roaming, specifically for inter-PLMN interfaces.\n\n---\n\n**Important caveat:** The actual normative requirements, technical specifications, and detailed definitions within these sections are **not present in the provided context**. To obtain the precise GSMA definitions and requirements, the full text of the referenced documents would need to be consulted.",
+      "sources": [
+        "WA.51 v2.3.docx",
+        "FS.40 v3.0.docx"
+      ],
+      "chunks_used": 5,
+      "keyword_score": 0.6,
+      "faithfulness": 0.9333333333333333,
+      "answer_relevancy": 0.893316062680026,
+      "mean_similarity": 0.47653324604034425,
+      "min_similarity": 0.47104310989379883,
+      "max_similarity": 0.4855266809463501,
+      "source_coverage": 2,
+      "canonical_hit": 1,
+      "coverage_ratio": 0.0,
+      "context_recall": -1.0,
+      "answer_correctness": -1.0,
+      "error": ""
+    }
+  ]
+}

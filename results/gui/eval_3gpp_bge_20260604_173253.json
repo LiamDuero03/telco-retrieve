@@ -1,0 +1,105 @@
+{
+  "corpus": "3gpp",
+  "model": "bge",
+  "top_k": 5,
+  "timestamp": "20260604_173253",
+  "n_questions": 5,
+  "mean_faithfulness": 0.6,
+  "mean_answer_relevancy": 0.5383519310704402,
+  "mean_similarity": 0.672788,
+  "mean_source_coverage": 1.0,
+  "mean_context_recall": 0.34,
+  "mean_answer_correctness": 0.556398806460182,
+  "question_results": [
+    {
+      "question": "During MGW bypass, which SIP messages and SDP-related procedures are handled by the GMSC-S?",
+      "corpus": "3gpp",
+      "answer": "During MGW bypass, the GMSC-S handles the following SIP messages and SDP-related procedures: \n\n- The GMSC-S relays the SDP media lines for codecs and RTP Telephony Event in the SDP offers and answers transparently between the external SIP-I network and the 3GPP CS CN.\n- The GMSC-S sets SIP headers (e.g. contact, via) in forwarded SIP messages consistent with earlier settings during the dialogue, similar to SIP proxy procedures.\n- The GMSC-S performs call control signalling without any associated MGW by not inserting a MGW in the bearer path during the call establishment, and passes the bearer related information of SDP offers/answers transparently through the (G)MSC Server. \n\nNote that the GMSC-S is not constrained by the procedures described in the subclause when applying the MGW Bypass option.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 5,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9116020029670199,
+      "mean_similarity": 0.68708,
+      "min_similarity": 0.6774,
+      "max_similarity": 0.6931,
+      "source_coverage": 1,
+      "context_recall": 0.2,
+      "answer_correctness": 0.45719227455465894,
+      "error": ""
+    },
+    {
+      "question": "What is the first call-controlmessage sent by the UE in the Basic Mobile Originating Call sequence?",
+      "corpus": "3gpp",
+      "answer": "The first call-control message sent by the UE in the Basic Mobile Originating Call sequence is 'CM service req'.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 5,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.9685910856919291,
+      "mean_similarity": 0.65086,
+      "min_similarity": 0.6362,
+      "max_similarity": 0.6728,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.37530316103854555,
+      "error": ""
+    },
+    {
+      "question": "What information is used as the destination address for subsequent downlink packets when IuUP support is enabled?",
+      "corpus": "3gpp",
+      "answer": "The source IP address and UDP Port of the IuUP Init packet received from the radio access network.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 5,
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.8115665666932522,
+      "mean_similarity": 0.64138,
+      "min_similarity": 0.6101,
+      "max_similarity": 0.7104,
+      "source_coverage": 1,
+      "context_recall": 1.0,
+      "answer_correctness": 0.99999999995,
+      "error": ""
+    },
+    {
+      "question": "What H.248 commands are exchanged between the MSC-S and MGW during the initial context management phase of an originating call over A interface user plane IP?",
+      "corpus": "3gpp",
+      "answer": "The context provided does not explicitly mention the H.248 commands exchanged between the MSC-S and MGW during the initial context management phase of an originating call over A interface user plane IP. However, it does mention the exchange of other messages.\n\nIn the sequence diagram provided, the following messages are exchanged between MSC-S and MGW:\n\n- Add.req ($)\n- Add.resp (T2)\n- MOD.request (T2)\n- MOD.reply (T2)\n- MOD.request (T1)\n- MOD.reply (T1)\n\nThese messages seem to be related to the resource control protocol (Mc Interface) between the (G)MSC and MGW, but the context does not explicitly state that they are H.248 commands.\n\nTherefore, based on the provided context, the answer is: The context does not provide a clear answer to this question.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 5,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.6930000000000001,
+      "min_similarity": 0.6821,
+      "max_similarity": 0.7089,
+      "source_coverage": 1,
+      "context_recall": 0.5,
+      "answer_correctness": 0.623195839810694,
+      "error": ""
+    },
+    {
+      "question": "What bearer-related action does the GMSC server request from MGWa before forwarding the INVITE to the MSC server?",
+      "corpus": "3gpp",
+      "answer": "The context does not provide information about the GMSC server requesting a bearer-related action from MGW A before forwarding the INVITE to the MSC server. The provided context only mentions the GMSC server's interaction with MGW G and the selection of an MGW for the bearer connection before sending the initial INVITE message, but it does not specify any action requested from MGW A in this context.",
+      "sources": [
+        "raw.md"
+      ],
+      "chunks_used": 5,
+      "faithfulness": 0.0,
+      "answer_relevancy": 0.0,
+      "mean_similarity": 0.69162,
+      "min_similarity": 0.6776,
+      "max_similarity": 0.6996,
+      "source_coverage": 1,
+      "context_recall": 0.0,
+      "answer_correctness": 0.32630275694701183,
+      "error": ""
+    }
+  ]
+}
