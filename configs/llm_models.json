@@ -1,18 +1,42 @@
 {
-    "qwen-32b": {
-        "model_name": "google/qwen-2.5-coder-32b",
-        "description": "Qwen 2.5 Coder 32B — Excellent baseline reasoning on specifications"
-    },
-    "llama-70b": {
-        "model_name": "meta-llama/llama-3.3-70b-instruct",
-        "description": "Llama 3.3 70B Instruct — High performance open-weights balance"
-    },
-    "claude-sonnet-4.5": {
+    "Claude Sonnet 4.5": {
         "model_name": "anthropic/claude-sonnet-4.5",
-        "description": "Anthropic Claude 4.5 Sonnet — State-of-the-art technical analysis"
+        "description": "State-of-the-art technical analysis and reasoning"
     },
-    "qwen-flash": {
-        "model_name": "google/qwen-2.5-flash",
-        "description": "Qwen 2.5 Flash — Fast, high efficiency cost-effective baseline"
+    "Claude Sonnet 4": {
+        "model_name": "anthropic/claude-sonnet-4",
+        "description": "High-reliability long-context reasoning baseline"
+    },
+    "Claude Haiku 4.5": {
+        "model_name": "anthropic/claude-haiku-4-5",
+        "description": "Fast, high-efficiency lightweight analytical runner"
+    },
+    "GPT-4o": {
+        "model_name": "openai/gpt-4o",
+        "description": "Commercial frontier baseline generalist model"
+    },
+    "GPT-4o mini": {
+        "model_name": "openai/gpt-4o-mini",
+        "description": "Highly cost-effective fast processing engine"
+    },
+    "Llama 3.3 70B": {
+        "model_name": "meta-llama/llama-3.3-70b-instruct",
+        "description": "Premier open-weights technical reasoning model"
+    },
+    "Llama 3.1 8B": {
+        "model_name": "meta-llama/llama-3.1-8b-instruct",
+        "description": "Small-footprint local/edge emulation baseline"
+    },
+    "Qwen 2.5 7B": {
+        "model_name": "qwen/qwen-2.5-7b-instruct",
+        "description": "Highly performant compact code/spec assistant"
+    },
+    "Gemma 3n E4B": {
+        "model_name": "google/gemma-3n-e4b-it",
+        "description": "Next-gen experimental efficient instruction model"
+    },
+    "Mistral Large": {
+        "model_name": "mistralai/mistral-large",
+        "description": "Strong European multilingual frontier standard"
     }
 }

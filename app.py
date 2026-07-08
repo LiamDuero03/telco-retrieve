@@ -122,8 +122,19 @@ def _load_embedder_keys() -> dict:
     data = json.loads(path.read_text(encoding="utf-8"))
     return {k: f"{k} — {v.get('description', v['model_name'])}" for k, v in data.items()}
 
+@st.cache_data(show_spinner=False)
+def _load_llm_keys() -> dict:
+    import json
+    from pathlib import Path
+    path = Path("configs/llm_models.json")
+    
+    if not path.exists():
+        return {"Claude Sonnet 4.5": "anthropic/claude-sonnet-4.5"}
+        
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return {k: v["model_name"] for k, v in data.items()}
 
-# ── FIND AND REPLACE THIS FUNCTION IN APP.PY ───────────────────────────
+
 def _get_store(source_type: str, model_key: str, db_path: str,
                collection: str | None = None, distance_metric: str = "l2"):
     from open_telco_rag.stores.chroma import ChromaStore
@@ -221,18 +232,7 @@ if is_rag:
         format_func=lambda k: _embedder_options[k],
     )
 
-    LLM_OPTIONS = {
-        "Claude Sonnet 4.5": "anthropic/claude-sonnet-4.5",
-        "Claude Sonnet 4":   "anthropic/claude-sonnet-4",
-        "Claude Haiku 4.5":  "anthropic/claude-haiku-4-5",
-        "GPT-4o":            "openai/gpt-4o",
-        "GPT-4o mini":       "openai/gpt-4o-mini",
-        "Llama 3.3 70B":     "meta-llama/llama-3.3-70b-instruct",
-        "Llama 3.1 8B":      "meta-llama/llama-3.1-8b-instruct",
-        "Qwen 2.5 7B":       "qwen/qwen-2.5-7b-instruct",
-        "Gemma 3n E4B":      "google/gemma-3n-e4b-it",
-        "Mistral Large":     "mistralai/mistral-large",
-    }
+    LLM_OPTIONS = _load_llm_keys()
     llm_label = st.sidebar.selectbox("LLM", list(LLM_OPTIONS.keys()))
     llm_model  = LLM_OPTIONS[llm_label]
 
@@ -588,13 +588,8 @@ if is_rag:
         with col_en2:
             selected_enrichment_model = st.selectbox(
                 "Enrichment Model (If LLM strategy chosen)",
-                options=[
-                    "google/qwen-2.5-coder-32b", 
-                    "google/qwen-2.5-flash", 
-                    "anthropic/claude-sonnet-4.5", 
-                    "meta-llama/llama-3.3-70b-instruct"
-                ],
-                index=0
+                options=list(LLM_OPTIONS.keys()),
+                format_func=lambda k: k.split("/")[-1]
             )
         # ──────────────────────────────────────────────────────────────────
                 
