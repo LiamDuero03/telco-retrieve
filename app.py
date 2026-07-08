@@ -591,7 +591,6 @@ if is_rag:
                 options=list(LLM_OPTIONS.keys()),
                 format_func=lambda k: k.split("/")[-1]
             )
-        # ──────────────────────────────────────────────────────────────────
                 
         col_i3, col_i4 = st.columns(2)
         with col_i3:
@@ -669,6 +668,10 @@ if is_rag:
                                  unsafe_allow_html=True)
                 st.success(f"Done — {stats.chunks_stored:,} chunks stored, "
                            f"{stats.skipped_files} skipped, {stats.error_files} errors.")
+                
+                from open_telco_rag.core.efficiency import render_efficiency_dashboard
+                render_efficiency_dashboard(stats)
+                
             except Exception as e:
                 log_lines.append(f"ERROR: {e}")
                 log_box.markdown("<div class='log-box'>" + "\n".join(log_lines) + "</div>",

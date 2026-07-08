@@ -91,6 +91,10 @@ class IngestStats:
     skipped_files:   int = 0
     error_files:     int = 0
     errors:          list[dict] = field(default_factory=list)
+    total_chunking_time_sec: float = 0.0
+    total_raw_chars:          int = 0
+    total_fused_chars:        int = 0
+    
 
 
 @dataclass

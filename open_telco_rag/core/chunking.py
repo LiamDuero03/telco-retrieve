@@ -117,8 +117,6 @@ def chunk_text_baseline(
                 source_type=source_type
             ))
             idx += 1
-            
-            # FIXED: Slice backwards strictly by character count, not word count
             current = current[-overlap:] if len(current) > overlap else current
             
         current = f"{current}\n\n{para}" if current else para

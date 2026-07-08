@@ -107,6 +107,10 @@ def ingest(
         try:
             from open_telco_rag.core.chunking import chunk_document, ChunkingStrategy
             from open_telco_rag.core.enrichment import enrich_chunks
+
+            start_chunk_time = time.perf_counter()
+            raw_char_count   = len(text) if text else 0
+
             source_type_str = source.__class__.__name__.lower().replace("source", "")
 
             is_native_markdown = file_path.suffix.lower() in [".md", ".yaml", ".yml"]
@@ -152,6 +156,16 @@ def ingest(
                     **meta 
                 )
 
+            chunk_duration_sec = time.perf_counter() - start_chunk_time
+            fused_char_count   = sum(len(c.text) for c in chunks) if chunks else 0
+
+            stats.total_chunking_time_sec += chunk_duration_sec
+            stats.total_raw_chars          += raw_char_count
+            stats.total_fused_chars        += fused_char_count
+
+            chunking_time_ms = chunk_duration_sec * 1000
+            expansion_ratio  = fused_char_count / max(1, raw_char_count)
+
         except Exception as e:
             print(f"  ERROR chunking: {e}")
             stats.error_files += 1
@@ -195,9 +209,13 @@ def ingest(
             print(f"  Chunks: {len(chunks)} | "
                   f"avg: {sum(chunk_lens)//len(chunk_lens)} | "
                   f"min: {min(chunk_lens)} | max: {max(chunk_lens)}")
-            _log_row(log_file, file_path, file_size_kb, "success",
-                     chunks=len(chunks), model=embedder.model_key,
-                     avg_len=sum(chunk_lens)//len(chunk_lens))
+            _log_row(
+                log_file, file_path, file_size_kb, "success",
+                chunks=len(chunks), model=embedder.model_key,
+                avg_len=sum(chunk_lens)//len(chunk_lens),
+                chunking_time_ms=chunking_time_ms,  
+                expansion_ratio=expansion_ratio,
+            )
             stats.files_processed += 1
 
             if resume:
@@ -277,7 +295,8 @@ def generate(
 
 _CSV_HEADERS = [
     "timestamp", "file_name", "file_size_kb", "status",
-    "chunks", "avg_len", "embedding_model", "error_message"
+    "chunks", "avg_len", "embedding_model", "error_message", 
+    "chunking_time_ms", "expansion_ratio"
 ]
 
 def _init_log(path: Path) -> None:
@@ -286,7 +305,8 @@ def _init_log(path: Path) -> None:
 
 def _log_row(
     path: Path, file_path: Path, size_kb: float, status: str,
-    chunks: int = 0, avg_len: int = 0, model: str = "", error: str = ""
+    chunks: int = 0, avg_len: int = 0, model: str = "", error: str = "",
+    chunking_time_ms: float = 0.0, expansion_ratio: float = 1.0
 ) -> None:
     with open(path, "a", newline="", encoding="utf-8") as f:
         csv.DictWriter(f, fieldnames=_CSV_HEADERS).writerow({
@@ -298,4 +318,7 @@ def _log_row(
             "avg_len":         avg_len,
             "embedding_model": model,
             "error_message":   error,
+            "chunking_time_ms": round(chunking_time_ms, 2), 
+            "expansion_ratio":  round(expansion_ratio, 3),
         })
+        
