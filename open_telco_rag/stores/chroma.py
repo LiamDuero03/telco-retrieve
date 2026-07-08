@@ -14,6 +14,7 @@ class ChromaStore:
         self,
         path:            str | Path = "chroma_db",
         collection_name: str        = "documents",
+        metadata:        dict | None = None,  
     ):
         try:
             import chromadb
@@ -23,7 +24,12 @@ class ChromaStore:
         self.path            = str(path)
         self.collection_name = collection_name
         self._client         = chromadb.PersistentClient(path=self.path)
-        self._collection     = self._client.get_or_create_collection(collection_name)
+        
+        
+        self._collection     = self._client.get_or_create_collection(
+            name=collection_name,
+            metadata=metadata
+        )
 
     def add(
         self,

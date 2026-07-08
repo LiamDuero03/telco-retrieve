@@ -123,11 +123,18 @@ def _load_embedder_keys() -> dict:
     return {k: f"{k} — {v.get('description', v['model_name'])}" for k, v in data.items()}
 
 
+# ── FIND AND REPLACE THIS FUNCTION IN APP.PY ───────────────────────────
 def _get_store(source_type: str, model_key: str, db_path: str,
-               collection: str | None = None):
+               collection: str | None = None, distance_metric: str = "l2"):
     from open_telco_rag.stores.chroma import ChromaStore
     col = collection.strip() if collection and collection.strip() else f"{source_type}_{model_key}"
-    return ChromaStore(path=db_path, collection_name=col)
+    
+    
+    return ChromaStore(
+        path=db_path, 
+        collection_name=col, 
+        metadata={"hnsw:space": distance_metric.lower()}
+    )
 
 
 def _similarity(distance: float) -> float:
@@ -406,11 +413,18 @@ if is_rag:
         question = st.text_input("Question",
             placeholder="What are the xApp conflict mitigation strategies in O-RAN?",
             label_visibility="collapsed")
-        col_ask1, col_ask2 = st.columns(2)
+        col_ask1, col_ask2, col_ask3 = st.columns(3) 
         with col_ask1:
             top_k_ask = st.number_input("Chunks to retrieve", min_value=1, max_value=20, value=8)
         with col_ask2:
             threshold_ask = st.slider("Similarity threshold", 0.0, 1.0, 0.0, 0.05)
+        with col_ask3:
+            selected_search_method = st.selectbox(
+                "Search Method",
+                options=["dense", "bm25", "hybrid"],
+                index=0,
+                key="ask_search_method"
+            )
         ask_btn = st.button("Ask ✦", type="primary")
 
         if ask_btn and question.strip():
@@ -420,7 +434,8 @@ if is_rag:
                     embedder = _get_embedder(model_key)
                     store    = _get_store(source_type, model_key, db_path, collection_override)
                     results  = search(question, store=store, embedder=embedder,
-                                      top_k=top_k_ask, threshold=1.0 - threshold_ask)
+                                      top_k=top_k_ask, threshold=1.0 - threshold_ask,
+                                      search_method=selected_search_method)
                     answer   = generate(question, results, source_type=source_type,
                                         generator=_build_generator(llm_model))
 
@@ -470,12 +485,18 @@ if is_rag:
         query = st.text_input("Query",
             placeholder="near-RT RIC E2 interface latency requirements",
             label_visibility="collapsed", key="search_query")
-        col_s1, col_s2 = st.columns(2)
+        col_s1, col_s2, col_s3 = st.columns(3)
         with col_s1:
             top_k_search = st.number_input("Top K", 1, 20, 5, key="sk_topk")
         with col_s2:
-            threshold_search = st.slider("Similarity threshold", 0.0, 1.0, 0.0, 0.05,
-                                         key="sk_threshold")
+            threshold_search = st.slider("Similarity threshold", 0.0, 1.0, 0.0, 0.05, key="sk_threshold")
+        with col_s3:
+            selected_search_method_s = st.selectbox(
+                "Search Method",
+                options=["dense", "bm25", "hybrid"],
+                index=0,
+                key="search_search_method"
+            )
         search_btn = st.button("Search", type="primary", key="search_btn")
 
         if search_btn and query.strip():
@@ -485,7 +506,8 @@ if is_rag:
                     embedder = _get_embedder(model_key)
                     store    = _get_store(source_type, model_key, db_path, collection_override)
                     results  = search(query, store=store, embedder=embedder,
-                                      top_k=top_k_search, threshold=1.0 - threshold_search)
+                                      top_k=top_k_search, threshold=1.0 - threshold_search,
+                                      search_method=selected_search_method_s)
                     if not results:
                         st.info("No results found.")
                     else:
@@ -529,6 +551,12 @@ if is_rag:
                 "Chunking Strategy", 
                 options=strategy_choices, 
                 index=strategy_choices.index("text_baseline")
+            )
+            selected_distance = st.selectbox(
+                "Distance Metric (Index Vector Space)",
+                options=["l2", "cosine", "ip"],
+                index=0,
+                help="l2 = Euclidean geometric distance, cosine = angular direction weight matching (highly recommended for prepended text decorations)."
             )
             
             if selected_strategy == "fixed_tokens":
@@ -598,7 +626,13 @@ if is_rag:
                 
                 src      = _get_source(selected_source_type, use_marker=use_marker)
                 embedder = _get_embedder(model_key)
-                store    = ChromaStore(path=db_path, collection_name=col_name)
+                store    = _get_store(
+                    source_type=selected_source_type, 
+                    model_key=model_key, 
+                    db_path=db_path, 
+                    collection=col_name,
+                    distance_metric=selected_distance
+                )
                 
                 # Load existing keyword arguments for chunker routing
                 chunk_kwargs = {

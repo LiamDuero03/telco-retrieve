@@ -1,0 +1,18 @@
+{
+    "qwen-32b": {
+        "model_name": "google/qwen-2.5-coder-32b",
+        "description": "Qwen 2.5 Coder 32B — Excellent baseline reasoning on specifications"
+    },
+    "llama-70b": {
+        "model_name": "meta-llama/llama-3.3-70b-instruct",
+        "description": "Llama 3.3 70B Instruct — High performance open-weights balance"
+    },
+    "claude-sonnet-4.5": {
+        "model_name": "anthropic/claude-sonnet-4.5",
+        "description": "Anthropic Claude 4.5 Sonnet — State-of-the-art technical analysis"
+    },
+    "qwen-flash": {
+        "model_name": "google/qwen-2.5-flash",
+        "description": "Qwen 2.5 Flash — Fast, high efficiency cost-effective baseline"
+    }
+}

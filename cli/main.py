@@ -181,10 +181,19 @@ def _get_embedder(model_key: str):
     return SentenceTransformerEmbedder(model_key=model_key)
 
 
-def _get_store(source_type: str, model_key: str, db_path: str, collection: str = None):
+def _get_store(source_type: str, model_key: str, db_path: str, collection: str = None, distance_metric: str = "l2"):
     from open_telco_rag.stores.chroma import ChromaStore
     col = collection or f"{source_type}_{model_key}"
-    return ChromaStore(path=db_path, collection_name=col)
+    
+    # Map CLI metric option strings directly to Chroma's native naming layout
+    metric_map = {"l2": "l2", "cosine": "cosine", "ip": "ip"}
+    chosen_space = metric_map.get(distance_metric.lower(), "l2")
+    
+    return ChromaStore(
+        path=db_path, 
+        collection_name=col, 
+        metadata={"hnsw:space": chosen_space}
+    )
 
 
 def _get_reranker(model_key: str):
@@ -201,12 +210,15 @@ def _run_ingest(args) -> None:
     use_marker = getattr(args, "use_marker", False)
     enrichment = getattr(args, "enrichment", "none")
     enrichment_model = getattr(args, "enrichment_model", "google/qwen-2.5-coder-32b")
+    distance_metric  = getattr(args, "distance_metric", "l2")
     strategy = getattr(args, "strategy", "text_baseline")
     source     = _get_source(args.source_type, use_marker=use_marker)
     embedder   = _get_embedder(args.model)
     store      = _get_store(args.source_type, args.model, args.db_path,
-                            collection=getattr(args, "collection", None))
+                            collection=getattr(args, "collection", None),
+                            distance_metric=distance_metric)
     data_dir   = args.data or f"data/{args.source_type}"
+   
 
     print(f"\nIngesting {args.source_type.upper()} documents")
     print(f"  Data dir:   {data_dir}")
@@ -216,6 +228,7 @@ def _run_ingest(args) -> None:
     print(f"  Enrichment: {enrichment.upper()}")  
     print(f"  Enrichment: {enrichment.upper()} ({enrichment_model})")
     print(f"  Strategy:   {strategy.upper()}")
+    print(f"  Distance:   {distance_metric.upper()}")
 
     stats = ingest(
         source     = source,
