@@ -220,112 +220,33 @@ def ingest(
 
     return stats
 # ── Search ────────────────────────────────────────────────────────────────────
-def reciprocal_rank_fusion(dense_results: list[SearchResult], bm25_results: list[SearchResult], k: int = 60) -> list[SearchResult]:
-    """Combines dense vector and sparse keyword scores using Reciprocal Rank Fusion."""
-    fused_scores: dict[str, float] = {}
-    
-    # Track the ranks from both dense and BM25 retrievals
-    for rank, item in enumerate(dense_results):
-        fused_scores[item.id] = fused_scores.get(item.id, 0.0) + 1.0 / (k + rank + 1)
-        
-    for rank, item in enumerate(bm25_results):
-        fused_scores[item.id] = fused_scores.get(item.id, 0.0) + 1.0 / (k + rank + 1)
-        
-    # Map back to unique items and sort by highest fusion weight
-    all_items = {item.id: item for item in dense_results + bm25_results}
-    sorted_ids = sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)
-    
-    return [all_items[idx] for idx, _ in sorted_ids]
-
 
 def search(
     query:        str,
-    store:        Any,  # Your VectorStore instance
+    store:        VectorStore,
     embedder:     Embedder,
     top_k:        int   = 8,
     threshold:    float = 1.0,
-    reranker      = None,
+    reranker            = None,
     rerank_top_k: int   = 5,
-    search_method: str  = "dense",  # <-- NEW: Benchmark selector flag
+    search_method: str  = "dense",
 ) -> list[SearchResult]:
-    """Embed a query and retrieve nearest neighbours using Dense, BM25, or Hybrid approaches."""
-    search_method = search_method.lower()
-    candidate_k = top_k * 3 if reranker is not None else top_k
-
-    dense_results: list[SearchResult] = []
-    bm25_results: list[SearchResult] = []
-
-    # 1. ── EXECUTE DENSE retrieval ───────────────────────────────────────────
-    if search_method in ["dense", "hybrid"]:
-        vector  = embedder.embed([query])[0]
-        # Your store.search method maps native dict objects into standard SearchResult formats
-        dense_results = store.search(vector, n_results=candidate_k)
-        dense_results = [r for r in dense_results if r.distance < threshold]
-
-    # 2. ── EXECUTE BM25 retrieval ────────────────────────────────────────────
-    if search_method in ["bm25", "hybrid"]:
-        # Query all records directly from Chroma's runtime collection cache memory space
-        all_records = store._collection.get(include=["documents", "metadatas"])
-        documents = all_records.get("documents", [])
-        ids = all_records.get("ids", [])
-        metadatas = all_records.get("metadatas", [])
-
-        if documents:
-            import math
-            # Calculate collection frequency statistics for BM25 matching
-            query_terms = [w.lower() for w in query.split() if len(w) > 1]
-            doc_tokens = [[w.lower() for w in doc.split()] for doc in documents]
-            avg_doc_len = sum(len(d) for d in doc_tokens) / len(doc_tokens) if doc_tokens else 1
-            
-            # Traditional BM25 Hyperparameters
-            k1, b = 1.5, 0.75
-            scores = []
-
-            for idx, tokens in enumerate(doc_tokens):
-                score = 0.0
-                doc_len = len(tokens)
-                for term in query_terms:
-                    tf = tokens.count(term)
-                    if tf > 0:
-                        df = sum(1 for d in doc_tokens if term in d)
-                        # Inverse Document Frequency (IDF)
-                        idf = math.log((len(doc_tokens) - df + 0.5) / (df + 0.5) + 1.0)
-                        # Term frequency saturation scaling formula
-                        score += idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * (doc_len / avg_doc_len)))
-                if score > 0:
-                    scores.append((idx, score))
-
-            # Sort candidate collections by descending structural BM25 weight
-            sorted_scores = sorted(scores, key=lambda x: x[1], reverse=True)[:candidate_k]
-            
-            # Map items back into unified SearchResult wrappers
-            for idx, score in sorted_scores:
-                # Convert the high score into a pseudo-distance variant so threshold loops don't drop it
-                pseudo_distance = 1.0 / (1.0 + score)
-                bm25_results.append(SearchResult(
-                    id=ids[idx],
-                    text=documents[idx],
-                    metadata=metadatas[idx] if metadatas else {},
-                    distance=pseudo_distance
-                ))
-
-    # 3. ── FUSION ROUTER ──────────────────────────────────────────────────────
-    if search_method == "dense":
-        final_candidates = dense_results
-    elif search_method == "bm25":
-        final_candidates = bm25_results
-    elif search_method == "hybrid":
-        final_candidates = reciprocal_rank_fusion(dense_results, bm25_results)
-    else:
-        final_candidates = dense_results
-
-    # 4. ── EXECUTE CROSS-ENCODER RERANKING pass ────────────────────────────────
-    if reranker is not None and final_candidates:
-        final_candidates = reranker.rerank(query, final_candidates, top_k=rerank_top_k)
-    else:
-        final_candidates = final_candidates[:top_k]
-
-    return final_candidates
+    """Embed a query and retrieve nearest neighbours.
+    
+    Delegates retrieval strategies out to the modular core search layer.
+    """
+    from open_telco_rag.core.retrieval import execute_retrieval
+    
+    return execute_retrieval(
+        query=query,
+        store=store,
+        embedder=embedder,
+        top_k=top_k,
+        threshold=threshold,
+        reranker=reranker,
+        rerank_top_k=rerank_top_k,
+        search_method=search_method
+    )
 
 # ── Generate ──────────────────────────────────────────────────────────────────
 
