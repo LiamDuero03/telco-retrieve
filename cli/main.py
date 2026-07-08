@@ -42,8 +42,7 @@ def main(argv: list[str] | None = None) -> None:
                           default="google/qwen-2.5-coder-32b",
                           help="The LLM model string to use when running an LLM-based enrichment strategy.")
     p_ingest.add_argument("--strategy",
-                          choices=["markdown", "text", "fixed_tokens", "hierarchical", "llm_aided", "information_nuggets"],
-                          default="text",
+choices=["hierarchical_markdown", "sliding_window_tokens", "parent_child", "lumber_chunker", "information_nuggets", "text_baseline"],                          default="text",
                           help="The underlying text segmentation or semantic chunking methodology to apply.")
 
     # ── search ────────────────────────────────────────────────────────────────
@@ -202,7 +201,7 @@ def _run_ingest(args) -> None:
     use_marker = getattr(args, "use_marker", False)
     enrichment = getattr(args, "enrichment", "none")
     enrichment_model = getattr(args, "enrichment_model", "google/qwen-2.5-coder-32b")
-    strategy = getattr(args, "strategy", "text")
+    strategy = getattr(args, "strategy", "text_baseline")
     source     = _get_source(args.source_type, use_marker=use_marker)
     embedder   = _get_embedder(args.model)
     store      = _get_store(args.source_type, args.model, args.db_path,

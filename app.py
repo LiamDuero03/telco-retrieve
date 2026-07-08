@@ -528,7 +528,7 @@ if is_rag:
             selected_strategy = st.selectbox(
                 "Chunking Strategy", 
                 options=strategy_choices, 
-                index=strategy_choices.index("text")
+                index=strategy_choices.index("text_baseline")
             )
             
             if selected_strategy == "fixed_tokens":

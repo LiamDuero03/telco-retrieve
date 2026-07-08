@@ -1,4 +1,4 @@
-"""Text chunking strategies."""
+"""Text chunking strategies aligned with thesis benchmark requirements."""
 
 from __future__ import annotations
 
@@ -13,12 +13,12 @@ from open_telco_rag.types import Chunk
 
 class ChunkingStrategy(str, Enum):
     """Supported strategies for document chunking."""
-    MARKDOWN = "markdown"
-    TEXT = "text"
-    FIXED_TOKENS = "fixed_tokens"
-    HIERARCHICAL = "hierarchical"
-    LLM_AIDED = "llm_aided"
-    INFORMATION_NUGGETS = "information_nuggets"
+    HIERARCHICAL_MARKDOWN = "hierarchical_markdown"  # Markdown heading boundaries (###)
+    SLIDING_WINDOW_TOKENS = "sliding_window_tokens"  # Fixed token size with sliding window % overlap
+    PARENT_CHILD = "parent_child"                    # Two-tier context tracking structures
+    LUMBER_CHUNKER = "lumber_chunker"                # LLM-aided boundary mapping
+    INFORMATION_NUGGETS = "information_nuggets"      # Atomic proposition extraction
+    TEXT_BASELINE = "text_baseline"                  # Plain paragraph baseline fall-back
 
 
 def _accumulate_chunks(
@@ -55,16 +55,17 @@ def _accumulate_chunks(
     return chunks
 
 
-def chunk_markdown(
+def chunk_hierarchical_markdown(
     text: str,
     chunk_size: int = 4000,
     source_type: str = "",
 ) -> list[Chunk]:
-    """Split markdown on heading boundaries then by paragraph."""
+    """Strategy 1: Identifies document layouts based on structural Markdown heading elements (# to #####)."""
     if not text or not text.strip():
         return []
 
-    sections = re.split(r"(?=^#{1,3}\s)", text, flags=re.MULTILINE)
+    # Supports deeper markdown nesting levels down to h5 (#####)
+    sections = re.split(r"(?=^#{1,5}\s)", text, flags=re.MULTILINE)
     all_chunks: list[Chunk] = []
 
     for section in sections:
@@ -72,7 +73,7 @@ def chunk_markdown(
         if not section:
             continue
 
-        heading_match = re.match(r"^#{1,3}\s+(.+)$", section, re.MULTILINE)
+        heading_match = re.match(r"^#{1,5}\s+(.+)$", section, re.MULTILINE)
         heading = heading_match.group(1).strip() if heading_match else None
 
         if len(section) <= chunk_size:
@@ -92,13 +93,13 @@ def chunk_markdown(
     return all_chunks
 
 
-def chunk_text(
+def chunk_text_baseline(
     text: str,
     chunk_size: int = 4000,
     overlap: int = 200,
     source_type: str = "",
 ) -> list[Chunk]:
-    """Generic paragraph-based chunker with overlap for PDFs and plain text."""
+    """Generic baseline paragraph-based chunker with window character overlap."""
     if not text or not text.strip():
         return []
 
@@ -116,9 +117,10 @@ def chunk_text(
                 source_type=source_type
             ))
             idx += 1
-            words = current.split()
-            overlap_text = " ".join(words[-overlap:]) if len(words) > overlap else current
-            current = overlap_text
+            
+            # FIXED: Slice backwards strictly by character count, not word count
+            current = current[-overlap:] if len(current) > overlap else current
+            
         current = f"{current}\n\n{para}" if current else para
 
     if current.strip():
@@ -131,15 +133,14 @@ def chunk_text(
 
     return chunks
 
-
-def chunk_fixed_tokens(
+def chunk_sliding_window_tokens(
     text: str,
     chunk_tokens: int = 512,
     overlap_tokens: int = 50,
     encoding_name: str = "cl100k_base",
     source_type: str = "",
 ) -> list[Chunk]:
-    """Strictly segments text by character-agnostic model token lengths."""
+    """Strategy 2: Fixed size segments tokenized precisely with explicit model sliding windows."""
     if not text or not text.strip():
         return []
 
@@ -171,14 +172,16 @@ def chunk_fixed_tokens(
     return chunks
 
 
-def chunk_hierarchical(
+def chunk_parent_child(
     text: str,
     parent_size: int = 2048,
     child_size: int = 512,
     source_type: str = "",
 ) -> list[Chunk]:
-    """Generates localized parent-child structures to preserve global technical context."""
-    parent_chunks = chunk_markdown(text, chunk_size=parent_size, source_type=source_type)
+    """Strategy 3: Two-Tier Retrieval. Identifies large parent segments 
+    and breaks them down into small, highly targeted child vectors.
+    """
+    parent_chunks = chunk_hierarchical_markdown(text, chunk_size=parent_size, source_type=source_type)
     hierarchical_chunks: list[Chunk] = []
     
     global_child_idx = 0
@@ -197,7 +200,8 @@ def chunk_hierarchical(
                 )
                 c_chunk.metadata = {
                     "parent_id": parent_chunk_id,
-                    "parent_context": p_chunk.text[:200] + "..."
+                    "parent_context": p_chunk.text[:200] + "...",
+                    "full_parent_text": p_chunk.text  # Cached for two-tier parent retrieval routines
                 }
                 hierarchical_chunks.append(c_chunk)
                 global_child_idx += 1
@@ -213,7 +217,8 @@ def chunk_hierarchical(
             )
             c_chunk.metadata = {
                 "parent_id": parent_chunk_id,
-                "parent_context": p_chunk.text[:200] + "..."
+                "parent_context": p_chunk.text[:200] + "...",
+                "full_parent_text": p_chunk.text
             }
             hierarchical_chunks.append(c_chunk)
             global_child_idx += 1
@@ -221,18 +226,20 @@ def chunk_hierarchical(
     return hierarchical_chunks
 
 
-def chunk_llm_aided(
+def chunk_lumber_chunker(
     text: str,
     llm_client: Any,
     model_name: str = "google/qwen-2.5-coder-32b",
     source_type: str = "",
 ) -> list[Chunk]:
-    """Leverages LLM structural comprehension to break text on precise semantic shifts."""
+    """Strategy 4: Lumber Chunker approach. Leverages LLM structural comprehension 
+    to break text precisely on logical context boundaries.
+    """
     if not text or not text.strip():
         return []
 
     system_prompt = (
-        "You are an advanced text analysis utility. Your task is to look over a document text "
+        "You are an advanced text analysis utility ('Lumber Chunker'). Your task is to look over a document text "
         "and determine logical breaking points where a semantic shift or clear topical change occurs. "
         "Return the content exactly as formatted arrays inside a clean valid JSON list structure. "
         "Example output: [\"semantic chunk 1 text\", \"semantic chunk 2 text\"]"
@@ -260,8 +267,8 @@ def chunk_llm_aided(
             for i, segment in enumerate(extracted_strings) if segment.strip()
         ]
     except Exception as e:
-        print(f"[Warning] LLM Chunker failed: {e}. Falling back to chunk_text baseline.")
-        return chunk_text(text, chunk_size=1500, source_type=source_type)
+        print(f"[Warning] Lumber Chunker failed: {e}. Falling back to text baseline.")
+        return chunk_text_baseline(text, chunk_size=1500, source_type=source_type)
 
 
 def chunk_information_nuggets(
@@ -270,7 +277,9 @@ def chunk_information_nuggets(
     model_name: str = "google/qwen-2.5-coder-32b",
     source_type: str = "",
 ) -> list[Chunk]:
-    """Deserializes text into atomic, self-contained semantic propositions ("nuggets")."""
+    """Strategy 5: Deserializes text into self-contained propositions ('nuggets') 
+    so that only core dense factual units are isolated and embedded.
+    """
     if not text or not text.strip():
         return []
 
@@ -323,8 +332,8 @@ def chunk_information_nuggets(
 
         return chunks
     except Exception as e:
-        print(f"[Warning] Nugget Chunker failed: {e}. Falling back to chunk_text baseline.")
-        return chunk_text(text, chunk_size=1000, source_type=source_type)
+        print(f"[Warning] Nugget Chunker failed: {e}. Falling back to text baseline.")
+        return chunk_text_baseline(text, chunk_size=1000, source_type=source_type)
 
 
 # --- Infrastructure Interface Entry Point ---
@@ -334,25 +343,16 @@ def chunk_document(
     strategy: ChunkingStrategy | str,
     **kwargs: Any,
 ) -> list[Chunk]:
-    """Master orchestration function to route text data to selected chunking strategy.
-
-    Args:
-        text: Target document raw string.
-        strategy: Chosen pipeline method (Enum or matching raw string name).
-        **kwargs: Flexible keyword configuration configurations tailored to individual strategies 
-                  (e.g., llm_client, chunk_size, parent_size).
-    """
-    # Map strategies cleanly to their underlying programmatic implementation
+    """Master orchestration function to route text data to selected chunking strategy."""
     _STRATEGY_MAP = {
-        ChunkingStrategy.MARKDOWN: chunk_markdown,
-        ChunkingStrategy.TEXT: chunk_text,
-        ChunkingStrategy.FIXED_TOKENS: chunk_fixed_tokens,
-        ChunkingStrategy.HIERARCHICAL: chunk_hierarchical,
-        ChunkingStrategy.LLM_AIDED: chunk_llm_aided,
+        ChunkingStrategy.HIERARCHICAL_MARKDOWN: chunk_hierarchical_markdown,
+        ChunkingStrategy.SLIDING_WINDOW_TOKENS: chunk_sliding_window_tokens,
+        ChunkingStrategy.PARENT_CHILD: chunk_parent_child,
+        ChunkingStrategy.LUMBER_CHUNKER: chunk_lumber_chunker,
         ChunkingStrategy.INFORMATION_NUGGETS: chunk_information_nuggets,
+        ChunkingStrategy.TEXT_BASELINE: chunk_text_baseline,
     }
 
-    # Normalize input string to enum if needed
     if isinstance(strategy, str):
         try:
             strategy = ChunkingStrategy(strategy.lower())

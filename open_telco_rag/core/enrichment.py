@@ -95,23 +95,34 @@ def enrich_acronym_expansion(chunks: list[Chunk], **kwargs: Any) -> list[Chunk]:
 
 
 def enrich_metadata_tagging(chunks: list[Chunk], **kwargs: Any) -> list[Chunk]:
-    """Strategy 3: Structural metadata ingestion. Automatically copies all 
-    extracted document parameters into each chunk's internal payload dictionary.
+    """Strategy 3: Structural metadata ingestion. Updates the chunk's 
+    database metadata dictionary (SQL) AND injects a structural text header 
+    directly into the text tokens before embedding.
     """
     for chunk in chunks:
         if not hasattr(chunk, 'metadata') or chunk.metadata is None:
             chunk.metadata = {}
 
-        # Loop through whatever fields were extracted by the parser (release, series, work_group, etc.)
+        header_parts = []
+        
+        # Pull any useful context keys dynamically passed down from the source parser
         for key, value in kwargs.items():
-            # Skip parameters meant for the script orchestrator rather than data filters
             if key in ["llm_client", "model_name"]:
                 continue
             
-            # Map the value into the chunk's vector database metadata slot
+            # 1. This writes directly to the Chroma/SQLite Relational Database Engine
             chunk.metadata[key] = value
             
+            # 2. Format the data into a text string fragment
+            clean_key = key.replace("_", " ").title()
+            header_parts.append(f"{clean_key}: {value}")
+
         chunk.metadata["enriched"] = True
+
+        # 3. Prepend the structured text block to the raw document content string
+        if header_parts:
+            metadata_header = " | ".join(header_parts)
+            chunk.text = f"[Document Context -> {metadata_header}]\n\n{chunk.text}"
 
     return chunks
 
