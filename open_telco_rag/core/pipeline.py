@@ -104,7 +104,6 @@ def ingest(
             continue
 
         # ── Chunk ─────────────────────────────────────────────────────────────
-        # Modified to use the dynamic chunking strategy interface passed via **chunk_kwargs
         try:
             from open_telco_rag.core.chunking import chunk_document, ChunkingStrategy
             from open_telco_rag.core.enrichment import enrich_chunks
@@ -148,10 +147,9 @@ def ingest(
                     chunks=chunks,
                     strategy=enrichment_strategy,
                     llm_client=llm_client,
+                    model_name=enrichment_model,
                     source_document=meta.get("source", file_path.name),
-                    release=meta.get("release", "unknown_release"),
-                    series=meta.get("series", "unknown_series"),
-                    model_name=enrichment_model 
+                    **meta 
                 )
 
         except Exception as e:

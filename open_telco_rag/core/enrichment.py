@@ -95,23 +95,23 @@ def enrich_acronym_expansion(chunks: list[Chunk], **kwargs: Any) -> list[Chunk]:
 
 
 def enrich_metadata_tagging(chunks: list[Chunk], **kwargs: Any) -> list[Chunk]:
-    """Strategy 3: Structural metadata ingestion. Explicitly updates the chunk's 
-    metadata payload dictionary with variables passed during extraction context.
+    """Strategy 3: Structural metadata ingestion. Automatically copies all 
+    extracted document parameters into each chunk's internal payload dictionary.
     """
-    # Grab structural parameters safely out of keyword arguments passed down by the source
-    doc_name = kwargs.get("source_document", "unspecified_doc")
-    release  = kwargs.get("release", "unknown_release")
-    series   = kwargs.get("series", "unknown_series")
-
     for chunk in chunks:
         if not hasattr(chunk, 'metadata') or chunk.metadata is None:
             chunk.metadata = {}
 
-        # Set specific structural tracking variables for downstream vector store storage
-        chunk.metadata["document_name"] = doc_name
-        chunk.metadata["release"]       = release
-        chunk.metadata["series"]        = series
-        chunk.metadata["enriched"]      = True
+        # Loop through whatever fields were extracted by the parser (release, series, work_group, etc.)
+        for key, value in kwargs.items():
+            # Skip parameters meant for the script orchestrator rather than data filters
+            if key in ["llm_client", "model_name"]:
+                continue
+            
+            # Map the value into the chunk's vector database metadata slot
+            chunk.metadata[key] = value
+            
+        chunk.metadata["enriched"] = True
 
     return chunks
 
