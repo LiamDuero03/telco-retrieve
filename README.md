@@ -370,8 +370,10 @@ open-telco-rag/
 ├── open_telco_rag/
 │   ├── types.py
 │   ├── core/
-│   │   ├── pipeline.py          # ingest, search, generate
-│   │   ├── chunking.py          # chunk_text, chunk_markdown
+│   │   ├── pipeline.py          # Master orchestrator tracking stats and logging
+│   │   ├── chunking.py          # Implements multi-strategy splitters (Token, nuggets, etc.)
+│   │   ├── enrichment.py        # Implements metadata tagging, glossary, and LLM-aided expansion
+│   │   ├── retrieval.py         # Implements Multi-Method retrieval passes (Dense, BM25, and RRF)
 │   │   ├── cleaning.py
 │   │   └── marker_loader.py     # Datalab Marker API mixin
 │   ├── sources/                 # one class per SDO
@@ -397,6 +399,8 @@ open-telco-rag/
 ├── configs/
 │   ├── embedding_models.json    # embedder registry
 │   ├── reranker_models.json     # reranker registry
+|   ├── chunking_strategies.json     # Central registry for character/token splitters
+|   ├── enrichment_strategies.json   # Central registry for tagging, glossary, & LLM expansion
 │   └── eval_questions/          # evaluation question sets per corpus
 └── pyproject.toml
 ```
