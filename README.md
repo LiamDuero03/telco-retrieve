@@ -186,8 +186,12 @@ open-telco-rag info              Show database info
 open-telco-rag ingest oran \
   --data data/oran/ \
   --model bge \
-  --chunk-size 1024 \
-  --overlap 200 \
+  --strategy sliding_window_tokens \
+  --chunk-size 512 \
+  --overlap 50 \
+  --enrichment llm_metadata \
+  --enrichment-model google/qwen-2.5-coder-32b \
+  --distance-metric cosine \
   --db-path chroma_db
 ```
 
@@ -196,8 +200,12 @@ open-telco-rag ingest oran \
 | `--data` | `data/<source>` | Path to corpus directory |
 | `--model` | `minilm` | Embedding model key |
 | `--db-path` | `chroma_db` | ChromaDB storage path |
+| `--strategy` | `text_baseline` | Segmentation strategy registered in chunking_strategies.json |
 | `--chunk-size` | `1024` | Chunk size in characters |
 | `--overlap` | `200` | Overlap between chunks in characters |
+| `--enrichment` | `none` | Pre-embedding strategy registry token mapped from enrichment_strategies.json |
+| `--enrichment-model` | `google/qwen-2.5-coder-32b` | LLM model target utilized when running LLM-aided metadata parsing routines |
+| `--distance-metric` | `l2` | Vector space index geometry calculation mapping: l2, cosine or ip |
 | `--no-resume` | off | Disable resume — re-ingest all files |
 | `--use-marker` | off | Use Datalab Marker API for PDF preprocessing |
 | `--collection` | `source_model` | Override collection name |
@@ -218,6 +226,7 @@ Requires `DATALAB_API_KEY` in `.env`. See [datalab.to](https://www.datalab.to) f
 open-telco-rag ask "What does TS 28.312 define for intent?" \
   --source-type 3gpp \
   --model bge \
+  --search-method dense \
   --top-k 8 \
   --rerank \
   --reranker-model ms-marco-minilm \
@@ -226,6 +235,7 @@ open-telco-rag ask "What does TS 28.312 define for intent?" \
 
 | Flag | Default | Description |
 |------|---------|-------------|
+| `--search-method` | `dense` | Multi-method search routing pass algorithm selection: `dense`, `bm25`, or `hybrid` |
 | `--top-k` | 5 / 8 | Chunks to retrieve |
 | `--rerank` | off | Enable reranking after retrieval |
 | `--reranker-model` | `ms-marco-minilm` | Reranker key from `configs/reranker_models.json` |
@@ -288,12 +298,21 @@ from open_telco_rag.core.pipeline import ingest, search, generate
 # Ingest
 source   = ORANSource()
 embedder = SentenceTransformerEmbedder(model_key="bge")
-store    = ChromaStore(path="chroma_db", collection_name="oran_bge")
-
-ingest(source=source, store=store, embedder=embedder, data_dir="data/oran/")
+store    = ChromaStore(path="chroma_db", collection_name="oran_bge", metadata={"hnsw:space": "cosine"})
+ingest(
+    source=source, 
+    store=store, 
+    embedder=embedder, 
+    data_dir="data/oran/",
+    strategy="sliding_window_tokens", # Configurations parsed dynamically from config registry files
+    chunk_tokens=512,
+    overlap_tokens=50,
+    enrichment="llm_metadata",       # Run domain expansion transformations before computing matrices
+    enrichment_model="google/qwen-2.5-coder-32b"
+)
 
 # Search
-results = search("E2 interface service models", store=store, embedder=embedder, top_k=5)
+results = search("E2 interface service models", store=store, embedder=embedder, top_k=5, search_method="dense")
 
 # Generate
 generator = OpenRouterGenerator(model="meta-llama/llama-3.3-70b-instruct")
@@ -314,17 +333,26 @@ Documents (PDF / DOCX / YAML / Markdown)
    (per SDO)             optional: Marker API for PDF
         │
         ▼
-   Chunker               chunk_markdown() or chunk_text()
+   Dynamic Chunker       Routes text to selected strategies (e.g. baseline, tokens, 
+                         parent-child, lumber or information nuggets) via configs
+        │
+        ▼
+   Enrichment            Pre-embedding passes: Structural Tagging, Acronym Expansion 
+                         or dynamic LLM Domain Expansion (metadata tracking)
         │
         ▼
    Embedder              SentenceTransformerEmbedder (local)
-        │                general-purpose or OTel telecom-domain models
+                         general-purpose or OTel telecom-domain models
+        |
         ▼
-   ChromaDB              persistent vector store
+   ChromaDB              Persistent vector store via configurable space metrics 
+                         (L2 Euclidean geometric, Cosine angular, Inner Product)
         │
         ▼
-   Search                cosine similarity retrieval
-        │                optional: cross-encoder or OTel reranking
+   Search                Multi-method retrieval pipeline: Dense vector, Sparse keyword (BM25),
+                         or Reciprocal Rank Fusion (Hybrid)
+                         optional: cross-encoder or OTel reranking
+        |
         ▼
    Generator             any LLM via OpenRouter or direct API
         │

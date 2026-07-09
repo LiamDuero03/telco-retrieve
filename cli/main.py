@@ -79,6 +79,8 @@ def main(argv: list[str] | None = None) -> None:
                           help="Reranker model key from configs/reranker_models.json "
                                "(default: ms-marco-minilm, telecom: otel-reranker-0.6b)")
     p_search.add_argument("--collection",     default=None,        help="Override collection name")
+    p_search.add_argument("--search-method", choices=["dense", "bm25", "hybrid"], default="dense",
+                          help="Multi-method search routing pass algorithm selection.")
 
     # ── ask ───────────────────────────────────────────────────────────────────
     p_ask = sub.add_parser("ask", help="Ask a question (search + generate)")
@@ -93,6 +95,8 @@ def main(argv: list[str] | None = None) -> None:
                        help="Reranker model key from configs/reranker_models.json "
                             "(default: ms-marco-minilm, telecom: otel-reranker-0.6b)")
     p_ask.add_argument("--collection",     default=None,            help="Override collection name")
+    p_ask.add_argument("--search-method", choices=["dense", "bm25", "hybrid"], default="dense",
+                          help="Multi-method search routing pass algorithm selection.")
 
     # ── evaluate ──────────────────────────────────────────────────────────────
     p_eval = sub.add_parser("evaluate", help="Run evaluation suite on a corpus")
@@ -311,6 +315,7 @@ def _run_search(args) -> None:
         top_k        = args.top_k,
         reranker     = reranker,
         rerank_top_k = args.rerank_top_k,
+        search_method = getattr(args, "search_method", "dense")
     )
 
     if not results:
@@ -362,6 +367,7 @@ def _run_ask(args) -> None:
         top_k        = args.top_k,
         reranker     = reranker,
         rerank_top_k = args.rerank_top_k,
+        search_method = getattr(args, "search_method", "dense")
     )
     answer = generate(args.question, results, source_type=args.source_type)
 
