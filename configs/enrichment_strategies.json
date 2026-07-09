@@ -1,0 +1,22 @@
+{
+  "none": {
+    "display_name": "No Enrichment",
+    "help_text": "Passes raw structural text chunks straight to the embedding model without additions.",
+    "requires_llm": false
+  },
+  "metadata_tagging": {
+    "display_name": "Structural Metadata Tagging",
+    "help_text": "Appends SDO specifications, working group scopes, and document headers into the token string.",
+    "requires_llm": false
+  },
+  "acronym_expansion": {
+    "display_name": "Glossary Acronym Expansion",
+    "help_text": "Scans chunk text against a fixed dictionary of telecom acronyms and appends extensions.",
+    "requires_llm": false
+  },
+  "llm_metadata": {
+    "display_name": "LLM Domain Expansion",
+    "help_text": "Uses an LLM agent to analyze text context and dynamically prepend inline entity translations.",
+    "requires_llm": true
+  }
+}

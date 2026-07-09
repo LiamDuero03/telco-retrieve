@@ -6,6 +6,22 @@ import argparse
 import sys
 from pathlib import Path
 
+def _load_chunking_strategies() -> list[str]:
+    import json
+    from pathlib import Path
+    path = Path("chunking_strategies.json")
+    if not path.exists():
+        return ["text_baseline"]
+    return list(json.loads(path.read_text(encoding="utf-8")).keys())
+
+
+def _load_enrichment_strategies() -> list[str]:
+    import json
+    from pathlib import Path
+    path = Path("enrichment_strategies.json")
+    if not path.exists():
+        return ["none"]
+    return list(json.loads(path.read_text(encoding="utf-8")).keys())
 
 def main(argv: list[str] | None = None) -> None:
     from dotenv import load_dotenv
@@ -35,15 +51,20 @@ def main(argv: list[str] | None = None) -> None:
                                "Requires DATALAB_API_KEY in .env. "
                                "Recommended for ETSI and TM Forum corpora.")
     p_ingest.add_argument("--enrichment",
-                          choices=["none", "llm_metadata", "acronym_expansion", "metadata_tagging"],
+                          choices=_load_enrichment_strategies(),
                           default="none",
-                          help="Select a metadata/content enrichment strategy to apply before embedding generation.")
+                          help="Select a metadata/content enrichment strategy dynamically mapped from enrichment_strategies.json.")
     p_ingest.add_argument("--enrichment-model",
                           default="google/qwen-2.5-coder-32b",
                           help="The LLM model string to use when running an LLM-based enrichment strategy.")
     p_ingest.add_argument("--strategy",
-choices=["hierarchical_markdown", "sliding_window_tokens", "parent_child", "lumber_chunker", "information_nuggets", "text_baseline"],                          default="text",
-                          help="The underlying text segmentation or semantic chunking methodology to apply.")
+                          choices=_load_chunking_strategies(),
+                          default="text_baseline",
+                          help="The underlying text segmentation methodology mapped from chunking_strategies.json.")
+    p_ingest.add_argument("--distance-metric",
+                          choices=["l2", "cosine", "ip"],
+                          default="l2",
+                          help="Distance metric used for indexing HNSW vector space.")
 
     # ── search ────────────────────────────────────────────────────────────────
     p_search = sub.add_parser("search", help="Search the vector database")
@@ -205,6 +226,8 @@ def _get_reranker(model_key: str):
 # ── Command runners ───────────────────────────────────────────────────────────
 
 def _run_ingest(args) -> None:
+    import json
+    from pathlib import Path
     from open_telco_rag.core.pipeline import ingest
 
     use_marker = getattr(args, "use_marker", False)
@@ -212,42 +235,60 @@ def _run_ingest(args) -> None:
     enrichment_model = getattr(args, "enrichment_model", "google/qwen-2.5-coder-32b")
     distance_metric  = getattr(args, "distance_metric", "l2")
     strategy = getattr(args, "strategy", "text_baseline")
+    
     source     = _get_source(args.source_type, use_marker=use_marker)
     embedder   = _get_embedder(args.model)
     store      = _get_store(args.source_type, args.model, args.db_path,
                             collection=getattr(args, "collection", None),
                             distance_metric=distance_metric)
     data_dir   = args.data or f"data/{args.source_type}"
-   
 
     print(f"\nIngesting {args.source_type.upper()} documents")
     print(f"  Data dir:   {data_dir}")
     print(f"  Model:      {args.model}")
     print(f"  Collection: {store.collection_name}")
     print(f"  PDF loader: {'Marker API (high-quality)' if use_marker else 'pypdf (default)'}")
-    print(f"  Enrichment: {enrichment.upper()}")  
     print(f"  Enrichment: {enrichment.upper()} ({enrichment_model})")
     print(f"  Strategy:   {strategy.upper()}")
     print(f"  Distance:   {distance_metric.upper()}")
 
-    stats = ingest(
-        source     = source,
-        store      = store,
-        embedder   = embedder,
-        data_dir   = data_dir,
-        chunk_size = args.chunk_size,
-        overlap    = args.overlap,
-        resume     = not args.no_resume,
-        enrichment = enrichment,
-        enrichment_model = enrichment_model,
-        strategy   = strategy,
-    )
+    # Aligns CLI argument structures seamlessly into dynamic chunker targets
+    chunk_kwargs = {
+        "source": source,
+        "store": store,
+        "embedder": embedder,
+        "data_dir": data_dir,
+        "resume": not args.no_resume,
+        "enrichment": enrichment,
+        "enrichment_model": enrichment_model,
+        "strategy": strategy,
+    }
+
+    # Pull structural constraints from the strategy definition JSON
+    strat_path = Path("chunking_strategies.json")
+    if strat_path.exists():
+        try:
+            strat_meta = json.loads(strat_path.read_text(encoding="utf-8")).get(strategy, {})
+            if strat_meta.get("unit") == "tokens":
+                chunk_kwargs["chunk_tokens"] = args.chunk_size
+                chunk_kwargs["overlap_tokens"] = args.overlap
+            else:
+                chunk_kwargs["chunk_size"] = args.chunk_size
+                chunk_kwargs["overlap"] = args.overlap
+        except Exception as e:
+            print(f"[Warning] Failed to parse chunking_strategies.json ({e}). Falling back to characters.")
+            chunk_kwargs["chunk_size"] = args.chunk_size
+            chunk_kwargs["overlap"] = args.overlap
+    else:
+        chunk_kwargs["chunk_size"] = args.chunk_size
+        chunk_kwargs["overlap"] = args.overlap
+
+    stats = ingest(**chunk_kwargs)
 
     print(f"\nFiles processed: {stats.files_processed}")
     print(f"Chunks stored:   {stats.chunks_stored}")
     print(f"Skipped:         {stats.skipped_files}")
     print(f"Errors:          {stats.error_files}")
-
 
 def _run_search(args) -> None:
     import math

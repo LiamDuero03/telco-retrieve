@@ -134,6 +134,25 @@ def _load_llm_keys() -> dict:
     data = json.loads(path.read_text(encoding="utf-8"))
     return {k: v["model_name"] for k, v in data.items()}
 
+    
+@st.cache_data(show_spinner=False)
+def _load_chunking_strategies() -> dict:
+    import json
+    from pathlib import Path
+    path = Path("configs/chunking_strategies.json")
+    if not path.exists():
+        return {"text_baseline": {"display_name": "Text Baseline", "help_text": "", "unit": "characters", "default_size": 1024, "default_overlap": 200}}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+@st.cache_data(show_spinner=False)
+def _load_enrichment_strategies() -> dict:
+    import json
+    from pathlib import Path
+    path = Path("configs/enrichment_strategies.json")
+    if not path.exists():
+        return {"none": {"display_name": "No Enrichment", "help_text": "", "requires_llm": False}}
+    return json.loads(path.read_text(encoding="utf-8"))
+
 
 def _get_store(source_type: str, model_key: str, db_path: str,
                collection: str | None = None, distance_metric: str = "l2"):
@@ -545,51 +564,81 @@ if is_rag:
         with col_i1:
             data_dir = st.text_input("Data directory", value=f"data/{selected_source_type}")
             
-            from open_telco_rag.core.chunking import ChunkingStrategy
-            strategy_choices = [s.value for s in ChunkingStrategy]
+            # Load dynamic strategies from JSON configs
+            chunk_strat_dict = _load_chunking_strategies()
+            enrich_strat_dict = _load_enrichment_strategies()
+
+            # Dynamic Chunking Strategy Selector
             selected_strategy = st.selectbox(
                 "Chunking Strategy", 
-                options=strategy_choices, 
-                index=strategy_choices.index("text_baseline")
+                options=list(chunk_strat_dict.keys()), 
+                index=0,
+                format_func=lambda k: chunk_strat_dict[k]["display_name"],
+                help="Select layout splitting parameters."
             )
+            
+            strat_meta = chunk_strat_dict[selected_strategy]
+            st.caption(f"💡 {strat_meta['help_text']}")
+
             selected_distance = st.selectbox(
                 "Distance Metric (Index Vector Space)",
                 options=["l2", "cosine", "ip"],
                 index=0,
-                help="l2 = Euclidean geometric distance, cosine = angular direction weight matching (highly recommended for prepended text decorations)."
+                help="l2 = Euclidean, cosine = angular matching (recommended for prepended text descriptions)."
             )
             
-            if selected_strategy == "fixed_tokens":
-                chunk_size = st.number_input("Chunk size (Tokens)", 64, 2048, 512, 64)
-            else:
-                chunk_size = st.number_input("Chunk size (Characters)", 128, 4096, 1024, 128)
+            # Dynamically switch sizing metrics label between characters and tokens
+            unit_label = strat_meta["unit"].capitalize()
+            chunk_size = st.number_input(
+                f"Chunk size ({unit_label})", 
+                min_value=strat_meta.get("min_size", 64), 
+                max_value=strat_meta.get("max_size", 4096), 
+                value=strat_meta.get("default_size", 1024)
+            )
                 
         with col_i2:
             ingest_collection = st.text_input("Collection name",
                                               placeholder=f"{selected_source_type}_{model_key}")
             
-            if selected_strategy == "fixed_tokens":
-                overlap = st.number_input("Overlap (Tokens)", 0, 256, 50, 10)
-            elif selected_strategy in ["llm_aided", "information_nuggets", "hierarchical"]:
-                overlap = st.number_input("Overlap", 0, 512, 0, 32, disabled=True, help="Not utilized by this strategy")
+            # Only show or enable overlap fields if the config declares a default overlap value
+            if "default_overlap" in strat_meta and strat_meta["default_overlap"] > 0:
+                overlap = st.number_input(
+                    f"Overlap ({unit_label})", 
+                    min_value=0, 
+                    max_value=strat_meta.get("max_size", 4096) // 2, 
+                    value=strat_meta["default_overlap"]
+                )
             else:
-                overlap = st.number_input("Overlap (Characters)", 0, 512, 200, 32)
+                overlap = st.number_input(
+                    f"Overlap", 
+                    min_value=0, max_value=0, value=0, 
+                    disabled=True, 
+                    help="Not utilized by this configuration strategy."
+                )
 
-        # ── NEW: ENRICHMENT UI FIELD CONFIGURATIONS ───────────────────────
+        # ── DYNAMIC ENRICHMENT CONFIGURATIONS ───────────────────────
         st.markdown("##### Chunk Enrichment (Pre-Embedding Process)")
-        col_en1, col_en2 = st.columns(2)
+        col_en1, col_en2 = col_i1, col_i2 # reuse spatial boundaries or keep columns aligned
+        
         with col_en1:
             selected_enrichment = st.selectbox(
                 "Enrichment Strategy",
-                options=["none", "llm_metadata", "acronym_expansion", "metadata_tagging"],
+                options=list(enrich_strat_dict.keys()),
                 index=0,
-                help="Appends additional domain context, vocabulary mappings, or file system markers before text is embedded."
+                format_func=lambda k: enrich_strat_dict[k]["display_name"],
+                help="Appends additional domain context, vocabulary mappings, or structural headers before text embedding."
             )
+            st.caption(f"💡 {enrich_strat_dict[selected_enrichment]['help_text']}")
+            
         with col_en2:
+            # Dynamically gray out the model selection if the chosen strategy doesn't require an LLM
+            req_llm = enrich_strat_dict[selected_enrichment].get("requires_llm", False)
             selected_enrichment_model = st.selectbox(
                 "Enrichment Model (If LLM strategy chosen)",
                 options=list(LLM_OPTIONS.keys()),
-                format_func=lambda k: k.split("/")[-1]
+                format_func=lambda k: k.split("/")[-1],
+                disabled=not req_llm,
+                help="Requires functional LLM processing credentials when active."
             )
                 
         col_i3, col_i4 = st.columns(2)
@@ -607,7 +656,7 @@ if is_rag:
                 f"  Model:      {model_key}",
                 f"  Collection: {col_name}",
                 f"  Strategy:   {selected_strategy}",
-                f"  Enrichment: {selected_enrichment.upper()}", # Log enrichment choice
+                f"  Enrichment: {selected_enrichment.upper()}", 
                 f"  PDF loader: {'Marker API' if use_marker else 'pypdf (default)'}",
                 ""
             ]
@@ -628,29 +677,25 @@ if is_rag:
                     distance_metric=selected_distance
                 )
                 
-                # Load existing keyword arguments for chunker routing
                 chunk_kwargs = {
                     "strategy": selected_strategy,
-                    "enrichment": selected_enrichment,             # <-- Pass Strategy Down
-                    "enrichment_model": selected_enrichment_model   # <-- Pass Model Down
+                    "enrichment": selected_enrichment,
+                    "enrichment_model": LLM_OPTIONS[selected_enrichment_model]
                 }
                 
-                if selected_strategy == "fixed_tokens":
+                if strat_meta["unit"] == "tokens":
                     chunk_kwargs["chunk_tokens"] = chunk_size
                     chunk_kwargs["overlap_tokens"] = overlap
-                elif selected_strategy == "hierarchical":
-                    chunk_kwargs["parent_size"] = chunk_size
-                    chunk_kwargs["child_size"] = chunk_size // 4
-                elif selected_strategy in ["llm_aided", "information_nuggets"]:
+                elif selected_strategy in ["lumber_chunker", "information_nuggets"]:
                     if "llm_client" in st.session_state:
                         chunk_kwargs["llm_client"] = st.session_state["llm_client"]
                     else:
                         from open_telco_rag.generators.openrouter import OpenRouterGenerator
-                        chunk_kwargs["llm_client"] = OpenRouterGenerator(model=selected_enrichment_model)
+                        chunk_kwargs["llm_client"] = OpenRouterGenerator(model=LLM_OPTIONS[selected_enrichment_model])
                 else:
                     chunk_kwargs["chunk_size"] = chunk_size
                     chunk_kwargs["overlap"] = overlap
-
+                    
                 stats = ingest(
                     source=src, 
                     store=store, 

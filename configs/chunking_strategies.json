@@ -1,0 +1,56 @@
+{
+  "text_baseline": {
+    "display_name": "Text Baseline Fallback",
+    "help_text": "Plain paragraph baseline splitting using window character overlaps.",
+    "unit": "characters",
+    "default_size": 1024,
+    "default_overlap": 200,
+    "min_size": 128,
+    "max_size": 4096
+  },
+  "sliding_window_tokens": {
+    "display_name": "Sliding Window Tokens",
+    "help_text": "Fixed token-size segments tokenized precisely against model sliding windows.",
+    "unit": "tokens",
+    "default_size": 512,
+    "default_overlap": 50,
+    "min_size": 64,
+    "max_size": 2048
+  },
+  "parent_child": {
+    "display_name": "Two-Tier Parent/Child",
+    "help_text": "Generates large structural parent segments mapped to tiny, targeted child semantic vectors.",
+    "unit": "characters",
+    "default_size": 2048,
+    "default_overlap": 0,
+    "min_size": 512,
+    "max_size": 4096
+  },
+  "hierarchical_markdown": {
+    "display_name": "Hierarchical Markdown",
+    "help_text": "Identifies document layouts based on structural heading elements (# to #####).",
+    "unit": "characters",
+    "default_size": 4000,
+    "default_overlap": 0,
+    "min_size": 512,
+    "max_size": 8192
+  },
+  "lumber_chunker": {
+    "display_name": "Lumber Chunker (LLM-Aided)",
+    "help_text": "Leverages LLM structural comprehension to break text precisely on logical context boundaries.",
+    "unit": "characters",
+    "default_size": 1500,
+    "default_overlap": 0,
+    "min_size": 512,
+    "max_size": 4096
+  },
+  "information_nuggets": {
+    "display_name": "Factual Information Nuggets",
+    "help_text": "Deserializes text into self-contained independent factual assertions so dense units are isolated.",
+    "unit": "characters",
+    "default_size": 1200,
+    "default_overlap": 0,
+    "min_size": 256,
+    "max_size": 2048
+  }
+}
