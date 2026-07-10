@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from enum import Enum
 from typing import Any
 from open_telco_rag.types import Chunk
@@ -63,36 +64,31 @@ def enrich_llm_metadata(chunks: list[Chunk], llm_client: Any = None, **kwargs: A
 
     return chunks
 
-
-def enrich_acronym_expansion(chunks: list[Chunk], **kwargs: Any) -> list[Chunk]:
-    """Strategy 2: Scans chunk text against a fixed dictionary of telecom acronyms 
-    and appends their explicit expansions to maximize token-matching accuracy.
+def enrich_acronym_expansion(chunks: list[Chunk], **kwargs) -> list[Chunk]:
     """
-    # Sample dictionary (Expand this with your core thesis telecom acronyms)
-    TELCO_ACRONYMS = {
+    Appends acronym expansions utilizing strict word-boundary evaluations.
+    """
+    acronym_dictionary = {
         "RAN": "Radio Access Network",
         "RIC": "RAN Intelligent Controller",
         "O-RAN": "Open Radio Access Network",
         "3GPP": "3rd Generation Partnership Project",
-        "CU": "Centralized Unit",
-        "DU": "Distributed Unit",
-        "RU": "Radio Unit",
+        "SMO": "Service Management and Orchestration"
     }
-
+    
     for chunk in chunks:
         found_expansions = []
-        # Basic boundary check to see if acronym matches a standalone word
-        for acronym, expansion in TELCO_ACRONYMS.items():
-            if repr(acronym)[1:-1] in chunk.text:  # Quick membership check
-                found_expansions.append(f"{acronym} ({expansion})")
-
+        for acronym, expansion in acronym_dictionary.items():
+            # Strict word boundary regex pattern check
+            pattern = r"\b" + re.escape(acronym) + r"\b"
+            if re.search(pattern, chunk.text):
+                found_expansions.append(f"{acronym}: {expansion}")
+                
         if found_expansions:
-            # Append dictionary definitions to the bottom of the text chunk
-            expansion_suffix = "\n\n[Acronym Expansions]: " + ", ".join(found_expansions)
-            chunk.text = f"{chunk.text}{expansion_suffix}"
-
+            suffix_string = "\n\n[Acronym Expansions]:\n* " + "\n* ".join(found_expansions)
+            chunk.text += suffix_string
+            
     return chunks
-
 
 def enrich_metadata_tagging(chunks: list[Chunk], **kwargs: Any) -> list[Chunk]:
     """Strategy 3: Structural metadata ingestion. Updates the chunk's 

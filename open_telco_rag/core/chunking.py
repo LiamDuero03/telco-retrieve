@@ -53,53 +53,95 @@ def _accumulate_chunks(
         ))
 
     return chunks
-
-
 def chunk_hierarchical_markdown(
     text: str,
     chunk_size: int = 4000,
     source_type: str = "",
+    **kwargs: Any,
 ) -> list[Chunk]:
-    """Strategy 1: Identifies document layouts based on structural Markdown heading elements (# to #####)."""
+    """Strategy 1: Identifies document layouts based on structural Markdown heading elements (# to #####)
+    while maintaining a stateful parent breadcrumb trail stack across deep sub-sections.
+    """
     if not text or not text.strip():
         return []
 
-    # Supports deeper markdown nesting levels down to h5 (#####)
-    sections = re.split(r"(?=^#{1,5}\s)", text, flags=re.MULTILINE)
-    all_chunks: list[Chunk] = []
+    # Regex split that captures heading lines while keeping them in the split stream
+    heading_pattern = re.compile(r"(^#{1,5}\s+.*$)", re.MULTILINE)
+    parts = heading_pattern.split(text)
+    
+    chunks: list[Chunk] = []
+    # State stack to track active headers from # down to #####
+    current_headers = {1: None, 2: None, 3: None, 4: None, 5: None}
+    
+    current_text_block = ""
+    active_heading_attr = "None"
+    global_idx = 0
 
-    for section in sections:
-        section = section.strip()
-        if not section:
+    for part in parts:
+        if not part.strip():
             continue
-
-        heading_match = re.match(r"^#{1,5}\s+(.+)$", section, re.MULTILINE)
-        heading = heading_match.group(1).strip() if heading_match else None
-
-        if len(section) <= chunk_size:
-            all_chunks.append(Chunk(
-                text=section,
-                heading=heading,
-                chunk_index=len(all_chunks),
-                source_type=source_type
-            ))
-            continue
-
-        paragraphs = [p.strip() for p in section.split("\n\n") if p.strip()]
-        all_chunks.extend(_accumulate_chunks(
-            paragraphs, chunk_size, heading, source_type
+            
+        # Check if the part is a heading line
+        header_match = re.match(r"^(#{1,5})\s+(.*)$", part.strip())
+        if header_match:
+            level = len(header_match.group(1))
+            heading_text = header_match.group(2).strip()
+            
+            # Update current level and clear deeper sub-levels to maintain stack hierarchy
+            current_headers[level] = heading_text
+            for l in range(level + 1, 6):
+                current_headers[l] = None
+                
+            # Build stateful breadcrumb string
+            active_breadcrumbs = [current_headers[i] for i in range(1, 6) if current_headers[i]]
+            active_heading_attr = " > ".join(active_breadcrumbs) if active_breadcrumbs else "None"
+            
+            # Flush existing accumulated blocks before starting the new heading sector
+            if current_text_block.strip():
+                chunks.append(Chunk(
+                    text=current_text_block.strip(),
+                    heading=active_heading_attr,
+                    chunk_index=global_idx,
+                    source_type=source_type
+                ))
+                global_idx += 1
+                current_text_block = ""
+                
+            # Keep the header title inline inside the chunk text payload
+            current_text_block += part + "\n"
+        else:
+            # If appending this paragraph breaks structural size limits, flush it
+            if len(current_text_block) + len(part) > chunk_size and current_text_block.strip():
+                chunks.append(Chunk(
+                    text=current_text_block.strip(),
+                    heading=active_heading_attr,
+                    chunk_index=global_idx,
+                    source_type=source_type
+                ))
+                global_idx += 1
+                current_text_block = part + "\n"
+            else:
+                current_text_block += part + "\n"
+                
+    if current_text_block.strip():
+        chunks.append(Chunk(
+            text=current_text_block.strip(),
+            heading=active_heading_attr,
+            chunk_index=global_idx,
+            source_type=source_type
         ))
-
-    return all_chunks
-
-
+        
+    return chunks
 def chunk_text_baseline(
     text: str,
     chunk_size: int = 4000,
     overlap: int = 200,
     source_type: str = "",
+    **kwargs: Any,
 ) -> list[Chunk]:
-    """Generic baseline paragraph-based chunker with window character overlap."""
+    """Generic baseline paragraph-based chunker with window character overlap 
+    and dynamic sentence-boundary backward snapping.
+    """
     if not text or not text.strip():
         return []
 
@@ -117,7 +159,20 @@ def chunk_text_baseline(
                 source_type=source_type
             ))
             idx += 1
-            current = current[-overlap:] if len(current) > overlap else current
+            
+            # Sentence terminal backward snapping index check
+            if len(current) > overlap:
+                lookback_window = current[-overlap:]
+                # Look for a natural punctuation split point inside the overlap tail
+                split_match = list(re.finditer(r"[\.\!\?\n]\s*", lookback_window))
+                if split_match:
+                    # Snap overlap window index forward to start neatly right after punctuation terminal
+                    snap_point = split_match[-1].end()
+                    current = lookback_window[snap_point:]
+                else:
+                    current = lookback_window
+            else:
+                current = current
             
         current = f"{current}\n\n{para}" if current else para
 
@@ -333,8 +388,23 @@ def chunk_information_nuggets(
         print(f"[Warning] Nugget Chunker failed: {e}. Falling back to text baseline.")
         return chunk_text_baseline(text, chunk_size=1000, source_type=source_type)
 
-
 # --- Infrastructure Interface Entry Point ---
+
+def calculate_token_budget_safe_kwargs(strategy_str: str, chunk_size: int, overlap: int, enrichment: str) -> tuple[int, int]:
+    """
+    Adjusts token limits if post-chunking enrichment metadata tagging expands the token footprint.
+    """
+    allocated_chunk_size = chunk_size
+    allocated_overlap = overlap
+    
+    if strategy_str == "sliding_window_tokens" and enrichment == "metadata_tagging":
+        # Reserve a safe token space margin (e.g., 64 tokens) strictly for the enrichment prefix string
+        TOKEN_RESERVATION_BUFFER = 64
+        allocated_chunk_size = max(128, chunk_size - TOKEN_RESERVATION_BUFFER)
+        allocated_overlap = max(0, overlap - int(TOKEN_RESERVATION_BUFFER * 0.2))
+        
+    return allocated_chunk_size, allocated_overlap
+
 
 def chunk_document(
     text: str,
@@ -359,6 +429,28 @@ def chunk_document(
                 f"Unknown chunking strategy '{strategy}'. "
                 f"Supported choices: {[s.value for s in ChunkingStrategy]}"
             )
+
+    # --- TOKEN BUDGET ADJUSTMENT PASS ---
+    strategy_str = strategy.value
+    enrichment = kwargs.get("enrichment", "none")  # Extract enrichment string if passed from master sweep
+
+    if strategy == ChunkingStrategy.SLIDING_WINDOW_TOKENS:
+        # Map generic size parameters to specific token keyword arguments
+        raw_size = kwargs.get("chunk_tokens", kwargs.get("chunk_size", 512))
+        raw_overlap = kwargs.get("overlap_tokens", kwargs.get("overlap", 50))
+        
+        # Calculate safe parameters
+        safe_size, safe_overlap = calculate_token_budget_safe_kwargs(
+            strategy_str, raw_size, raw_overlap, enrichment
+        )
+        
+        # Re-assign variables back to match signature specifications expected by chunk_sliding_window_tokens
+        kwargs["chunk_tokens"] = safe_size
+        kwargs["overlap_tokens"] = safe_overlap
+        
+        # Clean up baseline parameters to avoid unexpected argument conflicts
+        if "chunk_size" in kwargs: del kwargs["chunk_size"]
+        if "overlap" in kwargs: del kwargs["overlap"]
 
     chunker_function = _STRATEGY_MAP[strategy]
     return chunker_function(text, **kwargs)
