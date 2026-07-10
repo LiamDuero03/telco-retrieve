@@ -1071,7 +1071,6 @@ if is_rag:
         except Exception as e:
             st.error(f"Could not read database: {e}")
 
-
 # ══════════════════════════════════════════════════════════════════════════════
 # QNA GENERATION PIPELINE TABS
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1085,28 +1084,80 @@ else:
 
         from qna_generation.formats import VALID_FORMATS
 
+        # ── SUBTLE TEMPLATE OVERLAY ──────────────────────────────────────────
+        TEMPLATE_OPTIONS = {
+            "manual": "🛠️ Manual Pipeline Configuration",
+            "basic_open": "📦 Standard Evaluation Set (Open-Ended)",
+            "mixed_formats": "📦 Standard Evaluation Set (Mixed Formats)",
+            "model_training_generation": "🤖 Fine-Tuning Training Set (Contrastive Positive/Negative)",
+            "flowchart_jury_pipeline": "⚖️ Thesis Multi-Jury Validation Pipeline"
+        }
+
+        selected_template = st.selectbox(
+            "Pipeline Template Preset",
+            options=list(TEMPLATE_OPTIONS.keys()),
+            format_func=lambda k: TEMPLATE_OPTIONS[k],
+            key="selected_template",
+            help="Select a quick preset to fill the options below automatically, or configure manually."
+        )
+
+        # Subtle parameter mapping overrides based on template selection
+        default_sampling = "stratified"
+        default_n_chunks = 30
+        default_formats = ["open"]
+        default_n_questions = 20
+        default_qpc = 1
+        default_concurrency = 10
+        default_summarize = False
+        default_validate = False
+        default_drop = False
+        default_dedup = "exact"
+
+        if selected_template == "model_training_generation":
+            default_sampling = "stratified"
+            default_formats = ["open"]
+            default_dedup = "exact"
+            st.session_state["is_training_flow"] = True 
+        elif selected_template == "flowchart_jury_pipeline":
+            default_sampling = "stratified"
+            default_validate = True
+            default_drop = True
+            st.session_state["is_training_flow"] = False
+        elif selected_template == "basic_open":
+            default_sampling = "stratified"
+            default_formats = ["open"]
+            st.session_state["is_training_flow"] = False
+        elif selected_template == "mixed_formats":
+            default_sampling = "stratified"
+            default_formats = ["open", "tf", "mc"]
+            st.session_state["is_training_flow"] = False
+        else:
+            st.session_state["is_training_flow"] = False
+
         st.markdown("##### Sampling")
         col_g1, col_g2 = st.columns(2)
         with col_g1:
             genqa_sampling = st.selectbox(
-                "Strategy", ["stratified", "boundary"], key="genqa_sampling",
+                "Strategy", ["stratified", "boundary"], 
+                index=0 if default_sampling == "stratified" else 1,
+                key="genqa_sampling",
                 help="stratified: random spread across documents.\n"
                      "boundary: one chunk per document section (heading-based).",
             )
         with col_g2:
-            genqa_n_chunks = st.number_input("Chunks to sample", 1, 1000, 30, key="genqa_n_chunks")
+            genqa_n_chunks = st.number_input("Chunks to sample", 1, 1000, default_n_chunks, key="genqa_n_chunks")
 
         st.markdown("##### Question generation")
         col_g3, col_g4 = st.columns(2)
         with col_g3:
             genqa_formats = st.multiselect(
-                "Question types", VALID_FORMATS, default=["open"], key="genqa_formats",
+                "Question types", VALID_FORMATS, default=default_formats, key="genqa_formats",
                 help="open: free-text  ·  tf: true/false  ·  mc: multiple choice  ·  fill_blank: fill-in-the-blank",
             )
-            genqa_n_questions = st.number_input("Total questions", 1, 1000, 20, key="genqa_n_questions")
+            genqa_n_questions = st.number_input("Total questions", 1, 1000, default_n_questions, key="genqa_n_questions")
         with col_g4:
             genqa_qpc = st.number_input(
-                "Questions per chunk", 1, 10, 1, key="genqa_qpc",
+                "Questions per chunk", 1, 10, default_qpc, key="genqa_qpc",
                 help="1 = new chunk per question.\n>1 = ask same chunk for multiple distinct questions.",
             )
 
@@ -1114,19 +1165,15 @@ else:
         col_gc1, col_gc2 = st.columns(2)
         with col_gc1:
             genqa_concurrency = st.number_input(
-                "Max concurrent LLM calls", min_value=1, max_value=50, value=10,
+                "Max concurrent LLM calls", min_value=1, max_value=50, value=default_concurrency,
                 key="genqa_concurrency",
-                help="How many LLM calls to run in parallel. "
-                     "Red Hat recommends endpoints supporting at least 50. "
-                     "Keep lower for rate-limited endpoints.",
+                help="How many LLM calls to run in parallel. Keep lower for rate-limited endpoints.",
             )
         with col_gc2:
             genqa_summarize = st.checkbox(
                 "Summarize chunks",
-                value=False, key="genqa_summarize",
-                help="Adds a summarization step before question generation — "
-                     "chunk → summary → QnA. Improves quality by filtering "
-                     "boilerplate, at ~2x LLM calls.",
+                value=default_summarize, key="genqa_summarize",
+                help="Adds a summarization step before question generation — chunk → summary → QnA.",
             )
         if genqa_summarize:
             genqa_summary_sentences = st.number_input(
@@ -1140,12 +1187,14 @@ else:
         col_g5, col_g6 = st.columns(2)
         with col_g5:
             genqa_validate = st.checkbox("Validate each question (second LLM pass)",
-                                          value=False, key="genqa_validate")
+                                          value=default_validate, key="genqa_validate")
             genqa_drop_failures = st.checkbox("Drop questions that fail validation",
-                                               value=False, key="genqa_drop",
+                                               value=default_drop, key="genqa_drop",
                                                disabled=not genqa_validate)
         with col_g6:
-            genqa_dedup = st.selectbox("Dedup mode", ["exact", "prefix", "none"],
+            dedup_options = ["exact", "prefix", "none"]
+            genqa_dedup = st.selectbox("Dedup mode", dedup_options,
+                                        index=dedup_options.index(default_dedup),
                                         key="genqa_dedup")
 
         st.markdown("##### Output")
@@ -1166,7 +1215,7 @@ else:
                     log_box.markdown("<div class='log-box'>" + "\n".join(log_lines[-25:]) + "</div>",
                                      unsafe_allow_html=True)
 
-                _log("Starting…")
+                _log("Starting Pipeline Core Engine…")
                 try:
                     from qna_generation.sources import make_source
                     from qna_generation.flows import Flow
@@ -1183,6 +1232,7 @@ else:
                     source = make_source(**src_kwargs)
                     _log(f"Source: {qna_source} ({source.count():,} chunks)")
 
+                    # Assemble block array sequences sequentially
                     block_specs = [
                         {"type": "SampleChunksBlock",
                          "params": {"strategy": genqa_sampling, "n_chunks": genqa_n_chunks}},
@@ -1193,17 +1243,35 @@ else:
                             "params": {"summary_sentences": genqa_summary_sentences,
                                        "max_concurrency": genqa_concurrency},
                         })
-                    block_specs.append({
-                        "type": "GenerateQuestionBlock",
-                        "params": {"formats": genqa_formats, "n": genqa_n_questions,
-                                   "questions_per_chunk": genqa_qpc,
-                                   "max_concurrency": genqa_concurrency},
-                    })
-                    if genqa_validate:
+
+                    # Route down to either specialized fine-tuning or basic generation
+                    if st.session_state.get("is_training_flow", False):
+                        block_specs.append({
+                            "type": "GenerateTrainingQABlock",
+                            "params": {"generator_model": qna_gen_model, "max_concurrency": genqa_concurrency}
+                        })
+                        block_specs.append({
+                            "type": "TokenWindowNegativeSamplerBlock",
+                            "params": {"low": 475, "high": 525, "negatives_k": 3}
+                        })
+                    else:
+                        block_specs.append({
+                            "type": "GenerateQuestionBlock",
+                            "params": {"formats": genqa_formats, "n": genqa_n_questions,
+                                       "questions_per_chunk": genqa_qpc,
+                                       "max_concurrency": genqa_concurrency},
+                        })
+
+                    # Multi-jury architecture expansion routing passes
+                    if genqa_validate and selected_template == "flowchart_jury_pipeline":
+                        block_specs.append({"type": "MultiPersonQuestionJuryBlock", "params": {"jury_size": 3}})
+                        block_specs.append({"type": "MultiPersonAnswerJuryBlock", "params": {"jury_size": 3}})
+                    elif genqa_validate:
                         block_specs.append({
                             "type": "ValidateAnswerableBlock",
                             "params": {"drop_failures": genqa_drop_failures},
                         })
+
                     if genqa_dedup != "none":
                         block_specs.append({
                             "type": "DedupBlock", "params": {"mode": genqa_dedup},
@@ -1221,7 +1289,7 @@ else:
                     existing_path = _Path("configs/eval_questions") / f"{source_type}.json"
                     merged   = merge_with_existing(qa_pairs, existing_path)
                     out_path = save_draft(merged, _Path(genqa_output_dir), source_type,
-                                          n_questions=len(qa_pairs), model="gui_flow")
+                                          n_questions=len(qa_pairs), model=selected_template)
                     _log(f"Saved -> {out_path}")
                     st.success(f"Generated {len(qa_pairs)} draft questions -> {out_path}")
                     st.session_state["last_draft_path"] = str(out_path)
@@ -1251,16 +1319,13 @@ else:
             "camara":  "https://github.com/camaraproject",
         }
 
-        # PDF deep-link builders — where public hosting + page anchors are possible
         def _build_doc_url(q: dict) -> tuple[str | None, str | None]:
-            """Returns (portal_url, deep_link_url) — deep_link may be None."""
             corpus       = q.get("corpus", "")
             source_doc   = q.get("source_document", "")
             canonical    = q.get("canonical_source", "")
             chunk_id     = q.get("chunk_id", "")
             portal       = SDO_PORTAL_URLS.get(corpus)
 
-            # Try to extract page number from chunk_id (format: filename::embedder::index)
             page_num = None
             if "::" in chunk_id:
                 parts = chunk_id.split("::")
@@ -1272,30 +1337,21 @@ else:
             deep_link = None
 
             if corpus == "etsi" and source_doc:
-                # ETSI publicly hosts PDFs — build deliver URL from filename
-                # e.g. gs_ENI005v030101p.pdf → etsi.org/deliver/etsi_gs/ENI/...
                 fname = source_doc.replace(".pdf", "").replace(".PDF", "")
                 base_url = f"https://www.etsi.org/deliver/etsi_{fname}.pdf"
                 deep_link = f"{base_url}#page={page_num}" if page_num else base_url
-
             elif corpus == "itu" and canonical:
-                # ITU recommendations are publicly accessible
                 series = canonical.split(".")[0] if "." in canonical else canonical[:1]
                 rec    = canonical.replace(".", "-")
                 deep_link = f"https://www.itu.int/rec/T-REC-{rec}/en"
-
             elif corpus == "3gpp" and canonical:
-                # 3GPP specs are in public FTP
                 series = canonical.split(".")[0] if "." in canonical else ""
                 if series:
                     deep_link = f"https://www.3gpp.org/ftp/Specs/archive/{series}_series/"
-
             elif corpus == "oran":
                 deep_link = portal
-
             elif corpus == "camara" and canonical:
                 deep_link = f"https://github.com/camaraproject/{canonical}"
-
             elif corpus == "tmforum" and canonical:
                 deep_link = f"https://github.com/tmforum-rand/tmf-otel"
 
@@ -1303,7 +1359,6 @@ else:
 
         def _fetch_chunk_text(chunk_id: str, corpus: str, db_path_str: str,
                                model_key_str: str) -> str | None:
-            """Fetch the source chunk text from ChromaDB using the chunk_id."""
             if not chunk_id:
                 return None
             try:
@@ -1406,9 +1461,7 @@ else:
                                     )
                                     st.caption(f"chunk_id: {chunk_id}")
                                 else:
-                                    st.caption("Chunk text not available — ChromaDB not connected "
-                                               "or chunk_id not found. Set the correct DB path and "
-                                               "embedder above.")
+                                    st.caption("Chunk text not available.")
 
                         if val_passed is False:
                             st.warning(f"Validation flagged: {val_note}")
