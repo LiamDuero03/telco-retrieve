@@ -1084,95 +1084,58 @@ else:
 
         from qna_generation.formats import VALID_FORMATS
 
-        # ── SUBTLE TEMPLATE OVERLAY ──────────────────────────────────────────
-        TEMPLATE_OPTIONS = {
-            "manual": "🛠️ Manual Pipeline Configuration",
-            "basic_open": "📦 Standard Evaluation Set (Open-Ended)",
-            "mixed_formats": "📦 Standard Evaluation Set (Mixed Formats)",
-            "model_training_generation": "🤖 Fine-Tuning Training Set (Contrastive Positive/Negative)",
-            "flowchart_jury_pipeline": "⚖️ Thesis Multi-Jury Validation Pipeline"
-        }
-
-        selected_template = st.selectbox(
-            "Pipeline Template Preset",
-            options=list(TEMPLATE_OPTIONS.keys()),
-            format_func=lambda k: TEMPLATE_OPTIONS[k],
-            key="selected_template",
-            help="Select a quick preset to fill the options below automatically, or configure manually."
-        )
-
-        # Subtle parameter mapping overrides based on template selection
-        default_sampling = "stratified"
-        default_n_chunks = 30
-        default_formats = ["open"]
-        default_n_questions = 20
-        default_qpc = 1
-        default_concurrency = 10
-        default_summarize = False
-        default_validate = False
-        default_drop = False
-        default_dedup = "exact"
-
-        if selected_template == "model_training_generation":
-            default_sampling = "stratified"
-            default_formats = ["open"]
-            default_dedup = "exact"
-            st.session_state["is_training_flow"] = True 
-        elif selected_template == "flowchart_jury_pipeline":
-            default_sampling = "stratified"
-            default_validate = True
-            default_drop = True
-            st.session_state["is_training_flow"] = False
-        elif selected_template == "basic_open":
-            default_sampling = "stratified"
-            default_formats = ["open"]
-            st.session_state["is_training_flow"] = False
-        elif selected_template == "mixed_formats":
-            default_sampling = "stratified"
-            default_formats = ["open", "tf", "mc"]
-            st.session_state["is_training_flow"] = False
-        else:
-            st.session_state["is_training_flow"] = False
-
         st.markdown("##### Sampling")
         col_g1, col_g2 = st.columns(2)
         with col_g1:
             genqa_sampling = st.selectbox(
                 "Strategy", ["stratified", "boundary"], 
-                index=0 if default_sampling == "stratified" else 1,
+                index=0,
                 key="genqa_sampling",
                 help="stratified: random spread across documents.\n"
                      "boundary: one chunk per document section (heading-based).",
             )
         with col_g2:
-            genqa_n_chunks = st.number_input("Chunks to sample", 1, 1000, default_n_chunks, key="genqa_n_chunks")
+            genqa_n_chunks = st.number_input("Chunks to sample", 1, 1000, 30, key="genqa_n_chunks")
 
         st.markdown("##### Question generation")
         col_g3, col_g4 = st.columns(2)
         with col_g3:
             genqa_formats = st.multiselect(
-                "Question types", VALID_FORMATS, default=default_formats, key="genqa_formats",
+                "Question types", VALID_FORMATS, default=["open"], key="genqa_formats",
                 help="open: free-text  ·  tf: true/false  ·  mc: multiple choice  ·  fill_blank: fill-in-the-blank",
             )
-            genqa_n_questions = st.number_input("Total questions", 1, 1000, default_n_questions, key="genqa_n_questions")
+            genqa_n_questions = st.number_input("Total questions", 1, 1000, 20, key="genqa_n_questions")
         with col_g4:
             genqa_qpc = st.number_input(
-                "Questions per chunk", 1, 10, default_qpc, key="genqa_qpc",
+                "Questions per chunk", 1, 10, 1, key="genqa_qpc",
                 help="1 = new chunk per question.\n>1 = ask same chunk for multiple distinct questions.",
+            )
+
+        st.markdown("##### Filtering & Pre-validation Pass")
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            use_competitor = st.checkbox("Enable Competitor Filter", value=False, help="Queries vector DB to ensure the question is specific to this chunk.")
+            num_competitors = st.number_input("Number of competitor chunks to track", min_value=1, max_value=10, value=3, disabled=not use_competitor)
+        with col_f2:
+            validate_answer_mode = st.selectbox(
+                "Validate Answerable Pass (validate_answer.py)",
+                options=["Disabled", "Flag Failures", "Drop Failures"],
+                index=0,
+                help="Runs a secondary single-LLM pass to verify if the question is genuinely answerable."
             )
 
         st.markdown("##### Concurrency & summarization")
         col_gc1, col_gc2 = st.columns(2)
         with col_gc1:
             genqa_concurrency = st.number_input(
-                "Max concurrent LLM calls", min_value=1, max_value=50, value=default_concurrency,
+                "Max concurrent LLM calls", min_value=1, max_value=50, value=10,
                 key="genqa_concurrency",
                 help="How many LLM calls to run in parallel. Keep lower for rate-limited endpoints.",
             )
         with col_gc2:
             genqa_summarize = st.checkbox(
                 "Summarize chunks",
-                value=default_summarize, key="genqa_summarize",
+                value=False, key="genqa_summarize",
                 help="Adds a summarization step before question generation — chunk → summary → QnA.",
             )
         if genqa_summarize:
@@ -1183,23 +1146,30 @@ else:
         else:
             genqa_summary_sentences = 5
 
-        st.markdown("##### Validation")
+        # ── MODULAR LLM JUDGES SELECTION SECTION ─────────────────────────────
+        st.markdown("##### Active LLM Validation Judges")
+        st.caption("Toggle the independent agent modules to include in the validation gauntlet:")
+        
+        col_j1, col_j2, col_j3 = st.columns(3)
+        with col_j1:
+            j_grounding = st.checkbox("Grounding Judge", value=False, help="Ensures reference answers derive strictly from the text.")
+            j_domain = st.checkbox("Telecom Domain Relevance Judge", value=False, help="Filters out generic reading-comprehension prompts.")
+        with col_j2:
+            j_answerability = st.checkbox("Answerability Judge", value=False, help="Ensures the context has sufficient information to answer the question.")
+            j_faithfulness = st.checkbox("Faithfulness Judge", value=False, help="Checks for extraneous or hallucinated specification references.")
+        with col_j3:
+            j_semantic = st.checkbox("Semantic Correctness Judge", value=False, help="Guarantees logical integrity and nuance preservation.")
+            j_relevance = st.checkbox("Relevance Judge", value=False, help="Confirms questions target primary technical elements.")
+
+        st.markdown("##### Paths, Deduplication & Output Workflow")
         col_g5, col_g6 = st.columns(2)
         with col_g5:
-            genqa_validate = st.checkbox("Validate each question (second LLM pass)",
-                                          value=default_validate, key="genqa_validate")
-            genqa_drop_failures = st.checkbox("Drop questions that fail validation",
-                                               value=default_drop, key="genqa_drop",
-                                               disabled=not genqa_validate)
-        with col_g6:
+            #genqa_input_dir = st.text_input("Source documents directory (optional)", value=f"data/{source_type}", key="genqa_input_dir")
             dedup_options = ["exact", "prefix", "none"]
-            genqa_dedup = st.selectbox("Dedup mode", dedup_options,
-                                        index=dedup_options.index(default_dedup),
-                                        key="genqa_dedup")
-
-        st.markdown("##### Output")
-        genqa_output_dir = st.text_input("Output directory", value="draft_questions",
-                                          key="genqa_output_dir")
+            genqa_dedup = st.selectbox("Dedup mode", dedup_options, index=0, key="genqa_dedup")
+        with col_g6:
+            genqa_output_dir = st.text_input("Output directory", value="draft_questions", key="genqa_output_dir")
+            skip_review = st.checkbox("Skip Manual Review (Auto-approve and merge directly)", value=False)
 
         genqa_btn = st.button("Generate ▶", type="primary", key="genqa_btn")
 
@@ -1221,6 +1191,7 @@ else:
                     from qna_generation.flows import Flow
                     from qna_generation.io_utils import merge_with_existing, save_draft
                     from pathlib import Path as _Path
+                    import json
 
                     src_kwargs = dict(source_type=qna_source, corpus=source_type)
                     if qna_source == "chroma":
@@ -1244,33 +1215,41 @@ else:
                                        "max_concurrency": genqa_concurrency},
                         })
 
-                    # Route down to either specialized fine-tuning or basic generation
-                    if st.session_state.get("is_training_flow", False):
+                    # Base generator sequence
+                    block_specs.append({
+                        "type": "GenerateQuestionBlock",
+                        "params": {"formats": genqa_formats, "n": genqa_n_questions,
+                                   "questions_per_chunk": genqa_qpc,
+                                   "max_concurrency": genqa_concurrency},
+                    })
+
+                    # Inject Competitor Filter if checked
+                    if use_competitor:
                         block_specs.append({
-                            "type": "GenerateTrainingQABlock",
-                            "params": {"generator_model": qna_gen_model, "max_concurrency": genqa_concurrency}
-                        })
-                        block_specs.append({
-                            "type": "TokenWindowNegativeSamplerBlock",
-                            "params": {"low": 475, "high": 525, "negatives_k": 3}
-                        })
-                    else:
-                        block_specs.append({
-                            "type": "GenerateQuestionBlock",
-                            "params": {"formats": genqa_formats, "n": genqa_n_questions,
-                                       "questions_per_chunk": genqa_qpc,
-                                       "max_concurrency": genqa_concurrency},
+                            "type": "CompetitorFilterBlock",
+                            "params": {"num_competitors": num_competitors}
                         })
 
-                    # Multi-jury architecture expansion routing passes
-                    if genqa_validate and selected_template == "flowchart_jury_pipeline":
-                        block_specs.append({"type": "MultiPersonQuestionJuryBlock", "params": {"jury_size": 3}})
-                        block_specs.append({"type": "MultiPersonAnswerJuryBlock", "params": {"jury_size": 3}})
-                    elif genqa_validate:
+                    # Inject Validate Answerable Block Mode]
+                    if validate_answer_mode != "Disabled":
                         block_specs.append({
                             "type": "ValidateAnswerableBlock",
-                            "params": {"drop_failures": genqa_drop_failures},
+                            "params": {"drop_failures": (validate_answer_mode == "Drop Failures")}
                         })
+
+                    # Dynamically inject active modular judges
+                    if j_grounding:
+                        block_specs.append({"type": "GroundingJudgeBlock", "params": {"max_concurrency": genqa_concurrency}})
+                    if j_domain:
+                        block_specs.append({"type": "TelecomDomainRelevanceJudgeBlock", "params": {"max_concurrency": genqa_concurrency}})
+                    if j_answerability:
+                        block_specs.append({"type": "AnswerabilityJudgeBlock", "params": {"max_concurrency": genqa_concurrency}})
+                    if j_faithfulness:
+                        block_specs.append({"type": "FaithfulnessJudgeBlock", "params": {"max_concurrency": genqa_concurrency}})
+                    if j_semantic:
+                        block_specs.append({"type": "SemanticCorrectnessJudgeBlock", "params": {"max_concurrency": genqa_concurrency}})
+                    if j_relevance:
+                        block_specs.append({"type": "RelevanceJudgeBlock", "params": {"max_concurrency": genqa_concurrency}})
 
                     if genqa_dedup != "none":
                         block_specs.append({
@@ -1279,20 +1258,43 @@ else:
 
                     flow = Flow.from_dict({"name": "gui_flow", "blocks": block_specs})
                     flow.set_model_config(generator="openrouter", model=qna_gen_model)
-                    if genqa_validate:
-                        flow.set_validation_model_config(generator="openrouter",
-                                                         model=qna_val_model)
+                    
+                    # Bind validation credentials if any judge or validate pass is active
+                    if any([j_grounding, j_domain, j_answerability, j_faithfulness, j_semantic, j_relevance]) or validate_answer_mode != "Disabled":
+                        flow.set_validation_model_config(generator="openrouter", model=qna_val_model)
 
                     qa_pairs = flow.generate(source, source_type, log=_log)
                     _log(f"Generated {len(qa_pairs)} questions")
 
-                    existing_path = _Path("configs/eval_questions") / f"{source_type}.json"
-                    merged   = merge_with_existing(qa_pairs, existing_path)
-                    out_path = save_draft(merged, _Path(genqa_output_dir), source_type,
-                                          n_questions=len(qa_pairs), model=selected_template)
-                    _log(f"Saved -> {out_path}")
-                    st.success(f"Generated {len(qa_pairs)} draft questions -> {out_path}")
-                    st.session_state["last_draft_path"] = str(out_path)
+                    eval_path = _Path("configs/eval_questions") / f"{source_type}.json"
+
+                    # Check for Auto-Merge / Skip Review functionality
+                    if skip_review:
+                        _log("Skip review active: Auto-approving and merging directly into production eval set...")
+                        for q in qa_pairs:
+                            q["validated"] = True
+                            q["generated"] = False  # Set to approved target layout status
+                        
+                        eval_path.parent.mkdir(parents=True, exist_ok=True)
+                        existing = {"questions": []}
+                        if eval_path.exists():
+                            try:
+                                existing = json.loads(eval_path.read_text(encoding="utf-8"))
+                            except Exception:
+                                existing = {"questions": []}
+                        
+                        existing["questions"].extend(qa_pairs)
+                        eval_path.write_text(json.dumps(existing, indent=2, ensure_ascii=False), encoding="utf-8")
+                        _log(f"Successfully auto-merged {len(qa_pairs)} items into {eval_path}")
+                        st.success(f"Successfully auto-merged {len(qa_pairs)} questions directly into evaluation set! ✓")
+                    else:
+                        # Standard sequence: Save temporary review file layout
+                        merged   = merge_with_existing(qa_pairs, eval_path)
+                        out_path = save_draft(merged, _Path(genqa_output_dir), source_type,
+                                              n_questions=len(qa_pairs), model="automated_jury_flow")
+                        _log(f"Saved draft -> {out_path}")
+                        st.success(f"Generated {len(qa_pairs)} draft questions -> {out_path}")
+                        st.session_state["last_draft_path"] = str(out_path)
 
                 except Exception as e:
                     _log(f"ERROR: {e}")
