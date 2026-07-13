@@ -318,13 +318,22 @@ else:
         qna_collection = ""
 
     st.sidebar.markdown("---")
-    qna_gen_model = st.sidebar.text_input(
-        "Generation model", value="anthropic/claude-sonnet-4.5", key="qna_gen_model",
+    LLM_OPTIONS = _load_llm_keys()
+    
+    qna_gen_label = st.sidebar.selectbox(
+        "Generation model", 
+        options=list(LLM_OPTIONS.keys()),
+        key="qna_gen_label",
     )
-    qna_val_model = st.sidebar.text_input(
-        "Validation model", value="anthropic/claude-sonnet-4.5", key="qna_val_model",
-        help="Used by ValidateAnswerableBlock — can differ from generation model.",
+    qna_gen_model = LLM_OPTIONS[qna_gen_label]
+    
+    qna_val_label = st.sidebar.selectbox(
+        "Validation model", 
+        options=list(LLM_OPTIONS.keys()),
+        key="qna_val_label",
+        help="Used by validation judges — can differ from generation model.",
     )
+    qna_val_model = LLM_OPTIONS[qna_val_label]
     st.sidebar.markdown("---")
     st.sidebar.caption("Output goes to draft_questions/. Review in the Review QnA tab.")
 
