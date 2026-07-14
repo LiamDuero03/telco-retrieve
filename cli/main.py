@@ -9,16 +9,21 @@ from pathlib import Path
 def _load_chunking_strategies() -> list[str]:
     import json
     from pathlib import Path
-    path = Path("chunking_strategies.json")
+    # Correct path to look inside the configs/ directory
+    path = Path("configs") / "chunking_strategies.json" 
     if not path.exists():
-        return ["text_baseline"]
+        # Fallback to current directory if not found in configs
+        path = Path("chunking_strategies.json")
+        if not path.exists():
+            return ["text_baseline"]
     return list(json.loads(path.read_text(encoding="utf-8")).keys())
 
 
 def _load_enrichment_strategies() -> list[str]:
     import json
     from pathlib import Path
-    path = Path("enrichment_strategies.json")
+    path = Path("configs") / "enrichment_strategies.json"
+    
     if not path.exists():
         return ["none"]
     return list(json.loads(path.read_text(encoding="utf-8")).keys())

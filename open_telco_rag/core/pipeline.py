@@ -124,11 +124,15 @@ def ingest(
             # Otherwise, respect the exact strategy chosen from the Streamlit UI.
             user_strategy = active_kwargs.get("strategy", "text")
 
-            if user_strategy in ["text", "markdown"]:
-                if is_native_markdown or is_marker_output:
-                    active_kwargs["strategy"] = ChunkingStrategy.MARKDOWN
-                else:
-                    active_kwargs["strategy"] = ChunkingStrategy.TEXT
+            try:
+                # This automatically converts the string from the CLI (e.g., 'sliding_window_tokens')
+                # into the corresponding Enum member (ChunkingStrategy.SLIDING_WINDOW_TOKENS)
+                active_kwargs["strategy"] = ChunkingStrategy(active_kwargs.get("strategy", "text_baseline"))
+            except ValueError:
+                # If the provided string doesn't match an Enum value, safely fallback
+                print(f"  WARNING: Strategy '{active_kwargs.get('strategy')}' not recognized. Falling back to TEXT_BASELINE.")
+                active_kwargs["strategy"] = ChunkingStrategy.TEXT_BASELINE
+                
 
             # Extract our new enrichment parameter if it was passed through **chunk_kwargs
             enrichment_strategy = active_kwargs.pop("enrichment", "none")

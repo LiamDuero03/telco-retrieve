@@ -52,6 +52,8 @@ def _accumulate_chunks(
         ))
 
     return chunks
+
+
 def chunk_hierarchical_markdown(
     text: str,
     chunk_size: int = 4000,
@@ -131,6 +133,8 @@ def chunk_hierarchical_markdown(
         ))
         
     return chunks
+
+
 def chunk_text_baseline(
     text: str,
     chunk_size: int = 4000,
