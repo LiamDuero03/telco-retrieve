@@ -334,7 +334,7 @@ Documents (PDF / DOCX / YAML / Markdown)
         │
         ▼
    Dynamic Chunker       Routes text to selected strategies (e.g. baseline, tokens, 
-                         parent-child, lumber or information nuggets) via configs
+                         parent-child, lumberchunker) via configs
         │
         ▼
    Enrichment            Pre-embedding passes: Structural Tagging, Acronym Expansion 
@@ -371,7 +371,7 @@ open-telco-rag/
 │   ├── types.py
 │   ├── core/
 │   │   ├── pipeline.py          # Master orchestrator tracking stats and logging
-│   │   ├── chunking.py          # Implements multi-strategy splitters (Token, nuggets, etc.)
+│   │   ├── chunking.py          # Implements multi-strategy splitters (Token, etc.)
 │   │   ├── enrichment.py        # Implements metadata tagging, glossary, and LLM-aided expansion
 │   │   ├── retrieval.py         # Implements Multi-Method retrieval passes (Dense, BM25, and RRF)
 │   │   ├── cleaning.py

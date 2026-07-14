@@ -695,7 +695,7 @@ if is_rag:
                 if strat_meta["unit"] == "tokens":
                     chunk_kwargs["chunk_tokens"] = chunk_size
                     chunk_kwargs["overlap_tokens"] = overlap
-                elif selected_strategy in ["lumber_chunker", "information_nuggets"]:
+                elif selected_strategy in ["lumber_chunker"]:
                     if "llm_client" in st.session_state:
                         chunk_kwargs["llm_client"] = st.session_state["llm_client"]
                     else:

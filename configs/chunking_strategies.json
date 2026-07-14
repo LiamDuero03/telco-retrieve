@@ -43,14 +43,5 @@
     "default_overlap": 0,
     "min_size": 512,
     "max_size": 4096
-  },
-  "information_nuggets": {
-    "display_name": "Factual Information Nuggets",
-    "help_text": "Deserializes text into self-contained independent factual assertions so dense units are isolated.",
-    "unit": "characters",
-    "default_size": 1200,
-    "default_overlap": 0,
-    "min_size": 256,
-    "max_size": 2048
   }
 }

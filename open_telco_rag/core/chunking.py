@@ -17,7 +17,6 @@ class ChunkingStrategy(str, Enum):
     SLIDING_WINDOW_TOKENS = "sliding_window_tokens"  # Fixed token size with sliding window % overlap
     PARENT_CHILD = "parent_child"                    # Two-tier context tracking structures
     LUMBER_CHUNKER = "lumber_chunker"                # LLM-aided boundary mapping
-    INFORMATION_NUGGETS = "information_nuggets"      # Atomic proposition extraction
     TEXT_BASELINE = "text_baseline"                  # Plain paragraph baseline fall-back
 
 
@@ -277,116 +276,143 @@ def chunk_parent_child(
             global_child_idx += 1
 
     return hierarchical_chunks
-
+import re
+import concurrent.futures
+from typing import Any
+import tiktoken
+from open_telco_rag.types import Chunk
 
 def chunk_lumber_chunker(
     text: str,
     llm_client: Any,
-    model_name: str = "google/qwen-2.5-coder-32b",
+    model_name: str = "openai/gpt-4o-mini",
     source_type: str = "",
+    theta: int = 550,  # Optimal token context window from the paper
 ) -> list[Chunk]:
-    """Strategy 4: Lumber Chunker approach. Leverages LLM structural comprehension 
-    to break text precisely on logical context boundaries.
+    """Strategy 4: Lumber Chunker adapted for 3GPP Technical Specs.
+    Splits by major Markdown headers to process sections concurrently,
+    then executes the paper's rolling window shift-detection inside each section.
     """
     if not text or not text.strip():
         return []
 
-    system_prompt = (
-        "You are an advanced text analysis utility ('Lumber Chunker'). Your task is to look over a document text "
-        "and determine logical breaking points where a semantic shift or clear topical change occurs. "
-        "Return the content exactly as formatted arrays inside a clean valid JSON list structure. "
-        "Example output: [\"semantic chunk 1 text\", \"semantic chunk 2 text\"]"
-    )
+    tokenizer = tiktoken.get_encoding("cl100k_base")
 
-    try:
-        response = llm_client.completion.create(
-            model=model_name,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Analyze and split this document text semantically:\n\n{text}"}
-            ],
-            response_format={"type": "json_object"}
-        )
+    # Step 1: Divide by top-level markdown headers to allow parallelization
+    # This prevents the LLM from ever crossing a major Clause boundary by accident
+    section_pattern = re.compile(r"(^##?\s+.*$)", re.MULTILINE)
+    parts = section_pattern.split(text)
+    
+    sections = []
+    current_section = ""
+    for part in parts:
+        if section_pattern.match(part):
+            if current_section.strip():
+                sections.append(current_section)
+            current_section = part + "\n"
+        else:
+            current_section += part + "\n"
+    if current_section.strip():
+        sections.append(current_section)
+
+    # Step 2: Define the paper's rolling-window algorithm for a single section
+    def process_section(section_text: str, section_idx: int) -> list[str]:
+        # Split section into raw paragraphs
+        paragraphs = [p.strip() for p in section_text.split("\n\n") if p.strip()]
+        if not paragraphs:
+            return []
+
+        section_chunks = []
+        p_idx = 0
+        N = len(paragraphs)
+
+        while p_idx < N:
+            # Build Group (G_i) up to theta tokens
+            group_paras = []
+            group_tokens = 0
+            curr_slice_idx = p_idx
+            
+            while curr_slice_idx < N and group_tokens < theta:
+                para_text = f"ID {curr_slice_idx}: {paragraphs[curr_slice_idx]}"
+                group_paras.append(para_text)
+                group_tokens += len(tokenizer.encode(para_text))
+                curr_slice_idx += 1
+
+            # If there's only 1 paragraph left or we reached the end, consume it completely
+            if len(group_paras) <= 1 or p_idx == N - 1:
+                section_chunks.append("\n\n".join([p.split(": ", 1)[1] for p in group_paras]))
+                break
+
+            # Prompt exactly as specified in the LumberChunker paper (Appendix B)
+            document_context = "\n".join(group_paras)
+            system_prompt = (
+                "You will receive as input an English document with paragraphs identified by 'ID XXXX: <text>'.\n"
+                "Task: Find the first paragraph (not the first one) where the content clearly changes compared to the previous paragraphs.\n"
+                "Output: Return the ID of the paragraph with the content shift as in the exemplified format: 'Answer: ID XXXX'."
+            )
+            
+            try:
+                response = llm_client.completion.create(
+                    model=model_name,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": f"Document:\n{document_context}\n\nAnswer:"}
+                    ]
+                )
+                
+                # Extract the ID from "Answer: ID XXXX"
+                llm_output = response.choices[0].message.content
+                match = re.search(r"ID\s*(\d+)", llm_output, re.IGNORECASE)
+                
+                if match:
+                    shift_id = int(match.group(1))
+                    # Sanity check: Ensure the returned ID is actually inside our current window
+                    if p_idx < shift_id < curr_slice_idx:
+                        # Chunk spans from p_idx up to (but excluding) shift_id
+                        chunk_text = "\n\n".join(paragraphs[p_idx:shift_id])
+                        section_chunks.append(chunk_text)
+                        p_idx = shift_id  # Next group starts exactly where the shift occurred
+                        continue
+
+                # Fallback if LLM hallucinations an out-of-bounds ID or fails regex
+                raise ValueError("Invalid or out-of-bounds ID returned.")
+
+            except Exception:
+                # If the LLM call fails or returns garbage, advance by a baseline paragraph block
+                fallback_limit = min(p_idx + 3, N)
+                chunk_text = "\n\n".join(paragraphs[p_idx:fallback_limit])
+                section_chunks.append(chunk_text)
+                p_idx = fallback_limit
+
+        return section_chunks
+
+    # Step 3: Run the rolling windows concurrently across your structural sections
+    final_chunks = []
+    global_idx = 0
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {executor.submit(process_section, sec, i): i for i, sec in enumerate(sections)}
         
-        raw_content = response.choices[0].message.content
-        extracted_strings = json.loads(raw_content)
-        
-        if isinstance(extracted_strings, dict):
-            key = list(extracted_strings.keys())[0]
-            extracted_strings = extracted_strings[key]
+        # Gather results keeping track of structural order
+        ordered_results = [None] * len(sections)
+        for future in concurrent.futures.as_completed(futures):
+            idx = futures[future]
+            ordered_results[idx] = future.result()
 
-        return [
-            Chunk(text=segment.strip(), heading=None, chunk_index=i, source_type=source_type)
-            for i, segment in enumerate(extracted_strings) if segment.strip()
-        ]
-    except Exception as e:
-        print(f"[Warning] Lumber Chunker failed: {e}. Falling back to text baseline.")
-        return chunk_text_baseline(text, chunk_size=1500, source_type=source_type)
+    # Flatten out to official Chunk objects
+    for chunk_strings in ordered_results:
+        if chunk_strings:
+            for text_block in chunk_strings:
+                if text_block.strip():
+                    final_chunks.append(Chunk(
+                        text=text_block.strip(),
+                        heading=None,
+                        chunk_index=global_idx,
+                        source_type=source_type
+                    ))
+                    global_idx += 1
 
-
-def chunk_information_nuggets(
-    text: str,
-    llm_client: Any,
-    model_name: str = "google/qwen-2.5-coder-32b",
-    source_type: str = "",
-) -> list[Chunk]:
-    """Strategy 5: Deserializes text into self-contained propositions ('nuggets') 
-    so that only core dense factual units are isolated and embedded.
-    """
-    if not text or not text.strip():
-        return []
-
-    system_prompt = (
-        "You are a factual extraction engine. Dissect the target text into self-contained independent factual "
-        "assertions ('Information Nuggets'). Each nugget must be a single standalone declarative sentence "
-        "fully containing its context (substitute anaphoric reference pronouns with exact proper nouns). "
-        "Return your analysis as a flat JSON array of clean strings."
-    )
-
-    try:
-        response = llm_client.completion.create(
-            model=model_name,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Extract information nuggets from:\n\n{text}"}
-            ],
-            response_format={"type": "json_object"}
-        )
-        
-        raw_content = response.choices[0].message.content
-        nuggets = json.loads(raw_content)
-        if isinstance(nuggets, dict):
-            key = list(nuggets.keys())[0]
-            nuggets = nuggets[key]
-
-        chunks: list[Chunk] = []
-        current_block = ""
-        chunk_idx = 0
-        
-        for nugget in nuggets:
-            if len(current_block) + len(nugget) + 2 > 1200 and current_block:
-                chunks.append(Chunk(
-                    text=current_block.strip(),
-                    heading=None,
-                    chunk_index=chunk_idx,
-                    source_type=source_type
-                ))
-                chunk_idx += 1
-                current_block = ""
-            current_block = f"{current_block} {nugget}" if current_block else nugget
-
-        if current_block.strip():
-            chunks.append(Chunk(
-                text=current_block.strip(),
-                heading=None,
-                chunk_index=chunk_idx,
-                source_type=source_type
-            ))
-
-        return chunks
-    except Exception as e:
-        print(f"[Warning] Nugget Chunker failed: {e}. Falling back to text baseline.")
-        return chunk_text_baseline(text, chunk_size=1000, source_type=source_type)
+    return final_chunks
 
 # --- Infrastructure Interface Entry Point ---
 
@@ -417,7 +443,6 @@ def chunk_document(
         ChunkingStrategy.SLIDING_WINDOW_TOKENS: chunk_sliding_window_tokens,
         ChunkingStrategy.PARENT_CHILD: chunk_parent_child,
         ChunkingStrategy.LUMBER_CHUNKER: chunk_lumber_chunker,
-        ChunkingStrategy.INFORMATION_NUGGETS: chunk_information_nuggets,
         ChunkingStrategy.TEXT_BASELINE: chunk_text_baseline,
     }
 
