@@ -113,32 +113,48 @@ def ingest(
 
             source_type_str = source.__class__.__name__.lower().replace("source", "")
 
+            # Detect if this file has structured markdown markers
             is_native_markdown = file_path.suffix.lower() in [".md", ".yaml", ".yml"]
             is_marker_output   = use_marker and file_path.suffix.lower() in [".pdf", ".docx"]
+            is_structured      = is_native_markdown or is_marker_output
 
-            # Local runtime copy of runtime kwargs to prevent mutating shared state
+            # Local runtime copy of runtime kwargs
             active_kwargs = chunk_kwargs.copy()
             active_kwargs["source_type"] = source_type_str
 
-            # Fall back to structural text/markdown overrides ONLY if the user selected the baseline path.
-            # Otherwise, respect the exact strategy chosen from the Streamlit UI.
-            user_strategy = active_kwargs.get("strategy", "text")
-
+            # 1. Resolve user strategy
+            user_strategy_str = active_kwargs.get("strategy", "text_baseline")
+            
             try:
-                # This automatically converts the string from the CLI (e.g., 'sliding_window_tokens')
-                # into the corresponding Enum member (ChunkingStrategy.SLIDING_WINDOW_TOKENS)
-                active_kwargs["strategy"] = ChunkingStrategy(active_kwargs.get("strategy", "text_baseline"))
+                user_strategy = ChunkingStrategy(user_strategy_str)
             except ValueError:
-                # If the provided string doesn't match an Enum value, safely fallback
-                print(f"  WARNING: Strategy '{active_kwargs.get('strategy')}' not recognized. Falling back to TEXT_BASELINE.")
-                active_kwargs["strategy"] = ChunkingStrategy.TEXT_BASELINE
-                
+                print(f"  WARNING: Strategy '{user_strategy_str}' not recognized. Falling back to TEXT_BASELINE.")
+                user_strategy = ChunkingStrategy.TEXT_BASELINE
 
-            # Extract our new enrichment parameter if it was passed through **chunk_kwargs
+            # 2. VALIDATION: Check if strategy is compatible with file structure
+            # Define strategies that STRICTLY require Markdown headers to split
+            structure_required_strategies = {
+                ChunkingStrategy.HIERARCHICAL_MARKDOWN,
+                ChunkingStrategy.PARENT_CHILD
+            }
+
+            if not is_structured and user_strategy in structure_required_strategies:
+                # Force fallback because raw text has no headers to split on
+                fallback_strategy = ChunkingStrategy.TEXT_BASELINE
+                print(f"  ⚠️ WARNING: '{user_strategy.value}' requires structured headers, "
+                      f"but '{file_path.name}' is unstructured. Falling back to '{fallback_strategy.value}'.")
+                active_kwargs["strategy"] = fallback_strategy
+            else:
+                active_kwargs["strategy"] = user_strategy
+
+            # Pass the layout capability flag down to the chunker as well
+            active_kwargs["is_structured"] = is_structured
+
+            # Extract enrichment parameters
             enrichment_strategy = active_kwargs.pop("enrichment", "none")
-            enrichment_model    = active_kwargs.pop("enrichment_model", "google/qwen-2.5-coder-32b") # <-- Capture it here
+            enrichment_model    = active_kwargs.pop("enrichment_model", "google/qwen-2.5-coder-32b")
 
-            # Execute the orchestrated master strategy chunker
+            # Execute the validated, safe strategy chunker
             chunks = chunk_document(text=text, **active_kwargs)
             chunks = [c for c in chunks if len(c.text.strip()) >= min_length]
 

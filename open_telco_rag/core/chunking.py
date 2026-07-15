@@ -442,6 +442,9 @@ def chunk_document(
     **kwargs: Any,
 ) -> list[Chunk]:
     """Master orchestration function to route text data to selected chunking strategy."""
+
+    is_structured = kwargs.pop("is_structured", False)
+    
     _STRATEGY_MAP = {
         ChunkingStrategy.HIERARCHICAL_MARKDOWN: chunk_hierarchical_markdown,
         ChunkingStrategy.SLIDING_WINDOW_TOKENS: chunk_sliding_window_tokens,
