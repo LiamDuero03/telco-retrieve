@@ -834,6 +834,8 @@ if is_rag:
 
                     def _bl(v):
                         return round(max(0, v), 3) if v is not None and v >= 0 else None
+                    
+                    q_filename = Path(questions_file).name if questions_file else f"{source_type}.json"
 
                     lb_row = {
                         "timestamp":             __import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -842,6 +844,7 @@ if is_rag:
                         "embedder":              model_key,
                         "corpus":               source_type,
                         "collection":            col_name,
+                        "questions_file":         q_filename,
                         "top_k":                 top_k_eval,
                         "n_questions":           result.n_questions,
                         "faithfulness":          round(result.mean_faithfulness, 3),
@@ -1004,10 +1007,11 @@ if is_rag:
                         display_cols = {
                             "rank": "Rank", "rag_model": "Generator",
                             "evaluator_model": "Evaluator", "embedder": "Embedder",
-                            "collection": "Collection", "faithfulness": "Faithful",
+                            "collection": "Collection","questions_file" :"Question Set",
+                            "faithfulness": "Faithful",
                             "answer_relevancy": "Relevancy", "mean_similarity": "Similarity",
                             "context_recall": "Recall", "answer_correctness": "Correctness",
-                            "average": "RAG Avg ↓",
+                            "average": "RAG Avg",
                         }
                         if has_baseline:
                             display_cols.update({

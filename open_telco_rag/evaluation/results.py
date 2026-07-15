@@ -44,6 +44,8 @@ class CorpusResult:
     top_k:     int = 5
     timestamp: str = ""
 
+    questions_file: str = ""
+
     n_questions: int = 0
 
     # ── Tier 1 aggregates ─────────────────────────────────────────────────────

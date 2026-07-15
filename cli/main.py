@@ -466,6 +466,7 @@ def _run_evaluate(args) -> None:
                 corpus           = corpus,
                 collection       = col_name,
                 reranker_model   = args.reranker_model if args.rerank else None,
+                questions_file   = getattr(args, "questions_file", None),
             )
 
 
@@ -478,6 +479,7 @@ def _update_leaderboard(
     collection:       str,
     baseline_result   = None,
     reranker_model:   str | None = None,
+    questions_file:   str | None = None,
 ) -> None:
     """Append one row to the leaderboard JSON file."""
     import json
@@ -488,6 +490,15 @@ def _update_leaderboard(
                   r.mean_similarity, r.mean_context_recall, r.mean_answer_correctness]
         valid = [s for s in scores if s >= 0]
         return round(sum(valid) / len(valid), 3) if valid else -1.0
+    
+    # Extract the filename or fallback to default
+    q_file_label = "default"
+    if questions_file:
+        q_file_label = Path(questions_file).name
+    elif hasattr(result, "questions_file") and result.questions_file:
+        q_file_label = Path(result.questions_file).name
+    else:
+        q_file_label = f"{corpus}.json"
 
     row = {
         "timestamp":             datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -495,6 +506,7 @@ def _update_leaderboard(
         "evaluator_model":       evaluator_model,
         "embedder":              result.model,
         "corpus":                corpus,
+        "questions_file":        q_file_label,
         "collection":            collection,
         "top_k":                 result.top_k,
         "n_questions":           result.n_questions,

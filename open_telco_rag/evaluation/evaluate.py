@@ -180,6 +180,16 @@ def evaluate_corpus(
         (rag_result, baseline_result) — baseline_result is None if
         include_baseline=False.
     """
+    # 1. Track the source questions path or use the default
+    # You can infer or pass down the name of the file loaded:
+    questions_source_name = "default"
+    if questions:
+        # If questions were passed manually
+        questions_source_name = "custom_list"
+    else:
+        # If default questions file was loaded (e.g., configs/eval_questions/3gpp.json)
+        questions_source_name = f"{corpus}.json"
+        
     qs = questions or load_questions(corpus)
 
     print(f"\nEvaluating {corpus.upper()} — {len(qs)} questions | "
@@ -210,6 +220,7 @@ def evaluate_corpus(
     rag_result = CorpusResult(
         corpus=corpus, model=model, top_k=top_k,
         timestamp=datetime.now().strftime("%Y%m%d_%H%M%S"),
+        questions_file=questions_source_name,
         question_results=rag_results,
         **aggregate(rag_results),
     )
