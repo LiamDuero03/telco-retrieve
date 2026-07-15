@@ -54,10 +54,18 @@ st.markdown("""
     }
     .col-row {
         display: flex; justify-content: space-between; padding: 8px 12px;
-        background: #f5f5f5; border-radius: 8px; margin-bottom: 5px; font-size: 0.85rem;
+        background: var(--secondary-background-color, #f5f5f5); 
+        border: 1px solid rgba(128, 128, 128, 0.2);
+        border-radius: 8px; margin-bottom: 5px; font-size: 0.85rem;
     }
-    .col-name { font-weight: 500; }
-    .col-count { color: #888; }
+    .col-name { 
+        font-weight: 500;
+        color: var(--text-color, #31333F); 
+    }
+    .col-count { 
+        color: var(--text-color, #31333F); 
+        opacity: 0.65; 
+    }
     .eval-row {
         display: flex; justify-content: space-between; align-items: center;
         padding: 8px 14px; border-radius: 8px; margin-bottom: 4px; font-size: 0.85rem;
