@@ -42,7 +42,25 @@ def execute_retrieval(
     if search_method in ["dense", "hybrid"]:
         vector = embedder.embed([query])[0]
         dense_results = store.search(vector, n_results=candidate_k)
-        dense_results = [r for r in dense_results if r.distance < threshold]
+        
+        # --- PROFESSIONAL THRESHOLD HANDLING ---
+        # If threshold is 1.0 (default CLI behavior), let everything pass
+        if 0.0 < threshold < 1.0:
+            # Detect space metric from the store metadata if available, fallback to "l2"
+            space = "l2"
+            if hasattr(store, "metadata") and store.metadata:
+                space = store.metadata.get("hnsw:space", "l2").lower()
+            elif hasattr(store, "_collection") and hasattr(store._collection, "metadata") and store._collection.metadata:
+                space = store._collection.metadata.get("hnsw:space", "l2").lower()
+
+            if space == "cosine":
+                # Cosine distance = 1 - cosine similarity
+                distance_limit = 1.0 - threshold
+            else:
+                # L2 distance conversion: similarity = 1 / (1 + distance)
+                distance_limit = (1.0 / threshold) - 1.0
+
+            dense_results = [r for r in dense_results if r.distance < distance_limit]
 
     # 2. Execute BM25 Keyword Filter Pass
     if search_method in ["bm25", "hybrid"]:

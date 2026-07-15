@@ -36,8 +36,12 @@ st.markdown("""
         border: 1px solid #f0d080; margin-left: 6px;
     }
     .answer-box {
-        background: #f8f8f8; border: 1px solid #e8e8e8;
-        border-radius: 10px; padding: 1rem 1.2rem; margin-top: 0.5rem;
+        background: var(--secondary-background-color, #f8f8f8); 
+        color: var(--text-color, #31333F); /* <-- Uses Streamlit's native text color */
+        border: 1px solid var(--border-color, rgba(128, 128, 128, 0.2));
+        border-radius: 10px; 
+        padding: 1rem 1.2rem; 
+        margin-top: 0.5rem;
     }
     .result-card {
         background: #ffffff; border: 1px solid #e8e8e8;
@@ -470,7 +474,7 @@ if is_rag:
                     embedder = _get_embedder(model_key)
                     store    = _get_store(source_type, model_key, db_path, collection_override)
                     results  = search(question, store=store, embedder=embedder,
-                                      top_k=top_k_ask, threshold=1.0 - threshold_ask,
+                                      top_k=top_k_ask, threshold=threshold_ask,
                                       search_method=selected_search_method)
                     answer   = generate(question, results, source_type=source_type,
                                         generator=_build_generator(llm_model))
@@ -542,7 +546,7 @@ if is_rag:
                     embedder = _get_embedder(model_key)
                     store    = _get_store(source_type, model_key, db_path, collection_override)
                     results  = search(query, store=store, embedder=embedder,
-                                      top_k=top_k_search, threshold=1.0 - threshold_search,
+                                      top_k=top_k_search, threshold=threshold_search,
                                       search_method=selected_search_method_s)
                     if not results:
                         st.info("No results found.")
