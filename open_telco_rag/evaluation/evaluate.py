@@ -24,37 +24,15 @@ from open_telco_rag.evaluation.metrics.ground_truth import (
     context_recall, answer_correctness,
 )
 
-
-def _build_generator(llm_call: Callable[[str, int], str]):
+def _build_generator(llm_call: Callable[[str, int], str], model_name: str | None = None):
     """Wrap an llm_call callable as a generator for pipeline.generate()."""
-    class _CallableGenerator:
-        def generate(self, question: str, results: list, source_type: str = "telecom") -> dict:
-            if not results:
-                return {
-                    "answer":           "No relevant chunks found.",
-                    "sources":          [],
-                    "chunks_used":      0,
-                    "retrieved_chunks": [],
-                }
-            context = "\n\n---\n\n".join(r.text for r in results)
-            sources = list({r.metadata.get("source", "") for r in results})
-            prompt  = (
-                f"You are a {source_type} technical expert. "
-                "Answer the question using only the context provided. "
-                "If the answer is not in the context, say so clearly. "
-                "Be precise and technical.\n\n"
-                f"Context:\n{context}\n\n"
-                f"Question: {question}\n\nAnswer:"
-            )
-            answer = llm_call(prompt, max_tokens=1000)
-            return {
-                "answer":           answer,
-                "sources":          sources,
-                "chunks_used":      len(results),
-                "retrieved_chunks": [r.text for r in results],
-            }
-    return _CallableGenerator()
-
+    from open_telco_rag.generators.openrouter import OpenRouterGenerator
+    
+    # Use default if none provided
+    if not model_name:
+        model_name = "meta-llama/llama-3.1-8b-instruct"
+        
+    return OpenRouterGenerator(model=model_name)
 
 def _build_baseline_generator(llm_call: Callable[[str, int], str]):
     """Generator that answers from LLM knowledge only — no context chunks."""
@@ -88,6 +66,7 @@ def evaluate_question(
     reranker:      Any   = None,
     rerank_top_k:  int   = 5,
     debug:         bool  = False,
+    rag_model_name: str | None = None,
 ) -> QuestionResult:
     """Run all applicable metrics for one question.
 
@@ -103,6 +82,7 @@ def evaluate_question(
     )
 
     try:
+        start_time = time.perf_counter()
         if baseline:
             # No retrieval — answer from LLM knowledge only
             retrieved = []
@@ -113,10 +93,16 @@ def evaluate_question(
         else:
             retrieved = search(q.question, store=store, embedder=embedder,
                                 top_k=top_k, reranker=reranker, rerank_top_k=rerank_top_k)
-            generator = _build_generator(rag_llm_call or llm_call)
+            generator = _build_generator(rag_llm_call or llm_call, model_name=rag_model_name)
             gen       = generate(q.question, retrieved,
                                  source_type=q.corpus,
                                  generator=generator)
+        
+        # Extract metrics from generation result
+        result.latency = time.perf_counter() - start_time
+        usage = gen.get("usage", {})
+        result.prompt_tokens = usage.get("prompt_tokens", 0)
+        result.completion_tokens = usage.get("completion_tokens", 0)
 
         answer         = gen.get("answer", "")
         result.answer  = answer
@@ -153,6 +139,9 @@ def evaluate_question(
 
     except Exception as e:
         result.error = str(e)
+        result.latency = 0.0
+        result.prompt_tokens = 0
+        result.completion_tokens = 0
 
     return result
 
@@ -173,6 +162,7 @@ def evaluate_corpus(
     reranker:      Any   = None,
     rerank_top_k:  int   = 5,
     debug:         bool  = False,
+    rag_generator_model: str | None = None,
 ) -> tuple[CorpusResult, CorpusResult | None]:
     """Run the full evaluation suite for one corpus.
 
@@ -196,6 +186,9 @@ def evaluate_corpus(
           f"model={model} | top-k={top_k}"
           + (" | +BASELINE" if include_baseline else "")
           + (" | DEBUG ON" if debug else ""))
+    
+    # Default fallback string if none is provided down the pipe
+    resolved_rag_model = rag_generator_model or "meta-llama/llama-3.1-8b-instruct"
 
     # ── RAG pass ──────────────────────────────────────────────────────────────
     rag_results = []
@@ -204,7 +197,8 @@ def evaluate_corpus(
         qr = evaluate_question(q, store, embedder, top_k, sim_threshold,
                                llm_call=llm_call, rag_llm_call=rag_llm_call,
                                baseline=False, reranker=reranker,
-                               rerank_top_k=rerank_top_k, debug=debug)
+                               rerank_top_k=rerank_top_k, debug=debug,
+                               rag_model_name=resolved_rag_model)
         rag_results.append(qr)
         if qr.error:
             print(f"    [ERROR] {qr.error}")

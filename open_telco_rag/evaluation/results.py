@@ -20,6 +20,12 @@ class QuestionResult:
     sources:     list[str]
     chunks_used: int
 
+    # ── EFFICIENCY METRICS  ───────────────────────────────────────
+    latency:           float = 0.0
+    prompt_tokens:     int   = 0
+    completion_tokens: int   = 0
+    cost:              float = 0.0
+
     # ── Tier 1: no ground truth ───────────────────────────────────────────────
     faithfulness:     float = 0.0
     answer_relevancy: float = 0.0

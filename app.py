@@ -754,12 +754,7 @@ if is_rag:
             top_k_eval = st.number_input("Top K", 1, 20, 5, key="eval_topk")
             output_dir = st.text_input("Output directory", value="results/gui")
         with col_e2:
-            METRICS_LLM_OPTIONS = {
-                "Claude Sonnet 4.5": "anthropic/claude-sonnet-4.5",
-                "Claude Sonnet 4":   "anthropic/claude-sonnet-4",
-                "GPT-4o":            "openai/gpt-4o",
-                "Llama 3.3 70B":     "meta-llama/llama-3.3-70b-instruct",
-            }
+            METRICS_LLM_OPTIONS = _load_llm_keys() 
             metrics_llm_label = st.selectbox("Metrics evaluation model",
                                              list(METRICS_LLM_OPTIONS.keys()))
             eval_delay = st.slider("Delay between questions (s)", 0.0, 5.0, 1.0, 0.5)
@@ -825,7 +820,7 @@ if is_rag:
                         questions=questions, model=model_key, top_k=top_k_eval,
                         delay=eval_delay, output_dir=Path(output_dir),
                         llm_call=llm_call, rag_llm_call=rag_llm_call,
-                        include_baseline=include_baseline,
+                        include_baseline=include_baseline,rag_generator_model=rag_llm_model,
                     )
                     _eval_mod.evaluate_question = _orig_eq
                     progress_bar.progress(1.0, text="Done ✓")
@@ -841,6 +836,8 @@ if is_rag:
                     
                     q_filename = Path(questions_file).name if questions_file else f"{source_type}.json"
 
+                    total_cost = sum(getattr(q, "cost", 0.0) for q in result.question_results)
+
                     lb_row = {
                         "timestamp":             __import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M"),
                         "rag_model":             rag_llm_model,
@@ -851,6 +848,9 @@ if is_rag:
                         "questions_file":         q_filename,
                         "top_k":                 top_k_eval,
                         "n_questions":           result.n_questions,
+                        "avg_generation_latency_sec": round(sum(getattr(q, "latency", 0.0) for q in result.question_results) / max(1, len(result.question_results)), 2),
+                        "total_api_tokens":      sum(getattr(q, "prompt_tokens", 0) + getattr(q, "completion_tokens", 0) for q in result.question_results),
+                        "estimated_run_cost_usd": round(total_cost, 5), 
                         "faithfulness":          round(result.mean_faithfulness, 3),
                         "answer_relevancy":      round(result.mean_answer_relevancy, 3),
                         "mean_similarity":       round(result.mean_similarity, 3),
@@ -1012,6 +1012,9 @@ if is_rag:
                             "rank": "Rank", "rag_model": "Generator",
                             "evaluator_model": "Evaluator", "embedder": "Embedder",
                             "collection": "Collection","questions_file" :"Question Set",
+                            "avg_generation_latency_sec": "Latency (s)",
+                            "total_api_tokens": "Total Tokens",
+                            "estimated_run_cost_usd": "Cost (USD)",
                             "faithfulness": "Faithful",
                             "answer_relevancy": "Relevancy", "mean_similarity": "Similarity",
                             "context_recall": "Recall", "answer_correctness": "Correctness",
@@ -1030,6 +1033,11 @@ if is_rag:
                                                  "Recall","Correctness","BL Correctness","BL Recall","BL Avg"]}
                         col_config.update({k: st.column_config.NumberColumn(format="%+.3f")
                                            for k in ["Δ Correctness","Δ Recall","Δ Avg"]})
+                        col_config.update({
+                                        "Latency (s)": st.column_config.NumberColumn(format="%.2f s"),
+                                        "Total Tokens": st.column_config.NumberColumn(format="%d"),
+                                        "Cost (USD)": st.column_config.NumberColumn(format="$ %.5f")
+                        })
                         st.dataframe(df_display, use_container_width=True, hide_index=True,
                                      column_config=col_config)
 

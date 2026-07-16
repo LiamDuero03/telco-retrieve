@@ -37,6 +37,18 @@ RECOMMENDED_MODELS = {
     "command-r-plus": "cohere/command-r-plus",
 }
 
+# Pricing per 1M tokens: (Input/Prompt Cost USD, Output/Completion Cost USD)
+# Updated 2026 baseline rates
+MODEL_PRICING = {
+    "meta-llama/llama-3.1-8b-instruct":   (0.055, 0.055),
+    "meta-llama/llama-3.1-70b-instruct":  (0.35,  0.40),
+    "meta-llama/llama-3.1-405b-instruct": (2.66,  2.66),
+    "openai/gpt-4o":                      (2.50,  10.00),
+    "openai/gpt-4o-mini":                 (0.150, 0.600),
+    "google/gemini-flash-1.5":            (0.075, 0.300),
+    "google/gemini-pro-1.5":              (1.25,  5.00),
+}
+
 
 class OpenRouterGenerator:
     """Generate answers using any model via OpenRouter.
@@ -67,12 +79,19 @@ class OpenRouterGenerator:
         max_tokens:  int   = 1000,
         temperature: float = 0.0,
         api_key:     str | None = None,
+        site_url:    str   = "",
+        site_name:   str   = "Open Telco RAG",
     ):
         # Resolve short key to full model ID
         self.model       = RECOMMENDED_MODELS.get(model, model)
         self.max_tokens  = max_tokens
         self.temperature = temperature
         self._api_key    = api_key or os.environ.get("OPENROUTER_API_KEY")
+        self.site_url    = site_url
+        self.site_name   = site_name
+
+        self.last_usage  = {}
+        self.last_cost   = 0.0
 
         if not self._api_key:
             raise ValueError(
@@ -142,11 +161,21 @@ class OpenRouterGenerator:
 
         answer = data["choices"][0]["message"]["content"].strip()
 
+        # Extract and compute cost based on specific pricing structures
+        self.last_usage = data.get("usage", {})
+        prompt_tokens = self.last_usage.get("prompt_tokens", 0)
+        completion_tokens = self.last_usage.get("completion_tokens", 0)
+
+        # Resolve pricing (default to llama-3.1-70b rates if model is untracked)
+        price_in, price_out = MODEL_PRICING.get(self.model, (0.35, 0.40))
+        self.last_cost = ((prompt_tokens / 1_000_000) * price_in) + ((completion_tokens / 1_000_000) * price_out)
+
         return {
             "answer":           answer,
             "sources":          sources,
             "chunks_used":      len(results),
             "retrieved_chunks": [r.text for r in results],
             "model":            self.model,
-            "usage":            data.get("usage", {}),
+            "usage":            self.last_usage,
+            "cost":             self.last_cost,
         }

@@ -454,6 +454,7 @@ def _run_evaluate(args) -> None:
             reranker          = reranker,
             rerank_top_k      = args.rerank_top_k,
             debug             = args.debug,
+            rag_generator_model=rag_generator_model,
         )
 
         if not args.no_leaderboard:
@@ -491,6 +492,17 @@ def _update_leaderboard(
         valid = [s for s in scores if s >= 0]
         return round(sum(valid) / len(valid), 3) if valid else -1.0
     
+    q_results = getattr(result, "question_results", [])
+    
+    import statistics
+    # Calculate averages across all processed questions
+    avg_latency = statistics.mean([getattr(q, "latency", 0.0) for q in q_results]) if q_results else 0.0
+    total_prompt_tokens = sum([getattr(q, "prompt_tokens", 0) for q in q_results])
+    total_completion_tokens = sum([getattr(q, "completion_tokens", 0) for q in q_results])
+    
+    # Cost Estimation: (Blended rate example: $0.70/M input, $0.90/M output)
+    estimated_cost = ((total_prompt_tokens / 1_000_000) * 0.70) + ((total_completion_tokens / 1_000_000) * 0.90)
+    
     # Extract the filename or fallback to default
     q_file_label = "default"
     if questions_file:
@@ -511,6 +523,9 @@ def _update_leaderboard(
         "top_k":                 result.top_k,
         "n_questions":           result.n_questions,
         "reranker":              reranker_model or "none",
+        "avg_generation_latency_sec": round(avg_latency, 2),
+        "total_api_tokens":      total_prompt_tokens + total_completion_tokens,
+        "estimated_run_cost_usd": round(estimated_cost, 5),
         "faithfulness":          round(result.mean_faithfulness,               3),
         "answer_relevancy":      round(result.mean_answer_relevancy,           3),
         "mean_similarity":       round(result.mean_similarity,                 3),
