@@ -60,7 +60,7 @@ def main(argv: list[str] | None = None) -> None:
                           default="none",
                           help="Select a metadata/content enrichment strategy dynamically mapped from enrichment_strategies.json.")
     p_ingest.add_argument("--enrichment-model",
-                          default="google/qwen-2.5-coder-32b",
+                          default="openai/gpt-4o-mini",
                           help="The LLM model string to use when running an LLM-based enrichment strategy.")
     p_ingest.add_argument("--strategy",
                           choices=_load_chunking_strategies(),

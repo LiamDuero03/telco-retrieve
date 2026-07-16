@@ -152,7 +152,7 @@ def ingest(
 
             # Extract enrichment parameters
             enrichment_strategy = active_kwargs.pop("enrichment", "none")
-            enrichment_model    = active_kwargs.pop("enrichment_model", "google/qwen-2.5-coder-32b")
+            enrichment_model    = active_kwargs.pop("enrichment_model", "openai/gpt-4o-mini")
 
             # Execute the validated, safe strategy chunker
             chunks = chunk_document(text=text, **active_kwargs)
