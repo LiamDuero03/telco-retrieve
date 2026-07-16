@@ -7,9 +7,10 @@
         "model_name": "anthropic/claude-sonnet-4",
         "description": "High-reliability long-context reasoning baseline"
     },
-    "Claude Haiku 4.5": {
+    "Claude Haiku 4.5": { 
         "model_name": "anthropic/claude-haiku-4-5",
-        "description": "Fast, high-efficiency lightweight analytical runner"
+        "description": "Fast, high-efficiency lightweight analytical runner",
+        "comment": "This endpoint does not work"
     },
     "GPT-4o": {
         "model_name": "openai/gpt-4o",
