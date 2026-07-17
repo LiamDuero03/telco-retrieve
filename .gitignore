@@ -57,6 +57,7 @@ download/
 sweep_ingestions.py
 view_my_chunks.py
 reset_db.py
+test.py
 
 # Local utility scripts
 convert_qna.py
