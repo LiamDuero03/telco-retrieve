@@ -209,6 +209,8 @@ open-telco-rag ingest oran \
 | `--no-resume` | off | Disable resume — re-ingest all files |
 | `--use-marker` | off | Use Datalab Marker API for PDF preprocessing |
 | `--collection` | `source_model` | Override collection name |
+| `--embed-backend` | `local` | Backend for computing vector embeddings: `local` (CPU/GPU) or `openrouter` (Cloud APIs) |
+| `--batch-size` | 64 / 5000 | Parallel payload size. Defaults to 64 locally, or 5000 for high-throughput OpenRouter bulk ingestion |
 
 ### Marker preprocessing
 
@@ -241,6 +243,7 @@ open-telco-rag ask "What does TS 28.312 define for intent?" \
 | `--reranker-model` | `ms-marco-minilm` | Reranker key from `configs/reranker_models.json` |
 | `--rerank-top-k` | 5 | Chunks to keep after reranking |
 | `--collection` | `source_model` | Override collection name |
+| `--embed-backend` | `local` | Backend for computing vector embeddings (`local` or `openrouter`) |
 
 ### Reranker models
 
@@ -283,6 +286,8 @@ open-telco-rag evaluate 3gpp \
 | `--reranker-model` | `ms-marco-minilm` | Reranker model key |
 | `--include-baseline` | off | Run no-retrieval baseline pass |
 | `--leaderboard` | `results/leaderboard.json` | Leaderboard output path |
+`--embed-backend` | `local` | Backend for computing vector embeddings (`local` or `openrouter`) |
+| `--inject-metadata` | off | Simulates domain expert queries by dynamically prepending canonical source IDs to evaluation questions |
 
 ---
 
@@ -290,25 +295,26 @@ open-telco-rag evaluate 3gpp \
 
 ```python
 from open_telco_rag.sources.oran import ORANSource
-from open_telco_rag.embedders.sentense_transformers import SentenceTransformerEmbedder
+from open_telco_rag.embedders.openrouter_embedder import OpenRouterEmbedder
 from open_telco_rag.stores.chroma import ChromaStore
 from open_telco_rag.generators.openrouter import OpenRouterGenerator
 from open_telco_rag.core.pipeline import ingest, search, generate
 
-# Ingest
+# Ingest (Using OpenRouter for High-Throughput Bulk Processing)
 source   = ORANSource()
-embedder = SentenceTransformerEmbedder(model_key="bge")
+embedder = OpenRouterEmbedder(model_key="bge", batch_size=200) # Throttled safely for OpenAI limits
 store    = ChromaStore(path="chroma_db", collection_name="oran_bge", metadata={"hnsw:space": "cosine"})
 ingest(
     source=source, 
     store=store, 
     embedder=embedder, 
     data_dir="data/oran/",
-    strategy="sliding_window_tokens", # Configurations parsed dynamically from config registry files
+    strategy="sliding_window_tokens",
     chunk_tokens=512,
     overlap_tokens=50,
-    enrichment="llm_metadata",       # Run domain expansion transformations before computing matrices
-    enrichment_model="google/qwen-2.5-coder-32b"
+    enrichment="llm_metadata",
+    enrichment_model="google/qwen-2.5-coder-32b",
+    batch_size=5000 # Feed 5,000 chunks concurrently to the embedder!
 )
 
 # Search
@@ -316,8 +322,7 @@ results = search("E2 interface service models", store=store, embedder=embedder, 
 
 # Generate
 generator = OpenRouterGenerator(model="meta-llama/llama-3.3-70b-instruct")
-answer    = generate("What does WG3 define for the E2 interface?", results,
-                     generator=generator)
+answer    = generate("What does WG3 define for the E2 interface?", results, generator=generator)
 print(answer["answer"])
 ```
 
@@ -341,8 +346,9 @@ Documents (PDF / DOCX / YAML / Markdown)
                          or dynamic LLM Domain Expansion (metadata tracking)
         │
         ▼
-   Embedder              SentenceTransformerEmbedder (local)
-                         general-purpose or OTel telecom-domain models
+   Embedder              SentenceTransformerEmbedder (local GPU/CPU)
+                         OR OpenRouterEmbedder (Cloud API ThreadPool)
+        |                 general-purpose or OTel telecom-domain models
         |
         ▼
    ChromaDB              Persistent vector store via configurable space metrics 
