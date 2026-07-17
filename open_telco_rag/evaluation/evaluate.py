@@ -66,7 +66,8 @@ def evaluate_question(
     rerank_top_k:  int   = 5,
     debug:         bool  = False,
     rag_model_name: str | None = None,
-    inject_metadata: bool = False, # NEW PARAMETER
+    inject_metadata: bool = False, 
+    search_method: str = "dense",
 ) -> QuestionResult:
     """Run all applicable metrics for one question."""
     from open_telco_rag.core.pipeline import search, generate
@@ -86,21 +87,25 @@ def evaluate_question(
         if baseline:
             retrieved = []
             generator = _build_baseline_generator(rag_llm_call or llm_call)
-            # Use active_question instead of q.question
-            gen       = generate(active_question, retrieved,
-                                 source_type=q.corpus,
-                                 generator=generator)
+            
+            gen_start = time.perf_counter()
+            gen       = generate(active_question, retrieved, source_type=q.corpus, generator=generator)
+            result.gen_latency = time.perf_counter() - gen_start
+            result.search_latency = 0.0
         else:
-            # Use active_question instead of q.question
+            # Time the search retrieval pass
+            search_start = time.perf_counter()
             retrieved = search(active_question, store=store, embedder=embedder,
-                                top_k=top_k, reranker=reranker, rerank_top_k=rerank_top_k)
+                               top_k=top_k, reranker=reranker, rerank_top_k=rerank_top_k,
+                               search_method=search_method) # PASSED DOWN
+            result.search_latency = time.perf_counter() - search_start
+            
+            # Time the text generation pass
+            gen_start = time.perf_counter()
             generator = _build_generator(rag_llm_call or llm_call, model_name=rag_model_name)
-            # Use active_question instead of q.question
-            gen       = generate(active_question, retrieved,
-                                 source_type=q.corpus,
-                                 generator=generator)
+            gen       = generate(active_question, retrieved, source_type=q.corpus, generator=generator)
+            result.gen_latency = time.perf_counter() - gen_start
         
-        # Extract metrics from generation result
         result.latency = time.perf_counter() - start_time
         usage = gen.get("usage", {})
         
@@ -155,6 +160,8 @@ def evaluate_question(
         result.latency = 0.0
         result.prompt_tokens = 0
         result.completion_tokens = 0
+        result.search_latency = 0.0 
+        result.gen_latency = 0.0
 
     return result
 
@@ -178,6 +185,7 @@ def evaluate_corpus(
     debug:         bool  = False,
     rag_generator_model: str | None = None,
     inject_metadata: bool = False,
+    search_method: str = "dense",
 ) -> tuple[CorpusResult, CorpusResult | None]:
     """Run the full evaluation suite for one corpus.
 
@@ -217,7 +225,8 @@ def evaluate_corpus(
                                baseline=False, reranker=reranker,
                                rerank_top_k=rerank_top_k, debug=debug,
                                rag_model_name=resolved_rag_model,
-                               inject_metadata=inject_metadata)
+                               inject_metadata=inject_metadata,
+                               search_method=search_method)
         rag_results.append(qr)
         if qr.error:
             print(f"    [ERROR] {qr.error}")

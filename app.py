@@ -858,7 +858,7 @@ if is_rag:
                         delay=eval_delay, output_dir=Path(output_dir),
                         llm_call=llm_call, rag_llm_call=rag_llm_call,
                         include_baseline=include_baseline,rag_generator_model=rag_llm_model,
-                        inject_metadata=inject_metadata,
+                        inject_metadata=inject_metadata, search_method=selected_search_method,
                     )
                     _eval_mod.evaluate_question = _orig_eq
                     progress_bar.progress(1.0, text="Done ✓")
@@ -878,6 +878,10 @@ if is_rag:
                     total_cached = sum(getattr(q, "cached_tokens", 0) for q in result.question_results)
                     total_reasoning = sum(getattr(q, "reasoning_tokens", 0) for q in result.question_results)
 
+                    avg_search = round(sum(getattr(q, "search_latency", 0.0) for q in result.question_results) / max(1, len(result.question_results)), 2)
+                    avg_gen = round(sum(getattr(q, "gen_latency", 0.0) for q in result.question_results) / max(1, len(result.question_results)), 2)
+                    avg_total = round(sum(getattr(q, "latency", 0.0) for q in result.question_results) / max(1, len(result.question_results)), 2)
+
                     lb_row = {
                         "timestamp":             __import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M"),
                         "rag_model":             rag_llm_model,
@@ -889,7 +893,11 @@ if is_rag:
                         "top_k":                 top_k_eval,
                         "n_questions":           result.n_questions,
                         "inject_metadata":       inject_metadata,
-                        "avg_generation_latency_sec": round(sum(getattr(q, "latency", 0.0) for q in result.question_results) / max(1, len(result.question_results)), 2),
+                        "search_method":         selected_search_method, 
+                        "embed_backend":         embed_backend,
+                        "avg_search_latency_sec": avg_search,            
+                        "avg_gen_latency_sec":    avg_gen,              
+                        "avg_total_latency_sec":  avg_total,             
                         "total_api_tokens":      sum(getattr(q, "prompt_tokens", 0) + getattr(q, "completion_tokens", 0) for q in result.question_results),
                         "total_cached_tokens":   total_cached,
                         "total_reasoning_tokens": total_reasoning,
@@ -1056,7 +1064,11 @@ if is_rag:
                             "evaluator_model": "Evaluator", "embedder": "Embedder",
                             "collection": "Collection","questions_file" :"Question Set",
                             "inject_metadata": "Metadata Injected",
-                            "avg_generation_latency_sec": "Latency (s)",
+                            "search_method": "Search Method", 
+                            "embed_backend": "Vector Backend",
+                            "avg_search_latency_sec": "Search Latency",  
+                            "avg_gen_latency_sec": "Gen Latency",        
+                            "avg_total_latency_sec": "Total Latency",
                             "total_api_tokens": "Total Tokens",
                             "total_cached_tokens": "Cached Tokens",         
                             "total_reasoning_tokens": "Reasoning Tokens",   
@@ -1075,12 +1087,14 @@ if is_rag:
                             })
                         df_display = df[[c for c in display_cols if c in df.columns]].rename(columns=display_cols)
                         col_config = {k: st.column_config.NumberColumn(format="%.3f")
-                                      for k in ["RAG Avg ↓","Faithful","Relevancy","Similarity",
-                                                 "Recall","Correctness","BL Correctness","BL Recall","BL Avg"]}
+                                    for k in ["RAG Avg","Faithful","Relevancy","Similarity",
+                                                "Recall","Correctness","BL Correctness","BL Recall","BL Avg"]}
                         col_config.update({k: st.column_config.NumberColumn(format="%+.3f")
-                                           for k in ["Δ Correctness","Δ Recall","Δ Avg"]})
+                                        for k in ["Δ Correctness","Δ Recall","Δ Avg"]})
                         col_config.update({
-                                        "Latency (s)": st.column_config.NumberColumn(format="%.2f s"),
+                                        "Search Latency": st.column_config.NumberColumn(format="%.2f s"),  # Updated
+                                        "Gen Latency": st.column_config.NumberColumn(format="%.2f s"),     # Updated
+                                        "Total Latency": st.column_config.NumberColumn(format="%.2f s"),   # Updated
                                         "Total Tokens": st.column_config.NumberColumn(format="%d"),
                                         "Cached Tokens": st.column_config.NumberColumn(format="%d"),     
                                         "Reasoning Tokens": st.column_config.NumberColumn(format="%d"),  

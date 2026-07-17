@@ -481,6 +481,7 @@ def _run_evaluate(args) -> None:
             debug             = args.debug,
             rag_generator_model=rag_generator_model,
             inject_metadata   = args.inject_metadata,
+            search_method=getattr(args, "search_method", "dense"),
         )
 
         if not args.no_leaderboard:
@@ -495,6 +496,8 @@ def _run_evaluate(args) -> None:
                 reranker_model   = args.reranker_model if args.rerank else None,
                 questions_file   = getattr(args, "questions_file", None),
                 inject_metadata  = args.inject_metadata,
+                search_method=getattr(args, "search_method", "dense"),
+                embed_backend=embed_backend,
             )
 
 
@@ -509,6 +512,8 @@ def _update_leaderboard(
     reranker_model:   str | None = None,
     questions_file:   str | None = None,
     inject_metadata:  bool = False,
+    search_method:    str = "dense", 
+    embed_backend:    str = "local",
 ) -> None:
     """Append one row to the leaderboard JSON file."""
     import json
@@ -524,7 +529,9 @@ def _update_leaderboard(
     
     import statistics
     # Calculate averages across all processed questions
-    avg_latency = statistics.mean([getattr(q, "latency", 0.0) for q in q_results]) if q_results else 0.0
+    avg_total = statistics.mean([getattr(q, "latency", 0.0) for q in q_results]) if q_results else 0.0
+    avg_search = statistics.mean([getattr(q, "search_latency", 0.0) for q in q_results]) if q_results else 0.0
+    avg_gen = statistics.mean([getattr(q, "gen_latency", 0.0) for q in q_results]) if q_results else 0.0
     total_prompt_tokens = sum([getattr(q, "prompt_tokens", 0) for q in q_results])
     total_completion_tokens = sum([getattr(q, "completion_tokens", 0) for q in q_results])
     
@@ -557,7 +564,11 @@ def _update_leaderboard(
         "top_k":                 result.top_k,
         "n_questions":           result.n_questions,
         "reranker":              reranker_model or "none",
-        "avg_generation_latency_sec": round(avg_latency, 2),
+        "search_method":         search_method,
+        "embed_backend":         embed_backend,
+        "avg_search_latency_sec": round(avg_search, 2),  
+        "avg_gen_latency_sec":    round(avg_gen, 2),     
+        "avg_total_latency_sec":  round(avg_total, 2),   
         "total_api_tokens":      total_prompt_tokens + total_completion_tokens,
         "total_cached_tokens":   total_cached_tokens,       
         "total_reasoning_tokens": total_reasoning_tokens,   
