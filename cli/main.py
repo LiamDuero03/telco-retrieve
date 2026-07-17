@@ -528,8 +528,14 @@ def _update_leaderboard(
     total_prompt_tokens = sum([getattr(q, "prompt_tokens", 0) for q in q_results])
     total_completion_tokens = sum([getattr(q, "completion_tokens", 0) for q in q_results])
     
-    # Cost Estimation: (Blended rate example: $0.70/M input, $0.90/M output)
-    estimated_cost = ((total_prompt_tokens / 1_000_000) * 0.70) + ((total_completion_tokens / 1_000_000) * 0.90)
+    # NEW: Sum the advanced token metrics
+    total_cached_tokens = sum([getattr(q, "cached_tokens", 0) for q in q_results])
+    total_reasoning_tokens = sum([getattr(q, "reasoning_tokens", 0) for q in q_results])
+    
+    # NEW: Use exact API cost if provided by OpenRouter, otherwise fallback to estimation
+    exact_cost = sum([getattr(q, "cost", 0.0) for q in q_results])
+    if exact_cost == 0.0:
+        exact_cost = ((total_prompt_tokens / 1_000_000) * 0.70) + ((total_completion_tokens / 1_000_000) * 0.90)
     
     # Extract the filename or fallback to default
     q_file_label = "default"
@@ -553,7 +559,9 @@ def _update_leaderboard(
         "reranker":              reranker_model or "none",
         "avg_generation_latency_sec": round(avg_latency, 2),
         "total_api_tokens":      total_prompt_tokens + total_completion_tokens,
-        "estimated_run_cost_usd": round(estimated_cost, 5),
+        "total_cached_tokens":   total_cached_tokens,       
+        "total_reasoning_tokens": total_reasoning_tokens,   
+        "run_cost_usd":          round(exact_cost, 6),      
         "inject_metadata":       inject_metadata,
         "faithfulness":          round(result.mean_faithfulness,               3),
         "answer_relevancy":      round(result.mean_answer_relevancy,           3),

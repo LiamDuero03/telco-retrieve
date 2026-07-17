@@ -100,10 +100,24 @@ def evaluate_question(
                                  source_type=q.corpus,
                                  generator=generator)
         
+        # Extract metrics from generation result
         result.latency = time.perf_counter() - start_time
         usage = gen.get("usage", {})
+        
         result.prompt_tokens = usage.get("prompt_tokens", 0)
         result.completion_tokens = usage.get("completion_tokens", 0)
+        result.total_tokens = usage.get("total_tokens", result.prompt_tokens + result.completion_tokens)
+
+        # Extract nested prompt details (Cached input tokens)
+        prompt_details = usage.get("prompt_tokens_details", {}) or {}
+        result.cached_tokens = prompt_details.get("cached_tokens", 0)
+
+        # Extract nested completion details (DeepSeek R1 / o1 thinking tokens)
+        comp_details = usage.get("completion_tokens_details", {}) or {}
+        result.reasoning_tokens = comp_details.get("reasoning_tokens", 0)
+
+        # Extract exact OpenRouter cost
+        result.cost = usage.get("cost", 0.0)
 
         answer         = gen.get("answer", "")
         result.answer  = answer

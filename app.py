@@ -875,6 +875,8 @@ if is_rag:
                     q_filename = Path(questions_file).name if questions_file else f"{source_type}.json"
 
                     total_cost = sum(getattr(q, "cost", 0.0) for q in result.question_results)
+                    total_cached = sum(getattr(q, "cached_tokens", 0) for q in result.question_results)
+                    total_reasoning = sum(getattr(q, "reasoning_tokens", 0) for q in result.question_results)
 
                     lb_row = {
                         "timestamp":             __import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -889,7 +891,9 @@ if is_rag:
                         "inject_metadata":       inject_metadata,
                         "avg_generation_latency_sec": round(sum(getattr(q, "latency", 0.0) for q in result.question_results) / max(1, len(result.question_results)), 2),
                         "total_api_tokens":      sum(getattr(q, "prompt_tokens", 0) + getattr(q, "completion_tokens", 0) for q in result.question_results),
-                        "estimated_run_cost_usd": round(total_cost, 5), 
+                        "total_cached_tokens":   total_cached,
+                        "total_reasoning_tokens": total_reasoning,
+                        "run_cost_usd":          round(total_cost, 6),
                         "faithfulness":          round(result.mean_faithfulness, 3),
                         "answer_relevancy":      round(result.mean_answer_relevancy, 3),
                         "mean_similarity":       round(result.mean_similarity, 3),
@@ -1054,7 +1058,9 @@ if is_rag:
                             "inject_metadata": "Metadata Injected",
                             "avg_generation_latency_sec": "Latency (s)",
                             "total_api_tokens": "Total Tokens",
-                            "estimated_run_cost_usd": "Cost (USD)",
+                            "total_cached_tokens": "Cached Tokens",         
+                            "total_reasoning_tokens": "Reasoning Tokens",   
+                            "run_cost_usd": "Cost (USD)",
                             "faithfulness": "Faithful",
                             "answer_relevancy": "Relevancy", "mean_similarity": "Similarity",
                             "context_recall": "Recall", "answer_correctness": "Correctness",
@@ -1076,7 +1082,9 @@ if is_rag:
                         col_config.update({
                                         "Latency (s)": st.column_config.NumberColumn(format="%.2f s"),
                                         "Total Tokens": st.column_config.NumberColumn(format="%d"),
-                                        "Cost (USD)": st.column_config.NumberColumn(format="$ %.5f")
+                                        "Cached Tokens": st.column_config.NumberColumn(format="%d"),     
+                                        "Reasoning Tokens": st.column_config.NumberColumn(format="%d"),  
+                                        "Cost (USD)": st.column_config.NumberColumn(format="$ %.6f")     
                         })
                         st.dataframe(df_display, width="stretch", hide_index=True,
                                      column_config=col_config)
