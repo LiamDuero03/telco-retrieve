@@ -248,5 +248,32 @@
     "bl_context_recall": null,
     "bl_answer_correctness": null,
     "bl_average": null
+  },
+  {
+    "timestamp": "2026-07-17 12:55",
+    "rag_model": "openai/gpt-4o-mini",
+    "evaluator_model": "openai/gpt-4o-mini",
+    "embedder": "minilm",
+    "corpus": "3gpp",
+    "questions_file": "3gpp.json",
+    "collection": "3gpp_minilm",
+    "top_k": 5,
+    "n_questions": 20,
+    "reranker": "none",
+    "avg_generation_latency_sec": 2.1,
+    "total_api_tokens": 105018,
+    "estimated_run_cost_usd": 0.07369,
+    "inject_metadata": true,
+    "faithfulness": 0.117,
+    "answer_relevancy": 0.217,
+    "mean_similarity": 0.356,
+    "context_recall": 0.047,
+    "answer_correctness": 0.35,
+    "average": 0.217,
+    "bl_faithfulness": null,
+    "bl_answer_relevancy": null,
+    "bl_context_recall": null,
+    "bl_answer_correctness": null,
+    "bl_average": null
   }
 ]

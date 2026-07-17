@@ -165,6 +165,8 @@ def main(argv: list[str] | None = None) -> None:
                              "(default: ms-marco-minilm, telecom: otel-reranker-0.6b)")
     p_eval.add_argument("--embed-backend", choices=["local", "openrouter"], default="local",
                       help="Backend for computing embeddings (default: local)")
+    p_eval.add_argument("--inject-metadata", action="store_true",
+                    help="Simulate domain expert queries by prepending canonical source metadata to the question.")
 
     # ── info ──────────────────────────────────────────────────────────────────
     p_info = sub.add_parser("info", help="Show database info")
@@ -478,6 +480,7 @@ def _run_evaluate(args) -> None:
             rerank_top_k      = args.rerank_top_k,
             debug             = args.debug,
             rag_generator_model=rag_generator_model,
+            inject_metadata   = args.inject_metadata,
         )
 
         if not args.no_leaderboard:
@@ -491,6 +494,7 @@ def _run_evaluate(args) -> None:
                 collection       = col_name,
                 reranker_model   = args.reranker_model if args.rerank else None,
                 questions_file   = getattr(args, "questions_file", None),
+                inject_metadata  = args.inject_metadata,
             )
 
 
@@ -504,6 +508,7 @@ def _update_leaderboard(
     baseline_result   = None,
     reranker_model:   str | None = None,
     questions_file:   str | None = None,
+    inject_metadata:  bool = False,
 ) -> None:
     """Append one row to the leaderboard JSON file."""
     import json
@@ -549,6 +554,7 @@ def _update_leaderboard(
         "avg_generation_latency_sec": round(avg_latency, 2),
         "total_api_tokens":      total_prompt_tokens + total_completion_tokens,
         "estimated_run_cost_usd": round(estimated_cost, 5),
+        "inject_metadata":       inject_metadata,
         "faithfulness":          round(result.mean_faithfulness,               3),
         "answer_relevancy":      round(result.mean_answer_relevancy,           3),
         "mean_similarity":       round(result.mean_similarity,                 3),

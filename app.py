@@ -792,7 +792,13 @@ if is_rag:
 
         rag_llm_model     = llm_model
         metrics_llm_model = METRICS_LLM_OPTIONS[metrics_llm_label]
-        include_baseline  = st.checkbox("Include baseline (no retrieval)", value=False)
+
+        col_eval_opts1, col_eval_opts2 = st.columns(2)
+        with col_eval_opts1:
+            include_baseline = st.checkbox("Include baseline (no retrieval)", value=False)
+        with col_eval_opts2:
+            inject_metadata  = st.checkbox("Inject domain metadata into queries", value=False, help="Simulates domain-expert prompting by prepending document IDs to the question.")
+        
         eval_btn = st.button("Run evaluation ▶", type="primary", key="eval_btn")
 
         if eval_btn:
@@ -852,6 +858,7 @@ if is_rag:
                         delay=eval_delay, output_dir=Path(output_dir),
                         llm_call=llm_call, rag_llm_call=rag_llm_call,
                         include_baseline=include_baseline,rag_generator_model=rag_llm_model,
+                        inject_metadata=inject_metadata,
                     )
                     _eval_mod.evaluate_question = _orig_eq
                     progress_bar.progress(1.0, text="Done ✓")
@@ -879,6 +886,7 @@ if is_rag:
                         "questions_file":         q_filename,
                         "top_k":                 top_k_eval,
                         "n_questions":           result.n_questions,
+                        "inject_metadata":       inject_metadata,
                         "avg_generation_latency_sec": round(sum(getattr(q, "latency", 0.0) for q in result.question_results) / max(1, len(result.question_results)), 2),
                         "total_api_tokens":      sum(getattr(q, "prompt_tokens", 0) + getattr(q, "completion_tokens", 0) for q in result.question_results),
                         "estimated_run_cost_usd": round(total_cost, 5), 
@@ -1043,6 +1051,7 @@ if is_rag:
                             "rank": "Rank", "rag_model": "Generator",
                             "evaluator_model": "Evaluator", "embedder": "Embedder",
                             "collection": "Collection","questions_file" :"Question Set",
+                            "inject_metadata": "Metadata Injected",
                             "avg_generation_latency_sec": "Latency (s)",
                             "total_api_tokens": "Total Tokens",
                             "estimated_run_cost_usd": "Cost (USD)",
