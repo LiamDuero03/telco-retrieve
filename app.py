@@ -165,6 +165,15 @@ def _load_enrichment_strategies() -> dict:
         return {"none": {"display_name": "No Enrichment", "help_text": "", "requires_llm": False}}
     return json.loads(path.read_text(encoding="utf-8"))
 
+@st.cache_resource(show_spinner=False)
+def _get_embedder(model_key: str, backend: str = "local"):
+    if backend == "openrouter":
+        from open_telco_rag.embedders.openrouter_embedder import OpenRouterEmbedder
+        return OpenRouterEmbedder(model_key=model_key)
+    else:
+        from open_telco_rag.embedders.sentense_transformers import SentenceTransformerEmbedder
+        return SentenceTransformerEmbedder(model_key=model_key)
+
 
 def _get_store(source_type: str, model_key: str, db_path: str,
                collection: str | None = None, distance_metric: str = "l2"):
@@ -234,7 +243,7 @@ if "pipeline" not in st.session_state:
 is_rag = st.session_state["pipeline"] == "rag"
 
 if st.sidebar.button("🔍  RAG pipeline",
-    key="btn_rag", use_container_width=True,
+    key="btn_rag", width="stretch",
     type="primary" if is_rag else "secondary"):
     st.session_state["pipeline"] = "rag"
     st.rerun()
@@ -242,7 +251,7 @@ if st.sidebar.button("🔍  RAG pipeline",
 st.sidebar.caption("Ask · Search · Ingest · Evaluate · Leaderboard")
 
 if st.sidebar.button("🧪  QnA generation",
-    key="btn_qna", use_container_width=True,
+    key="btn_qna", width="stretch",
     type="primary" if not is_rag else "secondary"):
     st.session_state["pipeline"] = "qna"
     st.rerun()
@@ -261,6 +270,13 @@ if is_rag:
         "Embedder",
         options=list(_embedder_options.keys()),
         format_func=lambda k: _embedder_options[k],
+    )
+
+    embed_backend = st.sidebar.radio(
+        "Embedding Backend",
+        options=["local", "openrouter"],
+        horizontal=True,
+        help="Use 'local' to run embeddings on your local CPU/GPU, or 'openrouter' to offload execution to OpenRouter's cloud GPUs.",
     )
 
     LLM_OPTIONS = _load_llm_keys()
@@ -471,7 +487,7 @@ if is_rag:
             with st.spinner("Retrieving and generating…"):
                 try:
                     from open_telco_rag.core.pipeline import generate, search
-                    embedder = _get_embedder(model_key)
+                    embedder = _get_embedder(model_key, backend=embed_backend)
                     store    = _get_store(source_type, model_key, db_path, collection_override)
                     results  = search(question, store=store, embedder=embedder,
                                       top_k=top_k_ask, threshold=threshold_ask,
@@ -543,7 +559,7 @@ if is_rag:
             with st.spinner("Searching…"):
                 try:
                     from open_telco_rag.core.pipeline import search
-                    embedder = _get_embedder(model_key)
+                    embedder = _get_embedder(model_key, backend=embed_backend)
                     store    = _get_store(source_type, model_key, db_path, collection_override)
                     results  = search(query, store=store, embedder=embedder,
                                       top_k=top_k_search, threshold=threshold_search,
@@ -570,6 +586,7 @@ if is_rag:
 
 # ── INGEST ───────────────────────────────────────────────────────────────
     with tab_ingest:
+        # ── SECTION 1: GLOBAL DATA SETUP ──────────────────────────────────────
         col_i0_1, col_i0_2 = st.columns(2)
         with col_i0_1:
             selected_source_type = st.selectbox(
@@ -581,15 +598,25 @@ if is_rag:
         with col_i0_2:
             st.text(f"Active Model: {model_key}")
 
-        col_i1, col_i2 = st.columns(2)
-        with col_i1:
+        col_data1, col_data2 = st.columns(2)
+        with col_data1:
             data_dir = st.text_input("Data directory", value=f"data/{selected_source_type}")
-            
-            # Load dynamic strategies from JSON configs
-            chunk_strat_dict = _load_chunking_strategies()
-            enrich_strat_dict = _load_enrichment_strategies()
+        with col_data2:
+            ingest_collection = st.text_input("Collection name",
+                                              placeholder=f"{selected_source_type}_{model_key}")
 
-            # Dynamic Chunking Strategy Selector
+        # ── SECTION 2: CHUNKING CONFIGURATION ─────────────────────────────────
+        st.markdown("---")
+        st.markdown("##### Chunking Parameters")
+
+        # Load dynamic strategies from JSON configs
+        chunk_strat_dict = _load_chunking_strategies()
+        enrich_strat_dict = _load_enrichment_strategies()
+        
+        # ── ROW 1: Strategy & Distance Metric Side-by-Side ──
+        col_strat, col_dist = st.columns(2)
+        
+        with col_strat:
             selected_strategy = st.selectbox(
                 "Chunking Strategy", 
                 options=list(chunk_strat_dict.keys()), 
@@ -597,19 +624,24 @@ if is_rag:
                 format_func=lambda k: chunk_strat_dict[k]["display_name"],
                 help="Select layout splitting parameters."
             )
-            
             strat_meta = chunk_strat_dict[selected_strategy]
             st.caption(f"💡 {strat_meta['help_text']}")
-
+            
+        with col_dist:
             selected_distance = st.selectbox(
                 "Distance Metric (Index Vector Space)",
                 options=["l2", "cosine", "ip"],
                 index=0,
                 help="l2 = Euclidean, cosine = angular matching (recommended for prepended text descriptions)."
             )
-            
-            # Dynamically switch sizing metrics label between characters and tokens
-            unit_label = strat_meta["unit"].capitalize()
+
+        # Parse labels based on the selected strategy row above
+        unit_label = strat_meta["unit"].capitalize()
+
+        # ── ROW 2: Chunk Size & Overlap Side-by-Side ──
+        col_size, col_overlap = st.columns(2)
+        
+        with col_size:
             chunk_size = st.number_input(
                 f"Chunk size ({unit_label})", 
                 min_value=strat_meta.get("min_size", 64), 
@@ -617,11 +649,7 @@ if is_rag:
                 value=strat_meta.get("default_size", 1024)
             )
                 
-        with col_i2:
-            ingest_collection = st.text_input("Collection name",
-                                              placeholder=f"{selected_source_type}_{model_key}")
-            
-            # Only show or enable overlap fields if the config declares a default overlap value
+        with col_overlap:
             if "default_overlap" in strat_meta and strat_meta["default_overlap"] > 0:
                 overlap = st.number_input(
                     f"Overlap ({unit_label})", 
@@ -638,8 +666,10 @@ if is_rag:
                 )
 
         # ── DYNAMIC ENRICHMENT CONFIGURATIONS ───────────────────────
+        st.markdown("---")
         st.markdown("##### Chunk Enrichment (Pre-Embedding Process)")
-        col_en1, col_en2 = col_i1, col_i2 # reuse spatial boundaries or keep columns aligned
+        col_en1, col_en2 = st.columns(2)
+        #col_en1, col_en2 = col_i1, col_i2 
         
         with col_en1:
             selected_enrichment = st.selectbox(
@@ -677,6 +707,7 @@ if is_rag:
                 f"  Model:      {model_key}",
                 f"  Collection: {col_name}",
                 f"  Strategy:   {selected_strategy}",
+                f"  Embedder: {embed_backend.upper()} + {model_key.upper()}", 
                 f"  Enrichment: {selected_enrichment.upper()}", 
                 f"  PDF loader: {'Marker API' if use_marker else 'pypdf (default)'}",
                 ""
@@ -689,7 +720,7 @@ if is_rag:
                 from open_telco_rag.stores.chroma import ChromaStore
                 
                 src      = _get_source(selected_source_type, use_marker=use_marker)
-                embedder = _get_embedder(model_key)
+                embedder = _get_embedder(model_key, backend=embed_backend)
                 store    = _get_store(
                     source_type=selected_source_type, 
                     model_key=model_key, 
@@ -783,7 +814,7 @@ if is_rag:
                     from open_telco_rag.evaluation.questions import EvalQuestion
                     from open_telco_rag.evaluation._claude import make_llm_call
 
-                    embedder     = _get_embedder(model_key)
+                    embedder = _get_embedder(model_key, backend=embed_backend)
                     store        = _get_store(source_type, model_key, db_path, collection_override)
                     questions    = [EvalQuestion.from_dict(q) for q in qs]
                     llm_call     = make_llm_call("openrouter", metrics_llm_model)
@@ -950,7 +981,7 @@ if is_rag:
                     ):
                         with col:
                             st.plotly_chart(_metric_chart(title, values, color, mean_val),
-                                            use_container_width=True)
+                                            width="stretch")
                     st.success(f"Results saved → {output_dir}/")
 
                 except Exception as e:
@@ -1038,7 +1069,7 @@ if is_rag:
                                         "Total Tokens": st.column_config.NumberColumn(format="%d"),
                                         "Cost (USD)": st.column_config.NumberColumn(format="$ %.5f")
                         })
-                        st.dataframe(df_display, use_container_width=True, hide_index=True,
+                        st.dataframe(df_display, width="stretch", hide_index=True,
                                      column_config=col_config)
 
                         with st.expander("🗑 Remove a row"):
@@ -1072,7 +1103,7 @@ if is_rag:
                                           plot_bgcolor="white", paper_bgcolor="white",
                                           font=dict(size=11), xaxis=dict(tickangle=-20),
                                           showlegend=False)
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, width="stretch")
                         st.caption(f"Evaluator: {df['evaluator_model'].iloc[0]}  ·  "
                                    f"{len(df)} run(s) shown  ·  leaderboard at `{lb_path}`")
             except Exception as e:
@@ -1473,11 +1504,11 @@ else:
                         with col_s2:
                             if portal_url:
                                 st.link_button("🌐 Open portal", portal_url,
-                                               use_container_width=True)
+                                               width="stretch")
                         with col_s3:
                             if deep_link and deep_link != portal_url:
                                 st.link_button("📄 Open doc", deep_link,
-                                               use_container_width=True)
+                                               width="stretch")
 
                         # ── Source chunk text ─────────────────────────────
                         if chunk_id:

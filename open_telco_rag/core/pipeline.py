@@ -21,19 +21,18 @@ if TYPE_CHECKING:
 load_dotenv()
 
 # ── Ingest ────────────────────────────────────────────────────────────────────
-
 def ingest(
     source:      Source,
     store:      VectorStore,
     embedder:   Embedder,
     data_dir:   str | Path,
     min_length: int  = 100,
-    batch_size: int  = 64,
+    batch_size: int  = 64, # Default used for local, can be overridden to 1000 for OpenRouter
     resume:     bool = True,
     log_dir:    str | Path = "logs",
     **chunk_kwargs: Any,
 ) -> IngestStats:
-    """Scan files, clean, chunk, embed and store."""
+    """Scan files, clean, chunk, globally batch embed and store."""
 
     data_dir = Path(data_dir)
     log_dir  = Path(log_dir)
@@ -44,7 +43,6 @@ def ingest(
     log_file    = log_dir / f"ingest_{source_name}_{embedder.model_key}_{timestamp}.csv"
     stats       = IngestStats()
 
-    # ── NEW: detect whether Marker was used — affects chunk routing ───────────
     use_marker = getattr(source, '_use_marker', False)
 
     # Resume tracking
@@ -63,6 +61,13 @@ def ingest(
     _init_log(log_file)
     print(f"\nFound {len(files)} files | model: {embedder.model_key}")
     print(f"Logging to: {log_file}\n")
+
+    # ── PHASE 1: CHUNK ACCUMULATION ──
+    global_texts = []
+    global_ids = []
+    global_metadatas = []
+    files_to_log = [] # Holds stats to write to CSV logs after successful ingestion
+    files_processed_this_run = []
 
     for file_path in files:
         rel = str(file_path.relative_to(data_dir))
@@ -103,7 +108,7 @@ def ingest(
                      error=f"clean: {e}", model=embedder.model_key)
             continue
 
-        # ── Chunk ─────────────────────────────────────────────────────────────
+        # Chunk
         try:
             from open_telco_rag.core.chunking import chunk_document, ChunkingStrategy
             from open_telco_rag.core.enrichment import enrich_chunks
@@ -113,16 +118,13 @@ def ingest(
 
             source_type_str = source.__class__.__name__.lower().replace("source", "")
 
-            # Detect if this file has structured markdown markers
             is_native_markdown = file_path.suffix.lower() in [".md", ".yaml", ".yml"]
             is_marker_output   = use_marker and file_path.suffix.lower() in [".pdf", ".docx"]
             is_structured      = is_native_markdown or is_marker_output
 
-            # Local runtime copy of runtime kwargs
             active_kwargs = chunk_kwargs.copy()
             active_kwargs["source_type"] = source_type_str
 
-            # 1. Resolve user strategy
             user_strategy_str = active_kwargs.get("strategy", "text_baseline")
             
             try:
@@ -131,15 +133,12 @@ def ingest(
                 print(f"  WARNING: Strategy '{user_strategy_str}' not recognized. Falling back to TEXT_BASELINE.")
                 user_strategy = ChunkingStrategy.TEXT_BASELINE
 
-            # 2. VALIDATION: Check if strategy is compatible with file structure
-            # Define strategies that STRICTLY require Markdown headers to split
             structure_required_strategies = {
                 ChunkingStrategy.HIERARCHICAL_MARKDOWN,
                 ChunkingStrategy.PARENT_CHILD
             }
 
             if not is_structured and user_strategy in structure_required_strategies:
-                # Force fallback because raw text has no headers to split on
                 fallback_strategy = ChunkingStrategy.TEXT_BASELINE
                 print(f"  ⚠️ WARNING: '{user_strategy.value}' requires structured headers, "
                       f"but '{file_path.name}' is unstructured. Falling back to '{fallback_strategy.value}'.")
@@ -147,21 +146,16 @@ def ingest(
             else:
                 active_kwargs["strategy"] = user_strategy
 
-            # Pass the layout capability flag down to the chunker as well
             active_kwargs["is_structured"] = is_structured
 
-            # Extract enrichment parameters
             enrichment_strategy = active_kwargs.pop("enrichment", "none")
             enrichment_model    = active_kwargs.pop("enrichment_model", "openai/gpt-4o-mini")
 
-            # Execute the validated, safe strategy chunker
             chunks = chunk_document(text=text, **active_kwargs)
             chunks = [c for c in chunks if len(c.text.strip()) >= min_length]
 
             if enrichment_strategy and enrichment_strategy != "none" and chunks:
                 meta = source.metadata(file_path)
-                
-                # Setup LLM Client dynamically if the LLM metadata strategy is requested
                 llm_client = None
                 if enrichment_strategy == "llm_metadata":
                     from open_telco_rag.generators.openrouter import OpenRouterGenerator
@@ -199,54 +193,72 @@ def ingest(
                      error="no valid chunks", model=embedder.model_key)
             continue
 
-        # Embed and store in batches
+        # Accumulate chunks globally instead of embedding immediately
+        meta = source.metadata(file_path)
+        for j, c in enumerate(chunks):
+            chunk_id = f"{rel}::{embedder.model_key}::{j}"
+            base_meta = {
+                **meta, 
+                "heading": c.heading or "",
+                "chunk_index": j,
+                "source_type": c.source_type
+            }
+            if hasattr(c, 'metadata') and c.metadata:
+                base_meta.update(c.metadata)
+
+            global_texts.append(c.text)
+            global_ids.append(chunk_id)
+            global_metadatas.append(base_meta)
+
+        chunk_lens = [len(c.text) for c in chunks]
+        print(f"  Buffered: {len(chunks)} chunks | avg: {sum(chunk_lens)//len(chunk_lens)}")
+        
+        # Buffer stats for logging after successful batch write
+        files_to_log.append((file_path, file_size_kb, len(chunks), sum(chunk_lens)//len(chunk_lens), chunking_time_ms, expansion_ratio))
+        files_processed_this_run.append(rel)
+
+    # ── PHASE 2: GLOBAL BULK EMBEDDING ──
+    total_chunks = len(global_texts)
+    if total_chunks > 0:
+        print(f"\n{'-'*60}")
+        print(f"Phase 2: Bulk embedding {total_chunks} total chunks...")
+        print(f"Batch size: {batch_size} chunks per API call")
+        print(f"{'-'*60}")
+
+        start_embed_time = time.perf_counter()
+        
         try:
-            meta = source.metadata(file_path)
-            for batch_start in range(0, len(chunks), batch_size):
-                batch  = chunks[batch_start:batch_start+batch_size]
-                texts  = [c.text for c in batch]
-                ids    = [f"{rel}::{embedder.model_key}::{batch_start + j}"
-                        for j, c in enumerate(batch)]
+            for batch_start in range(0, total_chunks, batch_size):
+                batch_end = min(batch_start + batch_size, total_chunks)
+                print(f"  Embedding batch [{batch_start}/{total_chunks}] (Size: {batch_end - batch_start})...")
                 
-                # Merge custom metadata (like hierarchical parent links) alongside standard parameters
-                metas  = []
-                for j, c in enumerate(batch):
-                    base_meta = {
-                        **meta, 
-                        "heading": c.heading or "",
-                        "chunk_index": batch_start + j,
-                        "source_type": c.source_type
-                    }
-                    if hasattr(c, 'metadata') and c.metadata:
-                        base_meta.update(c.metadata)
-                    metas.append(base_meta)
+                batch_texts = global_texts[batch_start:batch_end]
+                batch_ids = global_ids[batch_start:batch_end]
+                batch_metas = global_metadatas[batch_start:batch_end]
 
-                embeds = embedder.embed(texts)
-                store.add(ids=ids, embeddings=embeds, documents=texts, metadatas=metas)
-                stats.chunks_stored += len(batch)
+                # Single bulk call to OpenRouter / Local model!
+                batch_embeds = embedder.embed(batch_texts)
+                
+                # Write to vector database
+                store.add(ids=batch_ids, embeddings=batch_embeds, documents=batch_texts, metadatas=batch_metas)
+                stats.chunks_stored += len(batch_texts)
 
-            chunk_lens = [len(c.text) for c in chunks]
-            print(f"  Chunks: {len(chunks)} | "
-                  f"avg: {sum(chunk_lens)//len(chunk_lens)} | "
-                  f"min: {min(chunk_lens)} | max: {max(chunk_lens)}")
-            _log_row(
-                log_file, file_path, file_size_kb, "success",
-                chunks=len(chunks), model=embedder.model_key,
-                avg_len=sum(chunk_lens)//len(chunk_lens),
-                chunking_time_ms=chunking_time_ms,  
-                expansion_ratio=expansion_ratio,
-            )
-            stats.files_processed += 1
+            # Execution was successful! Log files and mark progress
+            for log_item in files_to_log:
+                f_path, f_size, f_chunks, f_avg, f_time, f_ratio = log_item
+                _log_row(log_file, f_path, f_size, "success", chunks=f_chunks, model=embedder.model_key,
+                         avg_len=f_avg, chunking_time_ms=f_time, expansion_ratio=f_ratio)
+                stats.files_processed += 1
 
             if resume:
-                completed.add(rel)
+                completed.update(files_processed_this_run)
                 progress_file.write_text(json.dumps(sorted(completed)))
 
         except Exception as e:
-            print(f"  ERROR embedding/storing: {e}")
-            stats.error_files += 1
-            _log_row(log_file, file_path, file_size_kb, "error",
-                     error=f"embed/store: {e}", model=embedder.model_key)
+            print(f"\n[FATAL ERROR] Bulk Embedding/Database storage failed: {e}")
+            stats.error_files += len(files_processed_this_run)
+            for f_path, f_size, _, _, _, _ in files_to_log:
+                _log_row(log_file, f_path, f_size, "error", error=f"bulk embed fail: {e}", model=embedder.model_key)
 
     # Summary
     print(f"\n{'='*60}")
@@ -257,6 +269,8 @@ def ingest(
     print(f"{'='*60}")
 
     return stats
+
+
 # ── Search ────────────────────────────────────────────────────────────────────
 
 def search(

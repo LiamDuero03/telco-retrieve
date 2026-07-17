@@ -70,6 +70,10 @@ def main(argv: list[str] | None = None) -> None:
                           choices=["l2", "cosine", "ip"],
                           default="l2",
                           help="Distance metric used for indexing HNSW vector space.")
+    p_ingest.add_argument("--embed-backend", choices=["local", "openrouter"], default="local",
+                      help="Backend for computing embeddings (default: local)")
+    p_ingest.add_argument("--batch-size", type=int, default=None,
+                          help="Number of chunks to send per embedding call (defaults to 64 for local, 500 for openrouter)")
 
     # ── search ────────────────────────────────────────────────────────────────
     p_search = sub.add_parser("search", help="Search the vector database")
@@ -86,6 +90,8 @@ def main(argv: list[str] | None = None) -> None:
     p_search.add_argument("--collection",     default=None,        help="Override collection name")
     p_search.add_argument("--search-method", choices=["dense", "bm25", "hybrid"], default="dense",
                           help="Multi-method search routing pass algorithm selection.")
+    p_search.add_argument("--embed-backend", choices=["local", "openrouter"], default="local",
+                      help="Backend for computing embeddings (default: local)")
 
     # ── ask ───────────────────────────────────────────────────────────────────
     p_ask = sub.add_parser("ask", help="Ask a question (search + generate)")
@@ -102,6 +108,8 @@ def main(argv: list[str] | None = None) -> None:
     p_ask.add_argument("--collection",     default=None,            help="Override collection name")
     p_ask.add_argument("--search-method", choices=["dense", "bm25", "hybrid"], default="dense",
                           help="Multi-method search routing pass algorithm selection.")
+    p_ask.add_argument("--embed-backend", choices=["local", "openrouter"], default="local",
+                      help="Backend for computing embeddings (default: local)")
 
     # ── evaluate ──────────────────────────────────────────────────────────────
     p_eval = sub.add_parser("evaluate", help="Run evaluation suite on a corpus")
@@ -155,6 +163,8 @@ def main(argv: list[str] | None = None) -> None:
     p_eval.add_argument("--reranker-model", default="ms-marco-minilm",
                         help="Reranker model key from configs/reranker_models.json "
                              "(default: ms-marco-minilm, telecom: otel-reranker-0.6b)")
+    p_eval.add_argument("--embed-backend", choices=["local", "openrouter"], default="local",
+                      help="Backend for computing embeddings (default: local)")
 
     # ── info ──────────────────────────────────────────────────────────────────
     p_info = sub.add_parser("info", help="Show database info")
@@ -206,9 +216,14 @@ def _get_source(source_type: str, use_marker: bool = False):
     raise NotImplementedError(f"Source '{source_type}' not yet implemented.")
 
 
-def _get_embedder(model_key: str):
-    from open_telco_rag.embedders.sentense_transformers import SentenceTransformerEmbedder
-    return SentenceTransformerEmbedder(model_key=model_key)
+
+def _get_embedder(model_key: str, backend: str = "local"):
+    if backend == "openrouter":
+        from open_telco_rag.embedders.openrouter_embedder import OpenRouterEmbedder
+        return OpenRouterEmbedder(model_key=model_key)
+    else:
+        from open_telco_rag.embedders.sentense_transformers import SentenceTransformerEmbedder
+        return SentenceTransformerEmbedder(model_key=model_key)
 
 
 def _get_store(source_type: str, model_key: str, db_path: str, collection: str = None, distance_metric: str = "l2"):
@@ -246,11 +261,15 @@ def _run_ingest(args) -> None:
     strategy = getattr(args, "strategy", "text_baseline")
     
     source     = _get_source(args.source_type, use_marker=use_marker)
-    embedder   = _get_embedder(args.model)
+    embed_backend = getattr(args, "embed_backend", "local")
+    default_batch_size = 500 if embed_backend == "openrouter" else 64
+    batch_size_arg = getattr(args, "batch_size", None) or default_batch_size
+    embedder = _get_embedder(args.model, backend=embed_backend)
     store      = _get_store(args.source_type, args.model, args.db_path,
                             collection=getattr(args, "collection", None),
                             distance_metric=distance_metric)
     data_dir   = args.data or f"data/{args.source_type}"
+    
 
     print(f"\nIngesting {args.source_type.upper()} documents")
     print(f"  Data dir:   {data_dir}")
@@ -271,6 +290,7 @@ def _run_ingest(args) -> None:
         "enrichment": enrichment,
         "enrichment_model": enrichment_model,
         "strategy": strategy,
+        "batch_size": batch_size_arg,
     }
 
     # Pull structural constraints from the strategy definition JSON
@@ -303,7 +323,8 @@ def _run_search(args) -> None:
     import math
     from open_telco_rag.core.pipeline import search
 
-    embedder = _get_embedder(args.model)
+    embed_backend = getattr(args, "embed_backend", "local")
+    embedder = _get_embedder(args.model, backend=embed_backend)
     store    = _get_store(args.source_type, args.model, args.db_path,
                           collection=getattr(args, "collection", None))
 
@@ -355,7 +376,8 @@ def _run_search(args) -> None:
 def _run_ask(args) -> None:
     from open_telco_rag.core.pipeline import generate, search
 
-    embedder = _get_embedder(args.model)
+    embed_backend = getattr(args, "embed_backend", "local")
+    embedder = _get_embedder(args.model, backend=embed_backend)
     store    = _get_store(args.source_type, args.model, args.db_path,
                           collection=getattr(args, "collection", None))
 
@@ -386,7 +408,8 @@ def _run_evaluate(args) -> None:
     from open_telco_rag.evaluation.questions import SUPPORTED_CORPORA, load_questions, EvalQuestion
     from open_telco_rag.evaluation._claude import make_llm_call
 
-    embedder   = _get_embedder(args.model)
+    embed_backend = getattr(args, "embed_backend", "local")
+    embedder = _get_embedder(args.model, backend=embed_backend)
     output_dir = None if args.no_save else Path(args.output)
 
     # LLM for evaluation metrics
