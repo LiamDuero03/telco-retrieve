@@ -789,6 +789,12 @@ if is_rag:
             metrics_llm_label = st.selectbox("Metrics evaluation model",
                                              list(METRICS_LLM_OPTIONS.keys()))
             eval_delay = st.slider("Delay between questions (s)", 0.0, 5.0, 1.0, 0.5)
+            selected_search_method_eval = st.selectbox(
+                "Evaluation Search Pass Method",
+                options=["dense", "bm25", "hybrid"],
+                index=0,
+                key="eval_search_method"
+            )
 
         rag_llm_model     = llm_model
         metrics_llm_model = METRICS_LLM_OPTIONS[metrics_llm_label]
@@ -858,7 +864,7 @@ if is_rag:
                         delay=eval_delay, output_dir=Path(output_dir),
                         llm_call=llm_call, rag_llm_call=rag_llm_call,
                         include_baseline=include_baseline,rag_generator_model=rag_llm_model,
-                        inject_metadata=inject_metadata, search_method=selected_search_method,
+                        inject_metadata=inject_metadata, search_method=selected_search_method_eval,
                     )
                     _eval_mod.evaluate_question = _orig_eq
                     progress_bar.progress(1.0, text="Done ✓")
@@ -893,7 +899,7 @@ if is_rag:
                         "top_k":                 top_k_eval,
                         "n_questions":           result.n_questions,
                         "inject_metadata":       inject_metadata,
-                        "search_method":         selected_search_method, 
+                        "search_method":         selected_search_method_eval,
                         "embed_backend":         embed_backend,
                         "avg_search_latency_sec": avg_search,            
                         "avg_gen_latency_sec":    avg_gen,              

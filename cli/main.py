@@ -60,7 +60,7 @@ def main(argv: list[str] | None = None) -> None:
                           default="none",
                           help="Select a metadata/content enrichment strategy dynamically mapped from enrichment_strategies.json.")
     p_ingest.add_argument("--enrichment-model",
-                          default="openai/gpt-4o-mini",
+                          default="google/qwen-2.5-coder-32b", 
                           help="The LLM model string to use when running an LLM-based enrichment strategy.")
     p_ingest.add_argument("--strategy",
                           choices=_load_chunking_strategies(),
@@ -535,14 +535,27 @@ def _update_leaderboard(
     total_prompt_tokens = sum([getattr(q, "prompt_tokens", 0) for q in q_results])
     total_completion_tokens = sum([getattr(q, "completion_tokens", 0) for q in q_results])
     
-    # NEW: Sum the advanced token metrics
+    # Sum the advanced token metrics
     total_cached_tokens = sum([getattr(q, "cached_tokens", 0) for q in q_results])
     total_reasoning_tokens = sum([getattr(q, "reasoning_tokens", 0) for q in q_results])
     
-    # NEW: Use exact API cost if provided by OpenRouter, otherwise fallback to estimation
+    # Extract exact API cost if provided by OpenRouter, otherwise dynamic fallback based on model pricing matrix
     exact_cost = sum([getattr(q, "cost", 0.0) for q in q_results])
     if exact_cost == 0.0:
-        exact_cost = ((total_prompt_tokens / 1_000_000) * 0.70) + ((total_completion_tokens / 1_000_000) * 0.90)
+        # Dynamic lookup fallback dictionary per million tokens mapping
+        PRICING_MATRIX = {
+            "anthropic/claude-sonnet-4.5": {"prompt": 3.00, "completion": 15.00},
+            "meta-llama/llama-3.3-70b-instruct": {"prompt": 0.70, "completion": 0.90},
+            "google/qwen-2.5-coder-32b": {"prompt": 0.35, "completion": 0.35},
+            "default": {"prompt": 0.70, "completion": 0.90}
+        }
+        
+        # Cleanly match model attributes or apply secure generic defaults fallback layout
+        pricing = PRICING_MATRIX.get(rag_model, PRICING_MATRIX["default"])
+        
+        prompt_cost = (total_prompt_tokens / 1_000_000) * pricing["prompt"]
+        completion_cost = (total_completion_tokens / 1_000_000) * pricing["completion"]
+        exact_cost = prompt_cost + completion_cost
     
     # Extract the filename or fallback to default
     q_file_label = "default"
