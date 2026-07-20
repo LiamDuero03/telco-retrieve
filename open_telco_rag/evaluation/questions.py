@@ -23,6 +23,8 @@ class EvalQuestion:
     question:         str
     keywords:         list[str]
     corpus:           str
+    answer_type:      str = "open"          
+    options:          dict | None = None
     canonical_source: str | None = None
     reference_answer: str | None = None   # None until validated by domain expert
 
@@ -32,6 +34,8 @@ class EvalQuestion:
             question         = d["question"],
             keywords         = d.get("keywords", []),
             corpus           = d.get("corpus", ""),
+            answer_type      = d.get("answer_type", "open"),
+            options          = d.get("options", None),
             canonical_source = d.get("canonical_source"),
             reference_answer = d.get("reference_answer"),
         )
