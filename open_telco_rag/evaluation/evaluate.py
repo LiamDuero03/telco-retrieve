@@ -24,37 +24,15 @@ from open_telco_rag.evaluation.metrics.ground_truth import (
     context_recall, answer_correctness,
 )
 
-
-def _build_generator(llm_call: Callable[[str, int], str]):
+def _build_generator(llm_call: Callable[[str, int], str], model_name: str | None = None):
     """Wrap an llm_call callable as a generator for pipeline.generate()."""
-    class _CallableGenerator:
-        def generate(self, question: str, results: list, source_type: str = "telecom") -> dict:
-            if not results:
-                return {
-                    "answer":           "No relevant chunks found.",
-                    "sources":          [],
-                    "chunks_used":      0,
-                    "retrieved_chunks": [],
-                }
-            context = "\n\n---\n\n".join(r.text for r in results)
-            sources = list({r.metadata.get("source", "") for r in results})
-            prompt  = (
-                f"You are a {source_type} technical expert. "
-                "Answer the question using only the context provided. "
-                "If the answer is not in the context, say so clearly. "
-                "Be precise and technical.\n\n"
-                f"Context:\n{context}\n\n"
-                f"Question: {question}\n\nAnswer:"
-            )
-            answer = llm_call(prompt, max_tokens=1000)
-            return {
-                "answer":           answer,
-                "sources":          sources,
-                "chunks_used":      len(results),
-                "retrieved_chunks": [r.text for r in results],
-            }
-    return _CallableGenerator()
-
+    from open_telco_rag.generators.openrouter import OpenRouterGenerator
+    
+    # Use default if none provided
+    if not model_name:
+        model_name = "meta-llama/llama-3.1-8b-instruct"
+        
+    return OpenRouterGenerator(model=model_name)
 
 def _build_baseline_generator(llm_call: Callable[[str, int], str]):
     """Generator that answers from LLM knowledge only — no context chunks."""
@@ -75,7 +53,6 @@ def _build_baseline_generator(llm_call: Callable[[str, int], str]):
             }
     return _BaselineGenerator()
 
-
 def evaluate_question(
     q:             EvalQuestion,
     store:         Any,
@@ -88,35 +65,64 @@ def evaluate_question(
     reranker:      Any   = None,
     rerank_top_k:  int   = 5,
     debug:         bool  = False,
+    rag_model_name: str | None = None,
+    inject_metadata: bool = False, 
+    search_method: str = "dense",
 ) -> QuestionResult:
-    """Run all applicable metrics for one question.
-
-    Args:
-        baseline: if True, skip retrieval and generate answer from LLM only.
-                  Retrieval metrics (similarity, source_coverage) will be 0.
-    """
+    """Run all applicable metrics for one question."""
     from open_telco_rag.core.pipeline import search, generate
+    
+    # Rewrite the question if metadata injection is enabled and a source exists
+    active_question = q.question
+    if inject_metadata and q.canonical_source:
+        active_question = f"According to {q.corpus.upper()} document {q.canonical_source}, {q.question}"
 
     result = QuestionResult(
-        question=q.question, corpus=q.corpus,
+        question=active_question, corpus=q.corpus,
         answer="", sources=[], chunks_used=0,
     )
 
     try:
+        start_time = time.perf_counter()
         if baseline:
-            # No retrieval — answer from LLM knowledge only
             retrieved = []
             generator = _build_baseline_generator(rag_llm_call or llm_call)
-            gen       = generate(q.question, retrieved,
-                                 source_type=q.corpus,
-                                 generator=generator)
+            
+            gen_start = time.perf_counter()
+            gen       = generate(active_question, retrieved, source_type=q.corpus, generator=generator)
+            result.gen_latency = time.perf_counter() - gen_start
+            result.search_latency = 0.0
         else:
-            retrieved = search(q.question, store=store, embedder=embedder,
-                                top_k=top_k, reranker=reranker, rerank_top_k=rerank_top_k)
-            generator = _build_generator(rag_llm_call or llm_call)
-            gen       = generate(q.question, retrieved,
-                                 source_type=q.corpus,
-                                 generator=generator)
+            # Time the search retrieval pass
+            search_start = time.perf_counter()
+            retrieved = search(active_question, store=store, embedder=embedder,
+                               top_k=top_k, reranker=reranker, rerank_top_k=rerank_top_k,
+                               search_method=search_method) # PASSED DOWN
+            result.search_latency = time.perf_counter() - search_start
+            
+            # Time the text generation pass
+            gen_start = time.perf_counter()
+            generator = _build_generator(rag_llm_call or llm_call, model_name=rag_model_name)
+            gen       = generate(active_question, retrieved, source_type=q.corpus, generator=generator)
+            result.gen_latency = time.perf_counter() - gen_start
+        
+        result.latency = time.perf_counter() - start_time
+        usage = gen.get("usage", {})
+        
+        result.prompt_tokens = usage.get("prompt_tokens", 0)
+        result.completion_tokens = usage.get("completion_tokens", 0)
+        result.total_tokens = usage.get("total_tokens", result.prompt_tokens + result.completion_tokens)
+
+        # Extract nested prompt details (Cached input tokens)
+        prompt_details = usage.get("prompt_tokens_details", {}) or {}
+        result.cached_tokens = prompt_details.get("cached_tokens", 0)
+
+        # Extract nested completion details (DeepSeek R1 / o1 thinking tokens)
+        comp_details = usage.get("completion_tokens_details", {}) or {}
+        result.reasoning_tokens = comp_details.get("reasoning_tokens", 0)
+
+        # Extract exact OpenRouter cost
+        result.cost = usage.get("cost", 0.0)
 
         answer         = gen.get("answer", "")
         result.answer  = answer
@@ -125,16 +131,15 @@ def evaluate_question(
 
         if debug:
             mode = "BASELINE" if baseline else "RAG"
-            print(f"\n  [DEBUG] [{mode}] question: {q.question[:80]}")
+            print(f"\n  [DEBUG] [{mode}] question: {active_question[:80]}")
             print(f"  [DEBUG] [{mode}] answer preview: {answer[:200]}")
 
-        # Tier 1 — generation
+        # Use active_question for relevancy scoring
         result.faithfulness     = faithfulness(answer, retrieved,
                                                llm_call=llm_call, debug=debug)
-        result.answer_relevancy = answer_relevancy(q.question, answer, embedder,
+        result.answer_relevancy = answer_relevancy(active_question, answer, embedder,
                                                    llm_call=llm_call, debug=debug)
 
-        # Tier 1 — retrieval (0.0 in baseline mode — no chunks retrieved)
         if not baseline:
             mean_s, min_s, max_s  = cosine_sim_stats(retrieved)
             result.mean_similarity = mean_s
@@ -143,7 +148,6 @@ def evaluate_question(
             result.source_coverage = source_coverage(retrieved)
             result.canonical_hit   = canonical_source_hit(retrieved, q.canonical_source)
 
-        # Tier 2 — ground truth
         if q.reference_answer:
             result.context_recall     = context_recall(
                 q.reference_answer, retrieved, llm_call=llm_call, debug=debug)
@@ -153,8 +157,14 @@ def evaluate_question(
 
     except Exception as e:
         result.error = str(e)
+        result.latency = 0.0
+        result.prompt_tokens = 0
+        result.completion_tokens = 0
+        result.search_latency = 0.0 
+        result.gen_latency = 0.0
 
     return result
+
 
 
 def evaluate_corpus(
@@ -173,6 +183,9 @@ def evaluate_corpus(
     reranker:      Any   = None,
     rerank_top_k:  int   = 5,
     debug:         bool  = False,
+    rag_generator_model: str | None = None,
+    inject_metadata: bool = False,
+    search_method: str = "dense",
 ) -> tuple[CorpusResult, CorpusResult | None]:
     """Run the full evaluation suite for one corpus.
 
@@ -180,21 +193,40 @@ def evaluate_corpus(
         (rag_result, baseline_result) — baseline_result is None if
         include_baseline=False.
     """
+    # 1. Track the source questions path or use the default
+    # You can infer or pass down the name of the file loaded:
+    questions_source_name = "default"
+    if questions:
+        # If questions were passed manually
+        questions_source_name = "custom_list"
+    else:
+        # If default questions file was loaded (e.g., configs/eval_questions/3gpp.json)
+        questions_source_name = f"{corpus}.json"
+        
     qs = questions or load_questions(corpus)
 
     print(f"\nEvaluating {corpus.upper()} — {len(qs)} questions | "
           f"model={model} | top-k={top_k}"
           + (" | +BASELINE" if include_baseline else "")
           + (" | DEBUG ON" if debug else ""))
+    
+    # Default fallback string if none is provided down the pipe
+    resolved_rag_model = rag_generator_model or "meta-llama/llama-3.1-8b-instruct"
 
     # ── RAG pass ──────────────────────────────────────────────────────────────
     rag_results = []
     for i, q in enumerate(qs, 1):
-        print(f"  [RAG {i}/{len(qs)}] {q.question[:65]}...")
+        display_q = q.question
+        if inject_metadata and q.canonical_source:
+            display_q = f"According to {corpus.upper()} document {q.canonical_source}, {q.question}"
+        print(f"  [RAG {i}/{len(qs)}] {display_q[:65]}...")
         qr = evaluate_question(q, store, embedder, top_k, sim_threshold,
                                llm_call=llm_call, rag_llm_call=rag_llm_call,
                                baseline=False, reranker=reranker,
-                               rerank_top_k=rerank_top_k, debug=debug)
+                               rerank_top_k=rerank_top_k, debug=debug,
+                               rag_model_name=resolved_rag_model,
+                               inject_metadata=inject_metadata,
+                               search_method=search_method)
         rag_results.append(qr)
         if qr.error:
             print(f"    [ERROR] {qr.error}")
@@ -210,6 +242,7 @@ def evaluate_corpus(
     rag_result = CorpusResult(
         corpus=corpus, model=model, top_k=top_k,
         timestamp=datetime.now().strftime("%Y%m%d_%H%M%S"),
+        questions_file=questions_source_name,
         question_results=rag_results,
         **aggregate(rag_results),
     )

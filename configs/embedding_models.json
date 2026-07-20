@@ -33,5 +33,15 @@
         "model_name": "farbodtavakkoli/OTel-Embedding-0.6B",
         "dimensions": 1024,
         "description": "Telecom-domain fine-tuned — 0.6B params, highest quality OTel embedder"
+    },
+    "or-3-small": {
+        "model_name": "openai/text-embedding-3-small",
+        "dimensions": 1536,
+        "description": "OpenRouter: OpenAI Text Embedding 3 Small"
+    },
+    "or-bge-m3": {
+        "model_name": "baai/bge-m3",
+        "dimensions": 1024,
+        "description": "OpenRouter: BAAI BGE-M3"
     }
 }

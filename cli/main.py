@@ -6,6 +6,27 @@ import argparse
 import sys
 from pathlib import Path
 
+def _load_chunking_strategies() -> list[str]:
+    import json
+    from pathlib import Path
+    # Correct path to look inside the configs/ directory
+    path = Path("configs") / "chunking_strategies.json" 
+    if not path.exists():
+        # Fallback to current directory if not found in configs
+        path = Path("chunking_strategies.json")
+        if not path.exists():
+            return ["text_baseline"]
+    return list(json.loads(path.read_text(encoding="utf-8")).keys())
+
+
+def _load_enrichment_strategies() -> list[str]:
+    import json
+    from pathlib import Path
+    path = Path("configs") / "enrichment_strategies.json"
+    
+    if not path.exists():
+        return ["none"]
+    return list(json.loads(path.read_text(encoding="utf-8")).keys())
 
 def main(argv: list[str] | None = None) -> None:
     from dotenv import load_dotenv
@@ -34,6 +55,25 @@ def main(argv: list[str] | None = None) -> None:
                           help="Use Marker API for PDF conversion (better table/structure quality). "
                                "Requires DATALAB_API_KEY in .env. "
                                "Recommended for ETSI and TM Forum corpora.")
+    p_ingest.add_argument("--enrichment",
+                          choices=_load_enrichment_strategies(),
+                          default="none",
+                          help="Select a metadata/content enrichment strategy dynamically mapped from enrichment_strategies.json.")
+    p_ingest.add_argument("--enrichment-model",
+                          default="openai/gpt-4o-mini",
+                          help="The LLM model string to use when running an LLM-based enrichment strategy.")
+    p_ingest.add_argument("--strategy",
+                          choices=_load_chunking_strategies(),
+                          default="text_baseline",
+                          help="The underlying text segmentation methodology mapped from chunking_strategies.json.")
+    p_ingest.add_argument("--distance-metric",
+                          choices=["l2", "cosine", "ip"],
+                          default="l2",
+                          help="Distance metric used for indexing HNSW vector space.")
+    p_ingest.add_argument("--embed-backend", choices=["local", "openrouter"], default="local",
+                      help="Backend for computing embeddings (default: local)")
+    p_ingest.add_argument("--batch-size", type=int, default=None,
+                          help="Number of chunks to send per embedding call (defaults to 64 for local, 500 for openrouter)")
 
     # ── search ────────────────────────────────────────────────────────────────
     p_search = sub.add_parser("search", help="Search the vector database")
@@ -48,6 +88,10 @@ def main(argv: list[str] | None = None) -> None:
                           help="Reranker model key from configs/reranker_models.json "
                                "(default: ms-marco-minilm, telecom: otel-reranker-0.6b)")
     p_search.add_argument("--collection",     default=None,        help="Override collection name")
+    p_search.add_argument("--search-method", choices=["dense", "bm25", "hybrid"], default="dense",
+                          help="Multi-method search routing pass algorithm selection.")
+    p_search.add_argument("--embed-backend", choices=["local", "openrouter"], default="local",
+                      help="Backend for computing embeddings (default: local)")
 
     # ── ask ───────────────────────────────────────────────────────────────────
     p_ask = sub.add_parser("ask", help="Ask a question (search + generate)")
@@ -62,6 +106,10 @@ def main(argv: list[str] | None = None) -> None:
                        help="Reranker model key from configs/reranker_models.json "
                             "(default: ms-marco-minilm, telecom: otel-reranker-0.6b)")
     p_ask.add_argument("--collection",     default=None,            help="Override collection name")
+    p_ask.add_argument("--search-method", choices=["dense", "bm25", "hybrid"], default="dense",
+                          help="Multi-method search routing pass algorithm selection.")
+    p_ask.add_argument("--embed-backend", choices=["local", "openrouter"], default="local",
+                      help="Backend for computing embeddings (default: local)")
 
     # ── evaluate ──────────────────────────────────────────────────────────────
     p_eval = sub.add_parser("evaluate", help="Run evaluation suite on a corpus")
@@ -115,6 +163,10 @@ def main(argv: list[str] | None = None) -> None:
     p_eval.add_argument("--reranker-model", default="ms-marco-minilm",
                         help="Reranker model key from configs/reranker_models.json "
                              "(default: ms-marco-minilm, telecom: otel-reranker-0.6b)")
+    p_eval.add_argument("--embed-backend", choices=["local", "openrouter"], default="local",
+                      help="Backend for computing embeddings (default: local)")
+    p_eval.add_argument("--inject-metadata", action="store_true",
+                    help="Simulate domain expert queries by prepending canonical source metadata to the question.")
 
     # ── info ──────────────────────────────────────────────────────────────────
     p_info = sub.add_parser("info", help="Show database info")
@@ -166,15 +218,29 @@ def _get_source(source_type: str, use_marker: bool = False):
     raise NotImplementedError(f"Source '{source_type}' not yet implemented.")
 
 
-def _get_embedder(model_key: str):
-    from open_telco_rag.embedders.sentense_transformers import SentenceTransformerEmbedder
-    return SentenceTransformerEmbedder(model_key=model_key)
+
+def _get_embedder(model_key: str, backend: str = "local"):
+    if backend == "openrouter":
+        from open_telco_rag.embedders.openrouter_embedder import OpenRouterEmbedder
+        return OpenRouterEmbedder(model_key=model_key)
+    else:
+        from open_telco_rag.embedders.sentense_transformers import SentenceTransformerEmbedder
+        return SentenceTransformerEmbedder(model_key=model_key)
 
 
-def _get_store(source_type: str, model_key: str, db_path: str, collection: str = None):
+def _get_store(source_type: str, model_key: str, db_path: str, collection: str = None, distance_metric: str = "l2"):
     from open_telco_rag.stores.chroma import ChromaStore
     col = collection or f"{source_type}_{model_key}"
-    return ChromaStore(path=db_path, collection_name=col)
+    
+    # Map CLI metric option strings directly to Chroma's native naming layout
+    metric_map = {"l2": "l2", "cosine": "cosine", "ip": "ip"}
+    chosen_space = metric_map.get(distance_metric.lower(), "l2")
+    
+    return ChromaStore(
+        path=db_path, 
+        collection_name=col, 
+        metadata={"hnsw:space": chosen_space}
+    )
 
 
 def _get_reranker(model_key: str):
@@ -186,42 +252,81 @@ def _get_reranker(model_key: str):
 # ── Command runners ───────────────────────────────────────────────────────────
 
 def _run_ingest(args) -> None:
+    import json
+    from pathlib import Path
     from open_telco_rag.core.pipeline import ingest
 
     use_marker = getattr(args, "use_marker", False)
+    enrichment = getattr(args, "enrichment", "none")
+    enrichment_model = getattr(args, "enrichment_model", "google/qwen-2.5-coder-32b")
+    distance_metric  = getattr(args, "distance_metric", "l2")
+    strategy = getattr(args, "strategy", "text_baseline")
+    
     source     = _get_source(args.source_type, use_marker=use_marker)
-    embedder   = _get_embedder(args.model)
+    embed_backend = getattr(args, "embed_backend", "local")
+    default_batch_size = 500 if embed_backend == "openrouter" else 64
+    batch_size_arg = getattr(args, "batch_size", None) or default_batch_size
+    embedder = _get_embedder(args.model, backend=embed_backend)
     store      = _get_store(args.source_type, args.model, args.db_path,
-                            collection=getattr(args, "collection", None))
+                            collection=getattr(args, "collection", None),
+                            distance_metric=distance_metric)
     data_dir   = args.data or f"data/{args.source_type}"
+    
 
     print(f"\nIngesting {args.source_type.upper()} documents")
     print(f"  Data dir:   {data_dir}")
     print(f"  Model:      {args.model}")
     print(f"  Collection: {store.collection_name}")
     print(f"  PDF loader: {'Marker API (high-quality)' if use_marker else 'pypdf (default)'}")
+    print(f"  Enrichment: {enrichment.upper()} ({enrichment_model})")
+    print(f"  Strategy:   {strategy.upper()}")
+    print(f"  Distance:   {distance_metric.upper()}")
 
-    stats = ingest(
-        source     = source,
-        store      = store,
-        embedder   = embedder,
-        data_dir   = data_dir,
-        chunk_size = args.chunk_size,
-        overlap    = args.overlap,
-        resume     = not args.no_resume,
-    )
+    # Aligns CLI argument structures seamlessly into dynamic chunker targets
+    chunk_kwargs = {
+        "source": source,
+        "store": store,
+        "embedder": embedder,
+        "data_dir": data_dir,
+        "resume": not args.no_resume,
+        "enrichment": enrichment,
+        "enrichment_model": enrichment_model,
+        "strategy": strategy,
+        "batch_size": batch_size_arg,
+    }
+
+    # Pull structural constraints from the strategy definition JSON
+    strat_path = Path("chunking_strategies.json")
+    if strat_path.exists():
+        try:
+            strat_meta = json.loads(strat_path.read_text(encoding="utf-8")).get(strategy, {})
+            if strat_meta.get("unit") == "tokens":
+                chunk_kwargs["chunk_tokens"] = args.chunk_size
+                chunk_kwargs["overlap_tokens"] = args.overlap
+            else:
+                chunk_kwargs["chunk_size"] = args.chunk_size
+                chunk_kwargs["overlap"] = args.overlap
+        except Exception as e:
+            print(f"[Warning] Failed to parse chunking_strategies.json ({e}). Falling back to characters.")
+            chunk_kwargs["chunk_size"] = args.chunk_size
+            chunk_kwargs["overlap"] = args.overlap
+    else:
+        chunk_kwargs["chunk_size"] = args.chunk_size
+        chunk_kwargs["overlap"] = args.overlap
+
+    stats = ingest(**chunk_kwargs)
 
     print(f"\nFiles processed: {stats.files_processed}")
     print(f"Chunks stored:   {stats.chunks_stored}")
     print(f"Skipped:         {stats.skipped_files}")
     print(f"Errors:          {stats.error_files}")
 
-
 def _run_search(args) -> None:
     import math
     from open_telco_rag.core.pipeline import search
 
-    embedder = _get_embedder(args.model)
+    embed_backend = getattr(args, "embed_backend", "local")
+    embedder = _get_embedder(args.model, backend=embed_backend)
     store    = _get_store(args.source_type, args.model, args.db_path,
                           collection=getattr(args, "collection", None))
 
@@ -238,6 +343,7 @@ def _run_search(args) -> None:
         top_k        = args.top_k,
         reranker     = reranker,
         rerank_top_k = args.rerank_top_k,
+        search_method = getattr(args, "search_method", "dense")
     )
 
     if not results:
@@ -272,7 +378,8 @@ def _run_search(args) -> None:
 def _run_ask(args) -> None:
     from open_telco_rag.core.pipeline import generate, search
 
-    embedder = _get_embedder(args.model)
+    embed_backend = getattr(args, "embed_backend", "local")
+    embedder = _get_embedder(args.model, backend=embed_backend)
     store    = _get_store(args.source_type, args.model, args.db_path,
                           collection=getattr(args, "collection", None))
 
@@ -289,6 +396,7 @@ def _run_ask(args) -> None:
         top_k        = args.top_k,
         reranker     = reranker,
         rerank_top_k = args.rerank_top_k,
+        search_method = getattr(args, "search_method", "dense")
     )
     answer = generate(args.question, results, source_type=args.source_type)
 
@@ -302,7 +410,8 @@ def _run_evaluate(args) -> None:
     from open_telco_rag.evaluation.questions import SUPPORTED_CORPORA, load_questions, EvalQuestion
     from open_telco_rag.evaluation._claude import make_llm_call
 
-    embedder   = _get_embedder(args.model)
+    embed_backend = getattr(args, "embed_backend", "local")
+    embedder = _get_embedder(args.model, backend=embed_backend)
     output_dir = None if args.no_save else Path(args.output)
 
     # LLM for evaluation metrics
@@ -370,6 +479,9 @@ def _run_evaluate(args) -> None:
             reranker          = reranker,
             rerank_top_k      = args.rerank_top_k,
             debug             = args.debug,
+            rag_generator_model=rag_generator_model,
+            inject_metadata   = args.inject_metadata,
+            search_method=getattr(args, "search_method", "dense"),
         )
 
         if not args.no_leaderboard:
@@ -382,6 +494,10 @@ def _run_evaluate(args) -> None:
                 corpus           = corpus,
                 collection       = col_name,
                 reranker_model   = args.reranker_model if args.rerank else None,
+                questions_file   = getattr(args, "questions_file", None),
+                inject_metadata  = args.inject_metadata,
+                search_method=getattr(args, "search_method", "dense"),
+                embed_backend=embed_backend,
             )
 
 
@@ -394,6 +510,10 @@ def _update_leaderboard(
     collection:       str,
     baseline_result   = None,
     reranker_model:   str | None = None,
+    questions_file:   str | None = None,
+    inject_metadata:  bool = False,
+    search_method:    str = "dense", 
+    embed_backend:    str = "local",
 ) -> None:
     """Append one row to the leaderboard JSON file."""
     import json
@@ -404,6 +524,34 @@ def _update_leaderboard(
                   r.mean_similarity, r.mean_context_recall, r.mean_answer_correctness]
         valid = [s for s in scores if s >= 0]
         return round(sum(valid) / len(valid), 3) if valid else -1.0
+    
+    q_results = getattr(result, "question_results", [])
+    
+    import statistics
+    # Calculate averages across all processed questions
+    avg_total = statistics.mean([getattr(q, "latency", 0.0) for q in q_results]) if q_results else 0.0
+    avg_search = statistics.mean([getattr(q, "search_latency", 0.0) for q in q_results]) if q_results else 0.0
+    avg_gen = statistics.mean([getattr(q, "gen_latency", 0.0) for q in q_results]) if q_results else 0.0
+    total_prompt_tokens = sum([getattr(q, "prompt_tokens", 0) for q in q_results])
+    total_completion_tokens = sum([getattr(q, "completion_tokens", 0) for q in q_results])
+    
+    # NEW: Sum the advanced token metrics
+    total_cached_tokens = sum([getattr(q, "cached_tokens", 0) for q in q_results])
+    total_reasoning_tokens = sum([getattr(q, "reasoning_tokens", 0) for q in q_results])
+    
+    # NEW: Use exact API cost if provided by OpenRouter, otherwise fallback to estimation
+    exact_cost = sum([getattr(q, "cost", 0.0) for q in q_results])
+    if exact_cost == 0.0:
+        exact_cost = ((total_prompt_tokens / 1_000_000) * 0.70) + ((total_completion_tokens / 1_000_000) * 0.90)
+    
+    # Extract the filename or fallback to default
+    q_file_label = "default"
+    if questions_file:
+        q_file_label = Path(questions_file).name
+    elif hasattr(result, "questions_file") and result.questions_file:
+        q_file_label = Path(result.questions_file).name
+    else:
+        q_file_label = f"{corpus}.json"
 
     row = {
         "timestamp":             datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -411,10 +559,21 @@ def _update_leaderboard(
         "evaluator_model":       evaluator_model,
         "embedder":              result.model,
         "corpus":                corpus,
+        "questions_file":        q_file_label,
         "collection":            collection,
         "top_k":                 result.top_k,
         "n_questions":           result.n_questions,
         "reranker":              reranker_model or "none",
+        "search_method":         search_method,
+        "embed_backend":         embed_backend,
+        "avg_search_latency_sec": round(avg_search, 2),  
+        "avg_gen_latency_sec":    round(avg_gen, 2),     
+        "avg_total_latency_sec":  round(avg_total, 2),   
+        "total_api_tokens":      total_prompt_tokens + total_completion_tokens,
+        "total_cached_tokens":   total_cached_tokens,       
+        "total_reasoning_tokens": total_reasoning_tokens,   
+        "run_cost_usd":          round(exact_cost, 6),      
+        "inject_metadata":       inject_metadata,
         "faithfulness":          round(result.mean_faithfulness,               3),
         "answer_relevancy":      round(result.mean_answer_relevancy,           3),
         "mean_similarity":       round(result.mean_similarity,                 3),

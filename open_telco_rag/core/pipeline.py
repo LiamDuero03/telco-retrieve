@@ -8,7 +8,7 @@ import os
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 
 from dotenv import load_dotenv
@@ -21,20 +21,18 @@ if TYPE_CHECKING:
 load_dotenv()
 
 # ── Ingest ────────────────────────────────────────────────────────────────────
-
 def ingest(
-    source:     Source,
+    source:      Source,
     store:      VectorStore,
     embedder:   Embedder,
     data_dir:   str | Path,
-    chunk_size: int  = 1024,
-    overlap:    int  = 200,
     min_length: int  = 100,
-    batch_size: int  = 64,
+    batch_size: int  = 64, # Default used for local, can be overridden to 1000 for OpenRouter
     resume:     bool = True,
     log_dir:    str | Path = "logs",
+    **chunk_kwargs: Any,
 ) -> IngestStats:
-    """Scan files, clean, chunk, embed and store."""
+    """Scan files, clean, chunk, globally batch embed and store."""
 
     data_dir = Path(data_dir)
     log_dir  = Path(log_dir)
@@ -45,7 +43,6 @@ def ingest(
     log_file    = log_dir / f"ingest_{source_name}_{embedder.model_key}_{timestamp}.csv"
     stats       = IngestStats()
 
-    # ── NEW: detect whether Marker was used — affects chunk routing ───────────
     use_marker = getattr(source, '_use_marker', False)
 
     # Resume tracking
@@ -64,6 +61,13 @@ def ingest(
     _init_log(log_file)
     print(f"\nFound {len(files)} files | model: {embedder.model_key}")
     print(f"Logging to: {log_file}\n")
+
+    # ── PHASE 1: CHUNK ACCUMULATION ──
+    global_texts = []
+    global_ids = []
+    global_metadatas = []
+    files_to_log = [] # Holds stats to write to CSV logs after successful ingestion
+    files_processed_this_run = []
 
     for file_path in files:
         rel = str(file_path.relative_to(data_dir))
@@ -104,26 +108,78 @@ def ingest(
                      error=f"clean: {e}", model=embedder.model_key)
             continue
 
-        # ── Chunk ─────────────────────────────────────────────────────────────
-        # Routing:
-        #   .md / .yaml / .yml          → chunk_markdown (always)
-        #   .pdf / .docx  + use_marker  → chunk_markdown (Marker output is MD)
-        #   .pdf / .docx  + no marker   → chunk_text     (pypdf raw text)
+        # Chunk
         try:
-            from open_telco_rag.core.chunking import chunk_text, chunk_markdown
+            from open_telco_rag.core.chunking import chunk_document, ChunkingStrategy
+            from open_telco_rag.core.enrichment import enrich_chunks
+
+            start_chunk_time = time.perf_counter()
+            raw_char_count   = len(text) if text else 0
+
             source_type_str = source.__class__.__name__.lower().replace("source", "")
 
             is_native_markdown = file_path.suffix.lower() in [".md", ".yaml", ".yml"]
             is_marker_output   = use_marker and file_path.suffix.lower() in [".pdf", ".docx"]
+            is_structured      = is_native_markdown or is_marker_output
 
-            if is_native_markdown or is_marker_output:
-                chunks = chunk_markdown(text, chunk_size=chunk_size,
-                                        source_type=source_type_str)
+            active_kwargs = chunk_kwargs.copy()
+            active_kwargs["source_type"] = source_type_str
+
+            user_strategy_str = active_kwargs.get("strategy", "text_baseline")
+            
+            try:
+                user_strategy = ChunkingStrategy(user_strategy_str)
+            except ValueError:
+                print(f"  WARNING: Strategy '{user_strategy_str}' not recognized. Falling back to TEXT_BASELINE.")
+                user_strategy = ChunkingStrategy.TEXT_BASELINE
+
+            structure_required_strategies = {
+                ChunkingStrategy.HIERARCHICAL_MARKDOWN,
+                ChunkingStrategy.PARENT_CHILD
+            }
+
+            if not is_structured and user_strategy in structure_required_strategies:
+                fallback_strategy = ChunkingStrategy.TEXT_BASELINE
+                print(f"  ⚠️ WARNING: '{user_strategy.value}' requires structured headers, "
+                      f"but '{file_path.name}' is unstructured. Falling back to '{fallback_strategy.value}'.")
+                active_kwargs["strategy"] = fallback_strategy
             else:
-                chunks = chunk_text(text, chunk_size=chunk_size, overlap=overlap,
-                                    source_type=source_type_str)
+                active_kwargs["strategy"] = user_strategy
 
+            active_kwargs["is_structured"] = is_structured
+
+            enrichment_strategy = active_kwargs.pop("enrichment", "none")
+            enrichment_model    = active_kwargs.pop("enrichment_model", "openai/gpt-4o-mini")
+
+            chunks = chunk_document(text=text, **active_kwargs)
             chunks = [c for c in chunks if len(c.text.strip()) >= min_length]
+
+            if enrichment_strategy and enrichment_strategy != "none" and chunks:
+                meta = source.metadata(file_path)
+                llm_client = None
+                if enrichment_strategy == "llm_metadata":
+                    from open_telco_rag.generators.openrouter import OpenRouterGenerator
+                    llm_client = OpenRouterGenerator(model=enrichment_model) 
+
+                chunks = enrich_chunks(
+                    chunks=chunks,
+                    strategy=enrichment_strategy,
+                    llm_client=llm_client,
+                    model_name=enrichment_model,
+                    source_document=meta.get("source", file_path.name),
+                    **meta 
+                )
+
+            chunk_duration_sec = time.perf_counter() - start_chunk_time
+            fused_char_count   = sum(len(c.text) for c in chunks) if chunks else 0
+
+            stats.total_chunking_time_sec += chunk_duration_sec
+            stats.total_raw_chars          += raw_char_count
+            stats.total_fused_chars        += fused_char_count
+
+            chunking_time_ms = chunk_duration_sec * 1000
+            expansion_ratio  = fused_char_count / max(1, raw_char_count)
+
         except Exception as e:
             print(f"  ERROR chunking: {e}")
             stats.error_files += 1
@@ -137,40 +193,72 @@ def ingest(
                      error="no valid chunks", model=embedder.model_key)
             continue
 
-        # Embed and store in batches
-        try:
-            meta = source.metadata(file_path)
-            for batch_start in range(0, len(chunks), batch_size):
-                batch  = chunks[batch_start:batch_start+batch_size]
-                texts  = [c.text for c in batch]
-                ids    = [f"{rel}::{embedder.model_key}::{batch_start + j}"
-                        for j, c in enumerate(batch)]
-                metas  = [{**meta, "heading": c.heading or "",
-                        "chunk_index": batch_start + j,
-                        "source_type": c.source_type}
-                        for j, c in enumerate(batch)]
-                embeds = embedder.embed(texts)
-                store.add(ids=ids, embeddings=embeds, documents=texts, metadatas=metas)
-                stats.chunks_stored += len(batch)
+        # Accumulate chunks globally instead of embedding immediately
+        meta = source.metadata(file_path)
+        for j, c in enumerate(chunks):
+            chunk_id = f"{rel}::{embedder.model_key}::{j}"
+            base_meta = {
+                **meta, 
+                "heading": c.heading or "",
+                "chunk_index": j,
+                "source_type": c.source_type
+            }
+            if hasattr(c, 'metadata') and c.metadata:
+                base_meta.update(c.metadata)
 
-            chunk_lens = [len(c.text) for c in chunks]
-            print(f"  Chunks: {len(chunks)} | "
-                  f"avg: {sum(chunk_lens)//len(chunk_lens)} | "
-                  f"min: {min(chunk_lens)} | max: {max(chunk_lens)}")
-            _log_row(log_file, file_path, file_size_kb, "success",
-                     chunks=len(chunks), model=embedder.model_key,
-                     avg_len=sum(chunk_lens)//len(chunk_lens))
-            stats.files_processed += 1
+            global_texts.append(c.text)
+            global_ids.append(chunk_id)
+            global_metadatas.append(base_meta)
+
+        chunk_lens = [len(c.text) for c in chunks]
+        print(f"  Buffered: {len(chunks)} chunks | avg: {sum(chunk_lens)//len(chunk_lens)}")
+        
+        # Buffer stats for logging after successful batch write
+        files_to_log.append((file_path, file_size_kb, len(chunks), sum(chunk_lens)//len(chunk_lens), chunking_time_ms, expansion_ratio))
+        files_processed_this_run.append(rel)
+
+    # ── PHASE 2: GLOBAL BULK EMBEDDING ──
+    total_chunks = len(global_texts)
+    if total_chunks > 0:
+        print(f"\n{'-'*60}")
+        print(f"Phase 2: Bulk embedding {total_chunks} total chunks...")
+        print(f"Batch size: {batch_size} chunks per API call")
+        print(f"{'-'*60}")
+
+        start_embed_time = time.perf_counter()
+        
+        try:
+            for batch_start in range(0, total_chunks, batch_size):
+                batch_end = min(batch_start + batch_size, total_chunks)
+                print(f"  Embedding batch [{batch_start}/{total_chunks}] (Size: {batch_end - batch_start})...")
+                
+                batch_texts = global_texts[batch_start:batch_end]
+                batch_ids = global_ids[batch_start:batch_end]
+                batch_metas = global_metadatas[batch_start:batch_end]
+
+                # Single bulk call to OpenRouter / Local model!
+                batch_embeds = embedder.embed(batch_texts)
+                
+                # Write to vector database
+                store.add(ids=batch_ids, embeddings=batch_embeds, documents=batch_texts, metadatas=batch_metas)
+                stats.chunks_stored += len(batch_texts)
+
+            # Execution was successful! Log files and mark progress
+            for log_item in files_to_log:
+                f_path, f_size, f_chunks, f_avg, f_time, f_ratio = log_item
+                _log_row(log_file, f_path, f_size, "success", chunks=f_chunks, model=embedder.model_key,
+                         avg_len=f_avg, chunking_time_ms=f_time, expansion_ratio=f_ratio)
+                stats.files_processed += 1
 
             if resume:
-                completed.add(rel)
+                completed.update(files_processed_this_run)
                 progress_file.write_text(json.dumps(sorted(completed)))
 
         except Exception as e:
-            print(f"  ERROR embedding/storing: {e}")
-            stats.error_files += 1
-            _log_row(log_file, file_path, file_size_kb, "error",
-                     error=f"embed/store: {e}", model=embedder.model_key)
+            print(f"\n[FATAL ERROR] Bulk Embedding/Database storage failed: {e}")
+            stats.error_files += len(files_processed_this_run)
+            for f_path, f_size, _, _, _, _ in files_to_log:
+                _log_row(log_file, f_path, f_size, "error", error=f"bulk embed fail: {e}", model=embedder.model_key)
 
     # Summary
     print(f"\n{'='*60}")
@@ -191,25 +279,26 @@ def search(
     embedder:     Embedder,
     top_k:        int   = 8,
     threshold:    float = 1.0,
-    reranker      = None,
+    reranker            = None,
     rerank_top_k: int   = 5,
+    search_method: str  = "dense",
 ) -> list[SearchResult]:
     """Embed a query and retrieve nearest neighbours.
-
-    If reranker is provided, retrieves top_k * 3 candidates first,
-    then reranks down to rerank_top_k for higher precision.
+    
+    Delegates retrieval strategies out to the modular core search layer.
     """
-    candidate_k = top_k * 3 if reranker is not None else top_k
-
-    vector  = embedder.embed([query])[0]
-    results = store.search(vector, n_results=candidate_k)
-    results = [r for r in results if r.distance < threshold]
-
-    if reranker is not None and results:
-        results = reranker.rerank(query, results, top_k=rerank_top_k)
-
-    return results
-
+    from open_telco_rag.core.retrieval import execute_retrieval
+    
+    return execute_retrieval(
+        query=query,
+        store=store,
+        embedder=embedder,
+        top_k=top_k,
+        threshold=threshold,
+        reranker=reranker,
+        rerank_top_k=rerank_top_k,
+        search_method=search_method
+    )
 
 # ── Generate ──────────────────────────────────────────────────────────────────
 
@@ -240,7 +329,8 @@ def generate(
 
 _CSV_HEADERS = [
     "timestamp", "file_name", "file_size_kb", "status",
-    "chunks", "avg_len", "embedding_model", "error_message"
+    "chunks", "avg_len", "embedding_model", "error_message", 
+    "chunking_time_ms", "expansion_ratio"
 ]
 
 def _init_log(path: Path) -> None:
@@ -249,7 +339,8 @@ def _init_log(path: Path) -> None:
 
 def _log_row(
     path: Path, file_path: Path, size_kb: float, status: str,
-    chunks: int = 0, avg_len: int = 0, model: str = "", error: str = ""
+    chunks: int = 0, avg_len: int = 0, model: str = "", error: str = "",
+    chunking_time_ms: float = 0.0, expansion_ratio: float = 1.0
 ) -> None:
     with open(path, "a", newline="", encoding="utf-8") as f:
         csv.DictWriter(f, fieldnames=_CSV_HEADERS).writerow({
@@ -261,4 +352,7 @@ def _log_row(
             "avg_len":         avg_len,
             "embedding_model": model,
             "error_message":   error,
+            "chunking_time_ms": round(chunking_time_ms, 2), 
+            "expansion_ratio":  round(expansion_ratio, 3),
         })
+        

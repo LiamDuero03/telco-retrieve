@@ -36,8 +36,12 @@ st.markdown("""
         border: 1px solid #f0d080; margin-left: 6px;
     }
     .answer-box {
-        background: #f8f8f8; border: 1px solid #e8e8e8;
-        border-radius: 10px; padding: 1rem 1.2rem; margin-top: 0.5rem;
+        background: var(--secondary-background-color, #f8f8f8); 
+        color: var(--text-color, #31333F); /* <-- Uses Streamlit's native text color */
+        border: 1px solid var(--border-color, rgba(128, 128, 128, 0.2));
+        border-radius: 10px; 
+        padding: 1rem 1.2rem; 
+        margin-top: 0.5rem;
     }
     .result-card {
         background: #ffffff; border: 1px solid #e8e8e8;
@@ -54,10 +58,18 @@ st.markdown("""
     }
     .col-row {
         display: flex; justify-content: space-between; padding: 8px 12px;
-        background: #f5f5f5; border-radius: 8px; margin-bottom: 5px; font-size: 0.85rem;
+        background: var(--secondary-background-color, #f5f5f5); 
+        border: 1px solid rgba(128, 128, 128, 0.2);
+        border-radius: 8px; margin-bottom: 5px; font-size: 0.85rem;
     }
-    .col-name { font-weight: 500; }
-    .col-count { color: #888; }
+    .col-name { 
+        font-weight: 500;
+        color: var(--text-color, #31333F); 
+    }
+    .col-count { 
+        color: var(--text-color, #31333F); 
+        opacity: 0.65; 
+    }
     .eval-row {
         display: flex; justify-content: space-between; align-items: center;
         padding: 8px 14px; border-radius: 8px; margin-bottom: 4px; font-size: 0.85rem;
@@ -122,12 +134,58 @@ def _load_embedder_keys() -> dict:
     data = json.loads(path.read_text(encoding="utf-8"))
     return {k: f"{k} — {v.get('description', v['model_name'])}" for k, v in data.items()}
 
+@st.cache_data(show_spinner=False)
+def _load_llm_keys() -> dict:
+    import json
+    from pathlib import Path
+    path = Path("configs/llm_models.json")
+    
+    if not path.exists():
+        return {"Claude Sonnet 4.5": "anthropic/claude-sonnet-4.5"}
+        
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return {k: v["model_name"] for k, v in data.items()}
+
+    
+@st.cache_data(show_spinner=False)
+def _load_chunking_strategies() -> dict:
+    import json
+    from pathlib import Path
+    path = Path("configs/chunking_strategies.json")
+    if not path.exists():
+        return {"text_baseline": {"display_name": "Text Baseline", "help_text": "", "unit": "characters", "default_size": 1024, "default_overlap": 200}}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+@st.cache_data(show_spinner=False)
+def _load_enrichment_strategies() -> dict:
+    import json
+    from pathlib import Path
+    path = Path("configs/enrichment_strategies.json")
+    if not path.exists():
+        return {"none": {"display_name": "No Enrichment", "help_text": "", "requires_llm": False}}
+    return json.loads(path.read_text(encoding="utf-8"))
+
+@st.cache_resource(show_spinner=False)
+def _get_embedder(model_key: str, backend: str = "local"):
+    if backend == "openrouter":
+        from open_telco_rag.embedders.openrouter_embedder import OpenRouterEmbedder
+        return OpenRouterEmbedder(model_key=model_key)
+    else:
+        from open_telco_rag.embedders.sentense_transformers import SentenceTransformerEmbedder
+        return SentenceTransformerEmbedder(model_key=model_key)
+
 
 def _get_store(source_type: str, model_key: str, db_path: str,
-               collection: str | None = None):
+               collection: str | None = None, distance_metric: str = "l2"):
     from open_telco_rag.stores.chroma import ChromaStore
     col = collection.strip() if collection and collection.strip() else f"{source_type}_{model_key}"
-    return ChromaStore(path=db_path, collection_name=col)
+    
+    
+    return ChromaStore(
+        path=db_path, 
+        collection_name=col, 
+        metadata={"hnsw:space": distance_metric.lower()}
+    )
 
 
 def _similarity(distance: float) -> float:
@@ -185,7 +243,7 @@ if "pipeline" not in st.session_state:
 is_rag = st.session_state["pipeline"] == "rag"
 
 if st.sidebar.button("🔍  RAG pipeline",
-    key="btn_rag", use_container_width=True,
+    key="btn_rag", width="stretch",
     type="primary" if is_rag else "secondary"):
     st.session_state["pipeline"] = "rag"
     st.rerun()
@@ -193,7 +251,7 @@ if st.sidebar.button("🔍  RAG pipeline",
 st.sidebar.caption("Ask · Search · Ingest · Evaluate · Leaderboard")
 
 if st.sidebar.button("🧪  QnA generation",
-    key="btn_qna", use_container_width=True,
+    key="btn_qna", width="stretch",
     type="primary" if not is_rag else "secondary"):
     st.session_state["pipeline"] = "qna"
     st.rerun()
@@ -214,18 +272,14 @@ if is_rag:
         format_func=lambda k: _embedder_options[k],
     )
 
-    LLM_OPTIONS = {
-        "Claude Sonnet 4.5": "anthropic/claude-sonnet-4.5",
-        "Claude Sonnet 4":   "anthropic/claude-sonnet-4",
-        "Claude Haiku 4.5":  "anthropic/claude-haiku-4-5",
-        "GPT-4o":            "openai/gpt-4o",
-        "GPT-4o mini":       "openai/gpt-4o-mini",
-        "Llama 3.3 70B":     "meta-llama/llama-3.3-70b-instruct",
-        "Llama 3.1 8B":      "meta-llama/llama-3.1-8b-instruct",
-        "Qwen 2.5 7B":       "qwen/qwen-2.5-7b-instruct",
-        "Gemma 3n E4B":      "google/gemma-3n-e4b-it",
-        "Mistral Large":     "mistralai/mistral-large",
-    }
+    embed_backend = st.sidebar.radio(
+        "Embedding Backend",
+        options=["local", "openrouter"],
+        horizontal=True,
+        help="Use 'local' to run embeddings on your local CPU/GPU, or 'openrouter' to offload execution to OpenRouter's cloud GPUs.",
+    )
+
+    LLM_OPTIONS = _load_llm_keys()
     llm_label = st.sidebar.selectbox("LLM", list(LLM_OPTIONS.keys()))
     llm_model  = LLM_OPTIONS[llm_label]
 
@@ -292,13 +346,22 @@ else:
         qna_collection = ""
 
     st.sidebar.markdown("---")
-    qna_gen_model = st.sidebar.text_input(
-        "Generation model", value="anthropic/claude-sonnet-4.5", key="qna_gen_model",
+    LLM_OPTIONS = _load_llm_keys()
+    
+    qna_gen_label = st.sidebar.selectbox(
+        "Generation model", 
+        options=list(LLM_OPTIONS.keys()),
+        key="qna_gen_label",
     )
-    qna_val_model = st.sidebar.text_input(
-        "Validation model", value="anthropic/claude-sonnet-4.5", key="qna_val_model",
-        help="Used by ValidateAnswerableBlock — can differ from generation model.",
+    qna_gen_model = LLM_OPTIONS[qna_gen_label]
+    
+    qna_val_label = st.sidebar.selectbox(
+        "Validation model", 
+        options=list(LLM_OPTIONS.keys()),
+        key="qna_val_label",
+        help="Used by validation judges — can differ from generation model.",
     )
+    qna_val_model = LLM_OPTIONS[qna_val_label]
     st.sidebar.markdown("---")
     st.sidebar.caption("Output goes to draft_questions/. Review in the Review QnA tab.")
 
@@ -406,21 +469,29 @@ if is_rag:
         question = st.text_input("Question",
             placeholder="What are the xApp conflict mitigation strategies in O-RAN?",
             label_visibility="collapsed")
-        col_ask1, col_ask2 = st.columns(2)
+        col_ask1, col_ask2, col_ask3 = st.columns(3) 
         with col_ask1:
             top_k_ask = st.number_input("Chunks to retrieve", min_value=1, max_value=20, value=8)
         with col_ask2:
             threshold_ask = st.slider("Similarity threshold", 0.0, 1.0, 0.0, 0.05)
+        with col_ask3:
+            selected_search_method = st.selectbox(
+                "Search Method",
+                options=["dense", "bm25", "hybrid"],
+                index=0,
+                key="ask_search_method"
+            )
         ask_btn = st.button("Ask ✦", type="primary")
 
         if ask_btn and question.strip():
             with st.spinner("Retrieving and generating…"):
                 try:
                     from open_telco_rag.core.pipeline import generate, search
-                    embedder = _get_embedder(model_key)
+                    embedder = _get_embedder(model_key, backend=embed_backend)
                     store    = _get_store(source_type, model_key, db_path, collection_override)
                     results  = search(question, store=store, embedder=embedder,
-                                      top_k=top_k_ask, threshold=1.0 - threshold_ask)
+                                      top_k=top_k_ask, threshold=threshold_ask,
+                                      search_method=selected_search_method)
                     answer   = generate(question, results, source_type=source_type,
                                         generator=_build_generator(llm_model))
 
@@ -470,22 +541,29 @@ if is_rag:
         query = st.text_input("Query",
             placeholder="near-RT RIC E2 interface latency requirements",
             label_visibility="collapsed", key="search_query")
-        col_s1, col_s2 = st.columns(2)
+        col_s1, col_s2, col_s3 = st.columns(3)
         with col_s1:
             top_k_search = st.number_input("Top K", 1, 20, 5, key="sk_topk")
         with col_s2:
-            threshold_search = st.slider("Similarity threshold", 0.0, 1.0, 0.0, 0.05,
-                                         key="sk_threshold")
+            threshold_search = st.slider("Similarity threshold", 0.0, 1.0, 0.0, 0.05, key="sk_threshold")
+        with col_s3:
+            selected_search_method_s = st.selectbox(
+                "Search Method",
+                options=["dense", "bm25", "hybrid"],
+                index=0,
+                key="search_search_method"
+            )
         search_btn = st.button("Search", type="primary", key="search_btn")
 
         if search_btn and query.strip():
             with st.spinner("Searching…"):
                 try:
                     from open_telco_rag.core.pipeline import search
-                    embedder = _get_embedder(model_key)
+                    embedder = _get_embedder(model_key, backend=embed_backend)
                     store    = _get_store(source_type, model_key, db_path, collection_override)
                     results  = search(query, store=store, embedder=embedder,
-                                      top_k=top_k_search, threshold=1.0 - threshold_search)
+                                      top_k=top_k_search, threshold=threshold_search,
+                                      search_method=selected_search_method_s)
                     if not results:
                         st.info("No results found.")
                     else:
@@ -506,16 +584,114 @@ if is_rag:
         elif search_btn:
             st.warning("Please enter a query.")
 
-    # ── INGEST ───────────────────────────────────────────────────────────────
+# ── INGEST ───────────────────────────────────────────────────────────────
     with tab_ingest:
-        col_i1, col_i2 = st.columns(2)
-        with col_i1:
-            data_dir   = st.text_input("Data directory", value=f"data/{source_type}")
-            chunk_size = st.number_input("Chunk size", 128, 4096, 1024, 128)
-        with col_i2:
+        # ── SECTION 1: GLOBAL DATA SETUP ──────────────────────────────────────
+        col_i0_1, col_i0_2 = st.columns(2)
+        with col_i0_1:
+            selected_source_type = st.selectbox(
+                "Document Source Type",
+                options=["3gpp", "oran", "camara", "tmforum", "gsma", "itu", "etsi"],
+                index=0,
+                help="Selects the parsing class and expected file formats."
+            )
+        with col_i0_2:
+            st.text(f"Active Model: {model_key}")
+
+        col_data1, col_data2 = st.columns(2)
+        with col_data1:
+            data_dir = st.text_input("Data directory", value=f"data/{selected_source_type}")
+        with col_data2:
             ingest_collection = st.text_input("Collection name",
-                                              placeholder=f"{source_type}_{model_key}")
-            overlap = st.number_input("Overlap", 0, 512, 200, 32)
+                                              placeholder=f"{selected_source_type}_{model_key}")
+
+        # ── SECTION 2: CHUNKING CONFIGURATION ─────────────────────────────────
+        st.markdown("---")
+        st.markdown("##### Chunking Parameters")
+
+        # Load dynamic strategies from JSON configs
+        chunk_strat_dict = _load_chunking_strategies()
+        enrich_strat_dict = _load_enrichment_strategies()
+        
+        # ── ROW 1: Strategy & Distance Metric Side-by-Side ──
+        col_strat, col_dist = st.columns(2)
+        
+        with col_strat:
+            selected_strategy = st.selectbox(
+                "Chunking Strategy", 
+                options=list(chunk_strat_dict.keys()), 
+                index=0,
+                format_func=lambda k: chunk_strat_dict[k]["display_name"],
+                help="Select layout splitting parameters."
+            )
+            strat_meta = chunk_strat_dict[selected_strategy]
+            st.caption(f"💡 {strat_meta['help_text']}")
+            
+        with col_dist:
+            selected_distance = st.selectbox(
+                "Distance Metric (Index Vector Space)",
+                options=["l2", "cosine", "ip"],
+                index=0,
+                help="l2 = Euclidean, cosine = angular matching (recommended for prepended text descriptions)."
+            )
+
+        # Parse labels based on the selected strategy row above
+        unit_label = strat_meta["unit"].capitalize()
+
+        # ── ROW 2: Chunk Size & Overlap Side-by-Side ──
+        col_size, col_overlap = st.columns(2)
+        
+        with col_size:
+            chunk_size = st.number_input(
+                f"Chunk size ({unit_label})", 
+                min_value=strat_meta.get("min_size", 64), 
+                max_value=strat_meta.get("max_size", 4096), 
+                value=strat_meta.get("default_size", 1024)
+            )
+                
+        with col_overlap:
+            if "default_overlap" in strat_meta and strat_meta["default_overlap"] > 0:
+                overlap = st.number_input(
+                    f"Overlap ({unit_label})", 
+                    min_value=0, 
+                    max_value=strat_meta.get("max_size", 4096) // 2, 
+                    value=strat_meta["default_overlap"]
+                )
+            else:
+                overlap = st.number_input(
+                    f"Overlap", 
+                    min_value=0, max_value=0, value=0, 
+                    disabled=True, 
+                    help="Not utilized by this configuration strategy."
+                )
+
+        # ── DYNAMIC ENRICHMENT CONFIGURATIONS ───────────────────────
+        st.markdown("---")
+        st.markdown("##### Chunk Enrichment (Pre-Embedding Process)")
+        col_en1, col_en2 = st.columns(2)
+        #col_en1, col_en2 = col_i1, col_i2 
+        
+        with col_en1:
+            selected_enrichment = st.selectbox(
+                "Enrichment Strategy",
+                options=list(enrich_strat_dict.keys()),
+                index=0,
+                format_func=lambda k: enrich_strat_dict[k]["display_name"],
+                help="Appends additional domain context, vocabulary mappings, or structural headers before text embedding."
+            )
+            st.caption(f"💡 {enrich_strat_dict[selected_enrichment]['help_text']}")
+            
+        with col_en2:
+            # Dynamically gray out the model selection if the chosen strategy doesn't require an LLM
+            req_llm = enrich_strat_dict[selected_enrichment].get("requires_llm", False)
+            selected_enrichment_model = st.selectbox(
+                "Enrichment Model (If LLM strategy chosen)",
+                options=list(LLM_OPTIONS.keys()),
+                format_func=lambda k: k.split("/")[-1],
+                disabled=not req_llm,
+                help="Requires functional LLM processing credentials when active."
+            )
+                
         col_i3, col_i4 = st.columns(2)
         with col_i3:
             use_marker = st.checkbox("Use Marker API (better PDF quality)")
@@ -524,23 +700,63 @@ if is_rag:
         ingest_btn = st.button("Run ingest ▶", type="primary")
 
         if ingest_btn:
-            col_name  = ingest_collection.strip() or f"{source_type}_{model_key}"
-            log_lines = [f"Ingesting {source_type.upper()} documents",
-                         f"  Data dir:   {data_dir}", f"  Model:      {model_key}",
-                         f"  Collection: {col_name}",
-                         f"  PDF loader: {'Marker API' if use_marker else 'pypdf (default)'}",""]
+            col_name  = ingest_collection.strip() or f"{selected_source_type}_{model_key}"
+            log_lines = [
+                f"Ingesting {selected_source_type.upper()} documents",
+                f"  Data dir:   {data_dir}", 
+                f"  Model:      {model_key}",
+                f"  Collection: {col_name}",
+                f"  Strategy:   {selected_strategy}",
+                f"  Embedder: {embed_backend.upper()} + {model_key.upper()}", 
+                f"  Enrichment: {selected_enrichment.upper()}", 
+                f"  PDF loader: {'Marker API' if use_marker else 'pypdf (default)'}",
+                ""
+            ]
             log_box = st.empty()
             log_box.markdown("<div class='log-box'>" + "\n".join(log_lines) + "Running…</div>",
                              unsafe_allow_html=True)
             try:
                 from open_telco_rag.core.pipeline import ingest
                 from open_telco_rag.stores.chroma import ChromaStore
-                src      = _get_source(source_type, use_marker=use_marker)
-                embedder = _get_embedder(model_key)
-                store    = ChromaStore(path=db_path, collection_name=col_name)
-                stats = ingest(source=src, store=store, embedder=embedder,
-                               data_dir=data_dir, chunk_size=chunk_size,
-                               overlap=overlap, resume=not no_resume)
+                
+                src      = _get_source(selected_source_type, use_marker=use_marker)
+                embedder = _get_embedder(model_key, backend=embed_backend)
+                store    = _get_store(
+                    source_type=selected_source_type, 
+                    model_key=model_key, 
+                    db_path=db_path, 
+                    collection=col_name,
+                    distance_metric=selected_distance
+                )
+                
+                chunk_kwargs = {
+                    "strategy": selected_strategy,
+                    "enrichment": selected_enrichment,
+                    "enrichment_model": LLM_OPTIONS[selected_enrichment_model]
+                }
+                
+                if strat_meta["unit"] == "tokens":
+                    chunk_kwargs["chunk_tokens"] = chunk_size
+                    chunk_kwargs["overlap_tokens"] = overlap
+                elif selected_strategy in ["lumber_chunker"]:
+                    if "llm_client" in st.session_state:
+                        chunk_kwargs["llm_client"] = st.session_state["llm_client"]
+                    else:
+                        from open_telco_rag.generators.openrouter import OpenRouterGenerator
+                        chunk_kwargs["llm_client"] = OpenRouterGenerator(model=LLM_OPTIONS[selected_enrichment_model])
+                else:
+                    chunk_kwargs["chunk_size"] = chunk_size
+                    chunk_kwargs["overlap"] = overlap
+                    
+                stats = ingest(
+                    source=src, 
+                    store=store, 
+                    embedder=embedder,
+                    data_dir=data_dir, 
+                    resume=not no_resume,
+                    **chunk_kwargs
+                )
+                
                 log_lines += [f"Files processed: {stats.files_processed}",
                               f"Chunks stored:   {stats.chunks_stored}",
                               f"Skipped:         {stats.skipped_files}",
@@ -549,6 +765,10 @@ if is_rag:
                                  unsafe_allow_html=True)
                 st.success(f"Done — {stats.chunks_stored:,} chunks stored, "
                            f"{stats.skipped_files} skipped, {stats.error_files} errors.")
+                
+                from open_telco_rag.core.efficiency import render_efficiency_dashboard
+                render_efficiency_dashboard(stats)
+                
             except Exception as e:
                 log_lines.append(f"ERROR: {e}")
                 log_box.markdown("<div class='log-box'>" + "\n".join(log_lines) + "</div>",
@@ -565,19 +785,20 @@ if is_rag:
             top_k_eval = st.number_input("Top K", 1, 20, 5, key="eval_topk")
             output_dir = st.text_input("Output directory", value="results/gui")
         with col_e2:
-            METRICS_LLM_OPTIONS = {
-                "Claude Sonnet 4.5": "anthropic/claude-sonnet-4.5",
-                "Claude Sonnet 4":   "anthropic/claude-sonnet-4",
-                "GPT-4o":            "openai/gpt-4o",
-                "Llama 3.3 70B":     "meta-llama/llama-3.3-70b-instruct",
-            }
+            METRICS_LLM_OPTIONS = _load_llm_keys() 
             metrics_llm_label = st.selectbox("Metrics evaluation model",
                                              list(METRICS_LLM_OPTIONS.keys()))
             eval_delay = st.slider("Delay between questions (s)", 0.0, 5.0, 1.0, 0.5)
 
         rag_llm_model     = llm_model
         metrics_llm_model = METRICS_LLM_OPTIONS[metrics_llm_label]
-        include_baseline  = st.checkbox("Include baseline (no retrieval)", value=False)
+
+        col_eval_opts1, col_eval_opts2 = st.columns(2)
+        with col_eval_opts1:
+            include_baseline = st.checkbox("Include baseline (no retrieval)", value=False)
+        with col_eval_opts2:
+            inject_metadata  = st.checkbox("Inject domain metadata into queries", value=False, help="Simulates domain-expert prompting by prepending document IDs to the question.")
+        
         eval_btn = st.button("Run evaluation ▶", type="primary", key="eval_btn")
 
         if eval_btn:
@@ -599,7 +820,7 @@ if is_rag:
                     from open_telco_rag.evaluation.questions import EvalQuestion
                     from open_telco_rag.evaluation._claude import make_llm_call
 
-                    embedder     = _get_embedder(model_key)
+                    embedder = _get_embedder(model_key, backend=embed_backend)
                     store        = _get_store(source_type, model_key, db_path, collection_override)
                     questions    = [EvalQuestion.from_dict(q) for q in qs]
                     llm_call     = make_llm_call("openrouter", metrics_llm_model)
@@ -636,7 +857,8 @@ if is_rag:
                         questions=questions, model=model_key, top_k=top_k_eval,
                         delay=eval_delay, output_dir=Path(output_dir),
                         llm_call=llm_call, rag_llm_call=rag_llm_call,
-                        include_baseline=include_baseline,
+                        include_baseline=include_baseline,rag_generator_model=rag_llm_model,
+                        inject_metadata=inject_metadata, search_method=selected_search_method,
                     )
                     _eval_mod.evaluate_question = _orig_eq
                     progress_bar.progress(1.0, text="Done ✓")
@@ -649,6 +871,16 @@ if is_rag:
 
                     def _bl(v):
                         return round(max(0, v), 3) if v is not None and v >= 0 else None
+                    
+                    q_filename = Path(questions_file).name if questions_file else f"{source_type}.json"
+
+                    total_cost = sum(getattr(q, "cost", 0.0) for q in result.question_results)
+                    total_cached = sum(getattr(q, "cached_tokens", 0) for q in result.question_results)
+                    total_reasoning = sum(getattr(q, "reasoning_tokens", 0) for q in result.question_results)
+
+                    avg_search = round(sum(getattr(q, "search_latency", 0.0) for q in result.question_results) / max(1, len(result.question_results)), 2)
+                    avg_gen = round(sum(getattr(q, "gen_latency", 0.0) for q in result.question_results) / max(1, len(result.question_results)), 2)
+                    avg_total = round(sum(getattr(q, "latency", 0.0) for q in result.question_results) / max(1, len(result.question_results)), 2)
 
                     lb_row = {
                         "timestamp":             __import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -657,8 +889,19 @@ if is_rag:
                         "embedder":              model_key,
                         "corpus":               source_type,
                         "collection":            col_name,
+                        "questions_file":         q_filename,
                         "top_k":                 top_k_eval,
                         "n_questions":           result.n_questions,
+                        "inject_metadata":       inject_metadata,
+                        "search_method":         selected_search_method, 
+                        "embed_backend":         embed_backend,
+                        "avg_search_latency_sec": avg_search,            
+                        "avg_gen_latency_sec":    avg_gen,              
+                        "avg_total_latency_sec":  avg_total,             
+                        "total_api_tokens":      sum(getattr(q, "prompt_tokens", 0) + getattr(q, "completion_tokens", 0) for q in result.question_results),
+                        "total_cached_tokens":   total_cached,
+                        "total_reasoning_tokens": total_reasoning,
+                        "run_cost_usd":          round(total_cost, 6),
                         "faithfulness":          round(result.mean_faithfulness, 3),
                         "answer_relevancy":      round(result.mean_answer_relevancy, 3),
                         "mean_similarity":       round(result.mean_similarity, 3),
@@ -758,7 +1001,7 @@ if is_rag:
                     ):
                         with col:
                             st.plotly_chart(_metric_chart(title, values, color, mean_val),
-                                            use_container_width=True)
+                                            width="stretch")
                     st.success(f"Results saved → {output_dir}/")
 
                 except Exception as e:
@@ -819,10 +1062,21 @@ if is_rag:
                         display_cols = {
                             "rank": "Rank", "rag_model": "Generator",
                             "evaluator_model": "Evaluator", "embedder": "Embedder",
-                            "collection": "Collection", "faithfulness": "Faithful",
+                            "collection": "Collection","questions_file" :"Question Set",
+                            "inject_metadata": "Metadata Injected",
+                            "search_method": "Search Method", 
+                            "embed_backend": "Vector Backend",
+                            "avg_search_latency_sec": "Search Latency",  
+                            "avg_gen_latency_sec": "Gen Latency",        
+                            "avg_total_latency_sec": "Total Latency",
+                            "total_api_tokens": "Total Tokens",
+                            "total_cached_tokens": "Cached Tokens",         
+                            "total_reasoning_tokens": "Reasoning Tokens",   
+                            "run_cost_usd": "Cost (USD)",
+                            "faithfulness": "Faithful",
                             "answer_relevancy": "Relevancy", "mean_similarity": "Similarity",
                             "context_recall": "Recall", "answer_correctness": "Correctness",
-                            "average": "RAG Avg ↓",
+                            "average": "RAG Avg",
                         }
                         if has_baseline:
                             display_cols.update({
@@ -833,11 +1087,20 @@ if is_rag:
                             })
                         df_display = df[[c for c in display_cols if c in df.columns]].rename(columns=display_cols)
                         col_config = {k: st.column_config.NumberColumn(format="%.3f")
-                                      for k in ["RAG Avg ↓","Faithful","Relevancy","Similarity",
-                                                 "Recall","Correctness","BL Correctness","BL Recall","BL Avg"]}
+                                    for k in ["RAG Avg","Faithful","Relevancy","Similarity",
+                                                "Recall","Correctness","BL Correctness","BL Recall","BL Avg"]}
                         col_config.update({k: st.column_config.NumberColumn(format="%+.3f")
-                                           for k in ["Δ Correctness","Δ Recall","Δ Avg"]})
-                        st.dataframe(df_display, use_container_width=True, hide_index=True,
+                                        for k in ["Δ Correctness","Δ Recall","Δ Avg"]})
+                        col_config.update({
+                                        "Search Latency": st.column_config.NumberColumn(format="%.2f s"),  # Updated
+                                        "Gen Latency": st.column_config.NumberColumn(format="%.2f s"),     # Updated
+                                        "Total Latency": st.column_config.NumberColumn(format="%.2f s"),   # Updated
+                                        "Total Tokens": st.column_config.NumberColumn(format="%d"),
+                                        "Cached Tokens": st.column_config.NumberColumn(format="%d"),     
+                                        "Reasoning Tokens": st.column_config.NumberColumn(format="%d"),  
+                                        "Cost (USD)": st.column_config.NumberColumn(format="$ %.6f")     
+                        })
+                        st.dataframe(df_display, width="stretch", hide_index=True,
                                      column_config=col_config)
 
                         with st.expander("🗑 Remove a row"):
@@ -871,7 +1134,7 @@ if is_rag:
                                           plot_bgcolor="white", paper_bgcolor="white",
                                           font=dict(size=11), xaxis=dict(tickangle=-20),
                                           showlegend=False)
-                        st.plotly_chart(fig, use_container_width=True)
+                        st.plotly_chart(fig, width="stretch")
                         st.caption(f"Evaluator: {df['evaluator_model'].iloc[0]}  ·  "
                                    f"{len(df)} run(s) shown  ·  leaderboard at `{lb_path}`")
             except Exception as e:
@@ -903,7 +1166,6 @@ if is_rag:
         except Exception as e:
             st.error(f"Could not read database: {e}")
 
-
 # ══════════════════════════════════════════════════════════════════════════════
 # QNA GENERATION PIPELINE TABS
 # ══════════════════════════════════════════════════════════════════════════════
@@ -921,7 +1183,9 @@ else:
         col_g1, col_g2 = st.columns(2)
         with col_g1:
             genqa_sampling = st.selectbox(
-                "Strategy", ["stratified", "boundary"], key="genqa_sampling",
+                "Strategy", ["stratified", "boundary"], 
+                index=0,
+                key="genqa_sampling",
                 help="stratified: random spread across documents.\n"
                      "boundary: one chunk per document section (heading-based).",
             )
@@ -942,23 +1206,32 @@ else:
                 help="1 = new chunk per question.\n>1 = ask same chunk for multiple distinct questions.",
             )
 
+        st.markdown("##### Filtering & Pre-validation Pass")
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            use_competitor = st.checkbox("Enable Competitor Filter", value=False, help="Queries vector DB to ensure the question is specific to this chunk.")
+            num_competitors = st.number_input("Number of competitor chunks to track", min_value=1, max_value=10, value=3, disabled=not use_competitor)
+        with col_f2:
+            validate_answer_mode = st.selectbox(
+                "Validate Answerable Pass (validate_answer.py)",
+                options=["Disabled", "Flag Failures", "Drop Failures"],
+                index=0,
+                help="Runs a secondary single-LLM pass to verify if the question is genuinely answerable."
+            )
+
         st.markdown("##### Concurrency & summarization")
         col_gc1, col_gc2 = st.columns(2)
         with col_gc1:
             genqa_concurrency = st.number_input(
                 "Max concurrent LLM calls", min_value=1, max_value=50, value=10,
                 key="genqa_concurrency",
-                help="How many LLM calls to run in parallel. "
-                     "Red Hat recommends endpoints supporting at least 50. "
-                     "Keep lower for rate-limited endpoints.",
+                help="How many LLM calls to run in parallel. Keep lower for rate-limited endpoints.",
             )
         with col_gc2:
             genqa_summarize = st.checkbox(
                 "Summarize chunks",
                 value=False, key="genqa_summarize",
-                help="Adds a summarization step before question generation — "
-                     "chunk → summary → QnA. Improves quality by filtering "
-                     "boilerplate, at ~2x LLM calls.",
+                help="Adds a summarization step before question generation — chunk → summary → QnA.",
             )
         if genqa_summarize:
             genqa_summary_sentences = st.number_input(
@@ -968,21 +1241,30 @@ else:
         else:
             genqa_summary_sentences = 5
 
-        st.markdown("##### Validation")
+        # ── MODULAR LLM JUDGES SELECTION SECTION ─────────────────────────────
+        st.markdown("##### Active LLM Validation Judges")
+        st.caption("Toggle the independent agent modules to include in the validation gauntlet:")
+        
+        col_j1, col_j2, col_j3 = st.columns(3)
+        with col_j1:
+            j_grounding = st.checkbox("Grounding Judge", value=False, help="Ensures reference answers derive strictly from the text.")
+            j_domain = st.checkbox("Telecom Domain Relevance Judge", value=False, help="Filters out generic reading-comprehension prompts.")
+        with col_j2:
+            j_answerability = st.checkbox("Answerability Judge", value=False, help="Ensures the context has sufficient information to answer the question.")
+            j_faithfulness = st.checkbox("Faithfulness Judge", value=False, help="Checks for extraneous or hallucinated specification references.")
+        with col_j3:
+            j_semantic = st.checkbox("Semantic Correctness Judge", value=False, help="Guarantees logical integrity and nuance preservation.")
+            j_relevance = st.checkbox("Relevance Judge", value=False, help="Confirms questions target primary technical elements.")
+
+        st.markdown("##### Paths, Deduplication & Output Workflow")
         col_g5, col_g6 = st.columns(2)
         with col_g5:
-            genqa_validate = st.checkbox("Validate each question (second LLM pass)",
-                                          value=False, key="genqa_validate")
-            genqa_drop_failures = st.checkbox("Drop questions that fail validation",
-                                               value=False, key="genqa_drop",
-                                               disabled=not genqa_validate)
+            #genqa_input_dir = st.text_input("Source documents directory (optional)", value=f"data/{source_type}", key="genqa_input_dir")
+            dedup_options = ["exact", "prefix", "none"]
+            genqa_dedup = st.selectbox("Dedup mode", dedup_options, index=0, key="genqa_dedup")
         with col_g6:
-            genqa_dedup = st.selectbox("Dedup mode", ["exact", "prefix", "none"],
-                                        key="genqa_dedup")
-
-        st.markdown("##### Output")
-        genqa_output_dir = st.text_input("Output directory", value="draft_questions",
-                                          key="genqa_output_dir")
+            genqa_output_dir = st.text_input("Output directory", value="draft_questions", key="genqa_output_dir")
+            skip_review = st.checkbox("Skip Manual Review (Auto-approve and merge directly)", value=False)
 
         genqa_btn = st.button("Generate ▶", type="primary", key="genqa_btn")
 
@@ -998,12 +1280,13 @@ else:
                     log_box.markdown("<div class='log-box'>" + "\n".join(log_lines[-25:]) + "</div>",
                                      unsafe_allow_html=True)
 
-                _log("Starting…")
+                _log("Starting Pipeline Core Engine…")
                 try:
                     from qna_generation.sources import make_source
                     from qna_generation.flows import Flow
                     from qna_generation.io_utils import merge_with_existing, save_draft
                     from pathlib import Path as _Path
+                    import json
 
                     src_kwargs = dict(source_type=qna_source, corpus=source_type)
                     if qna_source == "chroma":
@@ -1015,6 +1298,7 @@ else:
                     source = make_source(**src_kwargs)
                     _log(f"Source: {qna_source} ({source.count():,} chunks)")
 
+                    # Assemble block array sequences sequentially
                     block_specs = [
                         {"type": "SampleChunksBlock",
                          "params": {"strategy": genqa_sampling, "n_chunks": genqa_n_chunks}},
@@ -1025,17 +1309,43 @@ else:
                             "params": {"summary_sentences": genqa_summary_sentences,
                                        "max_concurrency": genqa_concurrency},
                         })
+
+                    # Base generator sequence
                     block_specs.append({
                         "type": "GenerateQuestionBlock",
                         "params": {"formats": genqa_formats, "n": genqa_n_questions,
                                    "questions_per_chunk": genqa_qpc,
                                    "max_concurrency": genqa_concurrency},
                     })
-                    if genqa_validate:
+
+                    # Inject Competitor Filter if checked
+                    if use_competitor:
+                        block_specs.append({
+                            "type": "CompetitorFilterBlock",
+                            "params": {"num_competitors": num_competitors}
+                        })
+
+                    # Inject Validate Answerable Block Mode]
+                    if validate_answer_mode != "Disabled":
                         block_specs.append({
                             "type": "ValidateAnswerableBlock",
-                            "params": {"drop_failures": genqa_drop_failures},
+                            "params": {"drop_failures": (validate_answer_mode == "Drop Failures")}
                         })
+
+                    # Dynamically inject active modular judges
+                    if j_grounding:
+                        block_specs.append({"type": "GroundingJudgeBlock", "params": {"max_concurrency": genqa_concurrency}})
+                    if j_domain:
+                        block_specs.append({"type": "TelecomDomainRelevanceJudgeBlock", "params": {"max_concurrency": genqa_concurrency}})
+                    if j_answerability:
+                        block_specs.append({"type": "AnswerabilityJudgeBlock", "params": {"max_concurrency": genqa_concurrency}})
+                    if j_faithfulness:
+                        block_specs.append({"type": "FaithfulnessJudgeBlock", "params": {"max_concurrency": genqa_concurrency}})
+                    if j_semantic:
+                        block_specs.append({"type": "SemanticCorrectnessJudgeBlock", "params": {"max_concurrency": genqa_concurrency}})
+                    if j_relevance:
+                        block_specs.append({"type": "RelevanceJudgeBlock", "params": {"max_concurrency": genqa_concurrency}})
+
                     if genqa_dedup != "none":
                         block_specs.append({
                             "type": "DedupBlock", "params": {"mode": genqa_dedup},
@@ -1043,20 +1353,43 @@ else:
 
                     flow = Flow.from_dict({"name": "gui_flow", "blocks": block_specs})
                     flow.set_model_config(generator="openrouter", model=qna_gen_model)
-                    if genqa_validate:
-                        flow.set_validation_model_config(generator="openrouter",
-                                                         model=qna_val_model)
+                    
+                    # Bind validation credentials if any judge or validate pass is active
+                    if any([j_grounding, j_domain, j_answerability, j_faithfulness, j_semantic, j_relevance]) or validate_answer_mode != "Disabled":
+                        flow.set_validation_model_config(generator="openrouter", model=qna_val_model)
 
                     qa_pairs = flow.generate(source, source_type, log=_log)
                     _log(f"Generated {len(qa_pairs)} questions")
 
-                    existing_path = _Path("configs/eval_questions") / f"{source_type}.json"
-                    merged   = merge_with_existing(qa_pairs, existing_path)
-                    out_path = save_draft(merged, _Path(genqa_output_dir), source_type,
-                                          n_questions=len(qa_pairs), model="gui_flow")
-                    _log(f"Saved -> {out_path}")
-                    st.success(f"Generated {len(qa_pairs)} draft questions -> {out_path}")
-                    st.session_state["last_draft_path"] = str(out_path)
+                    eval_path = _Path("configs/eval_questions") / f"{source_type}.json"
+
+                    # Check for Auto-Merge / Skip Review functionality
+                    if skip_review:
+                        _log("Skip review active: Auto-approving and merging directly into production eval set...")
+                        for q in qa_pairs:
+                            q["validated"] = True
+                            q["generated"] = False  # Set to approved target layout status
+                        
+                        eval_path.parent.mkdir(parents=True, exist_ok=True)
+                        existing = {"questions": []}
+                        if eval_path.exists():
+                            try:
+                                existing = json.loads(eval_path.read_text(encoding="utf-8"))
+                            except Exception:
+                                existing = {"questions": []}
+                        
+                        existing["questions"].extend(qa_pairs)
+                        eval_path.write_text(json.dumps(existing, indent=2, ensure_ascii=False), encoding="utf-8")
+                        _log(f"Successfully auto-merged {len(qa_pairs)} items into {eval_path}")
+                        st.success(f"Successfully auto-merged {len(qa_pairs)} questions directly into evaluation set! ✓")
+                    else:
+                        # Standard sequence: Save temporary review file layout
+                        merged   = merge_with_existing(qa_pairs, eval_path)
+                        out_path = save_draft(merged, _Path(genqa_output_dir), source_type,
+                                              n_questions=len(qa_pairs), model="automated_jury_flow")
+                        _log(f"Saved draft -> {out_path}")
+                        st.success(f"Generated {len(qa_pairs)} draft questions -> {out_path}")
+                        st.session_state["last_draft_path"] = str(out_path)
 
                 except Exception as e:
                     _log(f"ERROR: {e}")
@@ -1083,16 +1416,13 @@ else:
             "camara":  "https://github.com/camaraproject",
         }
 
-        # PDF deep-link builders — where public hosting + page anchors are possible
         def _build_doc_url(q: dict) -> tuple[str | None, str | None]:
-            """Returns (portal_url, deep_link_url) — deep_link may be None."""
             corpus       = q.get("corpus", "")
             source_doc   = q.get("source_document", "")
             canonical    = q.get("canonical_source", "")
             chunk_id     = q.get("chunk_id", "")
             portal       = SDO_PORTAL_URLS.get(corpus)
 
-            # Try to extract page number from chunk_id (format: filename::embedder::index)
             page_num = None
             if "::" in chunk_id:
                 parts = chunk_id.split("::")
@@ -1104,30 +1434,21 @@ else:
             deep_link = None
 
             if corpus == "etsi" and source_doc:
-                # ETSI publicly hosts PDFs — build deliver URL from filename
-                # e.g. gs_ENI005v030101p.pdf → etsi.org/deliver/etsi_gs/ENI/...
                 fname = source_doc.replace(".pdf", "").replace(".PDF", "")
                 base_url = f"https://www.etsi.org/deliver/etsi_{fname}.pdf"
                 deep_link = f"{base_url}#page={page_num}" if page_num else base_url
-
             elif corpus == "itu" and canonical:
-                # ITU recommendations are publicly accessible
                 series = canonical.split(".")[0] if "." in canonical else canonical[:1]
                 rec    = canonical.replace(".", "-")
                 deep_link = f"https://www.itu.int/rec/T-REC-{rec}/en"
-
             elif corpus == "3gpp" and canonical:
-                # 3GPP specs are in public FTP
                 series = canonical.split(".")[0] if "." in canonical else ""
                 if series:
                     deep_link = f"https://www.3gpp.org/ftp/Specs/archive/{series}_series/"
-
             elif corpus == "oran":
                 deep_link = portal
-
             elif corpus == "camara" and canonical:
                 deep_link = f"https://github.com/camaraproject/{canonical}"
-
             elif corpus == "tmforum" and canonical:
                 deep_link = f"https://github.com/tmforum-rand/tmf-otel"
 
@@ -1135,7 +1456,6 @@ else:
 
         def _fetch_chunk_text(chunk_id: str, corpus: str, db_path_str: str,
                                model_key_str: str) -> str | None:
-            """Fetch the source chunk text from ChromaDB using the chunk_id."""
             if not chunk_id:
                 return None
             try:
@@ -1215,11 +1535,11 @@ else:
                         with col_s2:
                             if portal_url:
                                 st.link_button("🌐 Open portal", portal_url,
-                                               use_container_width=True)
+                                               width="stretch")
                         with col_s3:
                             if deep_link and deep_link != portal_url:
                                 st.link_button("📄 Open doc", deep_link,
-                                               use_container_width=True)
+                                               width="stretch")
 
                         # ── Source chunk text ─────────────────────────────
                         if chunk_id:
@@ -1238,9 +1558,7 @@ else:
                                     )
                                     st.caption(f"chunk_id: {chunk_id}")
                                 else:
-                                    st.caption("Chunk text not available — ChromaDB not connected "
-                                               "or chunk_id not found. Set the correct DB path and "
-                                               "embedder above.")
+                                    st.caption("Chunk text not available.")
 
                         if val_passed is False:
                             st.warning(f"Validation flagged: {val_note}")

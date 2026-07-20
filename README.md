@@ -186,8 +186,12 @@ open-telco-rag info              Show database info
 open-telco-rag ingest oran \
   --data data/oran/ \
   --model bge \
-  --chunk-size 1024 \
-  --overlap 200 \
+  --strategy sliding_window_tokens \
+  --chunk-size 512 \
+  --overlap 50 \
+  --enrichment llm_metadata \
+  --enrichment-model google/qwen-2.5-coder-32b \
+  --distance-metric cosine \
   --db-path chroma_db
 ```
 
@@ -196,11 +200,17 @@ open-telco-rag ingest oran \
 | `--data` | `data/<source>` | Path to corpus directory |
 | `--model` | `minilm` | Embedding model key |
 | `--db-path` | `chroma_db` | ChromaDB storage path |
+| `--strategy` | `text_baseline` | Segmentation strategy registered in chunking_strategies.json |
 | `--chunk-size` | `1024` | Chunk size in characters |
 | `--overlap` | `200` | Overlap between chunks in characters |
+| `--enrichment` | `none` | Pre-embedding strategy registry token mapped from enrichment_strategies.json |
+| `--enrichment-model` | `google/qwen-2.5-coder-32b` | LLM model target utilized when running LLM-aided metadata parsing routines |
+| `--distance-metric` | `l2` | Vector space index geometry calculation mapping: l2, cosine or ip |
 | `--no-resume` | off | Disable resume — re-ingest all files |
 | `--use-marker` | off | Use Datalab Marker API for PDF preprocessing |
 | `--collection` | `source_model` | Override collection name |
+| `--embed-backend` | `local` | Backend for computing vector embeddings: `local` (CPU/GPU) or `openrouter` (Cloud APIs) |
+| `--batch-size` | 64 / 5000 | Parallel payload size. Defaults to 64 locally, or 5000 for high-throughput OpenRouter bulk ingestion |
 
 ### Marker preprocessing
 
@@ -218,6 +228,7 @@ Requires `DATALAB_API_KEY` in `.env`. See [datalab.to](https://www.datalab.to) f
 open-telco-rag ask "What does TS 28.312 define for intent?" \
   --source-type 3gpp \
   --model bge \
+  --search-method dense \
   --top-k 8 \
   --rerank \
   --reranker-model ms-marco-minilm \
@@ -226,11 +237,13 @@ open-telco-rag ask "What does TS 28.312 define for intent?" \
 
 | Flag | Default | Description |
 |------|---------|-------------|
+| `--search-method` | `dense` | Multi-method search routing pass algorithm selection: `dense`, `bm25`, or `hybrid` |
 | `--top-k` | 5 / 8 | Chunks to retrieve |
 | `--rerank` | off | Enable reranking after retrieval |
 | `--reranker-model` | `ms-marco-minilm` | Reranker key from `configs/reranker_models.json` |
 | `--rerank-top-k` | 5 | Chunks to keep after reranking |
 | `--collection` | `source_model` | Override collection name |
+| `--embed-backend` | `local` | Backend for computing vector embeddings (`local` or `openrouter`) |
 
 ### Reranker models
 
@@ -273,6 +286,8 @@ open-telco-rag evaluate 3gpp \
 | `--reranker-model` | `ms-marco-minilm` | Reranker model key |
 | `--include-baseline` | off | Run no-retrieval baseline pass |
 | `--leaderboard` | `results/leaderboard.json` | Leaderboard output path |
+`--embed-backend` | `local` | Backend for computing vector embeddings (`local` or `openrouter`) |
+| `--inject-metadata` | off | Simulates domain expert queries by dynamically prepending canonical source IDs to evaluation questions |
 
 ---
 
@@ -280,25 +295,34 @@ open-telco-rag evaluate 3gpp \
 
 ```python
 from open_telco_rag.sources.oran import ORANSource
-from open_telco_rag.embedders.sentense_transformers import SentenceTransformerEmbedder
+from open_telco_rag.embedders.openrouter_embedder import OpenRouterEmbedder
 from open_telco_rag.stores.chroma import ChromaStore
 from open_telco_rag.generators.openrouter import OpenRouterGenerator
 from open_telco_rag.core.pipeline import ingest, search, generate
 
-# Ingest
+# Ingest (Using OpenRouter for High-Throughput Bulk Processing)
 source   = ORANSource()
-embedder = SentenceTransformerEmbedder(model_key="bge")
-store    = ChromaStore(path="chroma_db", collection_name="oran_bge")
-
-ingest(source=source, store=store, embedder=embedder, data_dir="data/oran/")
+embedder = OpenRouterEmbedder(model_key="bge", batch_size=200) # Throttled safely for OpenAI limits
+store    = ChromaStore(path="chroma_db", collection_name="oran_bge", metadata={"hnsw:space": "cosine"})
+ingest(
+    source=source, 
+    store=store, 
+    embedder=embedder, 
+    data_dir="data/oran/",
+    strategy="sliding_window_tokens",
+    chunk_tokens=512,
+    overlap_tokens=50,
+    enrichment="llm_metadata",
+    enrichment_model="google/qwen-2.5-coder-32b",
+    batch_size=5000 # Feed 5,000 chunks concurrently to the embedder!
+)
 
 # Search
-results = search("E2 interface service models", store=store, embedder=embedder, top_k=5)
+results = search("E2 interface service models", store=store, embedder=embedder, top_k=5, search_method="dense")
 
 # Generate
 generator = OpenRouterGenerator(model="meta-llama/llama-3.3-70b-instruct")
-answer    = generate("What does WG3 define for the E2 interface?", results,
-                     generator=generator)
+answer    = generate("What does WG3 define for the E2 interface?", results, generator=generator)
 print(answer["answer"])
 ```
 
@@ -314,17 +338,27 @@ Documents (PDF / DOCX / YAML / Markdown)
    (per SDO)             optional: Marker API for PDF
         │
         ▼
-   Chunker               chunk_markdown() or chunk_text()
+   Dynamic Chunker       Routes text to selected strategies (e.g. baseline, tokens, 
+                         parent-child, lumberchunker) via configs
         │
         ▼
-   Embedder              SentenceTransformerEmbedder (local)
-        │                general-purpose or OTel telecom-domain models
-        ▼
-   ChromaDB              persistent vector store
+   Enrichment            Pre-embedding passes: Structural Tagging, Acronym Expansion 
+                         or dynamic LLM Domain Expansion (metadata tracking)
         │
         ▼
-   Search                cosine similarity retrieval
-        │                optional: cross-encoder or OTel reranking
+   Embedder              SentenceTransformerEmbedder (local GPU/CPU)
+                         OR OpenRouterEmbedder (Cloud API ThreadPool)
+        |                 general-purpose or OTel telecom-domain models
+        |
+        ▼
+   ChromaDB              Persistent vector store via configurable space metrics 
+                         (L2 Euclidean geometric, Cosine angular, Inner Product)
+        │
+        ▼
+   Search                Multi-method retrieval pipeline: Dense vector, Sparse keyword (BM25),
+                         or Reciprocal Rank Fusion (Hybrid)
+                         optional: cross-encoder or OTel reranking
+        |
         ▼
    Generator             any LLM via OpenRouter or direct API
         │
@@ -342,8 +376,10 @@ open-telco-rag/
 ├── open_telco_rag/
 │   ├── types.py
 │   ├── core/
-│   │   ├── pipeline.py          # ingest, search, generate
-│   │   ├── chunking.py          # chunk_text, chunk_markdown
+│   │   ├── pipeline.py          # Master orchestrator tracking stats and logging
+│   │   ├── chunking.py          # Implements multi-strategy splitters (Token, etc.)
+│   │   ├── enrichment.py        # Implements metadata tagging, glossary, and LLM-aided expansion
+│   │   ├── retrieval.py         # Implements Multi-Method retrieval passes (Dense, BM25, and RRF)
 │   │   ├── cleaning.py
 │   │   └── marker_loader.py     # Datalab Marker API mixin
 │   ├── sources/                 # one class per SDO
@@ -369,6 +405,8 @@ open-telco-rag/
 ├── configs/
 │   ├── embedding_models.json    # embedder registry
 │   ├── reranker_models.json     # reranker registry
+|   ├── chunking_strategies.json     # Central registry for character/token splitters
+|   ├── enrichment_strategies.json   # Central registry for tagging, glossary, & LLM expansion
 │   └── eval_questions/          # evaluation question sets per corpus
 └── pyproject.toml
 ```
