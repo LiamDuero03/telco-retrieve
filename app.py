@@ -1300,15 +1300,74 @@ else:
         with col_g2:
             genqa_n_chunks = st.number_input("Chunks to sample", 1, 1000, 30, key="genqa_n_chunks")
 
-        st.markdown("##### Question generation")
-        col_g3, col_g4 = st.columns(2)
-        with col_g3:
-            genqa_formats = st.multiselect(
-                "Question types", VALID_FORMATS, default=["open"], key="genqa_formats",
-                help="open: free-text  ·  tf: true/false  ·  mc: multiple choice  ·  fill_blank: fill-in-the-blank",
-            )
-            genqa_n_questions = st.number_input("Total questions", 1, 1000, 20, key="genqa_n_questions")
-        with col_g4:
+        st.markdown("##### Question Generation Specs Builder")
+        st.caption("Construct a custom mix of question types, quantities, and MCQ option counts:")
+
+        # Initialize question spec list in session state if not already set
+        if "qspec_list" not in st.session_state:
+            st.session_state["qspec_list"] = [
+                {"format": "open", "n": 10, "num_mc_options": 4},
+                {"format": "mc", "n": 5, "num_mc_options": 4},
+            ]
+
+        # Container to render dynamic rows
+        specs_to_delete = []
+
+        for idx, spec in enumerate(st.session_state["qspec_list"]):
+            col_spec1, col_spec2, col_spec3, col_spec4 = st.columns([2, 2, 2, 1])
+
+            with col_spec1:
+                spec["format"] = st.selectbox(
+                    f"Format #{idx+1}",
+                    options=VALID_FORMATS,
+                    index=VALID_FORMATS.index(spec.get("format", "open")),
+                    key=f"qspec_fmt_{idx}"
+                )
+
+            with col_spec2:
+                spec["n"] = st.number_input(
+                    f"Quantity #{idx+1}",
+                    min_value=1, max_value=500,
+                    value=int(spec.get("n", 5)),
+                    key=f"qspec_n_{idx}"
+                )
+
+            with col_spec3:
+                if spec["format"] == "mc":
+                    spec["num_mc_options"] = st.number_input(
+                        f"MC Choices #{idx+1}",
+                        min_value=2, max_value=6,
+                        value=int(spec.get("num_mc_options", 4)),
+                        key=f"qspec_opts_{idx}",
+                        help="Number of multiple-choice answer options (e.g., 5 = A, B, C, D, E)."
+                    )
+                else:
+                    st.text_input(f"Choices #{idx+1}", value="N/A", disabled=True, key=f"qspec_dis_{idx}")
+
+            with col_spec4:
+                st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                if st.button("🗑️", key=f"qspec_del_{idx}", help="Remove this question group"):
+                    specs_to_delete.append(idx)
+
+        # Handle removals
+        if specs_to_delete:
+            for d_idx in sorted(specs_to_delete, reverse=True):
+                st.session_state["qspec_list"].pop(d_idx)
+            st.rerun()
+
+        col_add1, col_add2 = st.columns([2, 2])
+        with col_add1:
+            if st.button("➕ Add Question Group", key="qspec_add_btn"):
+                st.session_state["qspec_list"].append({"format": "mc", "n": 5, "num_mc_options": 4})
+                st.rerun()
+
+        with col_add2:
+            total_gen_questions = sum(s["n"] for s in st.session_state["qspec_list"])
+            st.info(f"**Total planned questions:** {total_gen_questions}")
+
+        st.markdown("---")
+        col_g4_1, col_g4_2 = st.columns(2)
+        with col_g4_1:
             genqa_qpc = st.number_input(
                 "Questions per chunk", 1, 10, 1, key="genqa_qpc",
                 help="1 = new chunk per question.\n>1 = ask same chunk for multiple distinct questions.",
@@ -1361,9 +1420,26 @@ else:
             j_answerability = st.checkbox("Answerability Judge", value=False, help="Ensures the context has sufficient information to answer the question.")
             j_faithfulness = st.checkbox("Faithfulness Judge", value=False, help="Checks for extraneous or hallucinated specification references.")
         with col_j3:
-            j_semantic = st.checkbox("Semantic Correctness Judge", value=False, help="Guarantees logical integrity and nuance preservation.")
-            j_relevance = st.checkbox("Relevance Judge", value=False, help="Confirms questions target primary technical elements.")
+            j_semantic = st.checkbox("Semantic Correctness Judge", value=False)
+            j_empirical = st.checkbox("Empirical Difficulty Judge Panel", value=False, help="Runs a jury panel across both context-less and context-provided passes.")
 
+        if j_empirical:
+            st.markdown("###### Empirical Jury Configuration")
+            col_emp1, col_emp2 = st.columns(2)
+            with col_emp1:
+                selected_jury_labels = st.multiselect(
+                    "Jury Models (Majority Voting)",
+                    options=list(LLM_OPTIONS.keys()),
+                    default=[qna_val_label],
+                    help="Select 1 or more models to act as the empirical difficulty jury panel."
+                )
+                jury_models = [LLM_OPTIONS[lbl] for lbl in selected_jury_labels]
+            with col_emp2:
+                no_ctx_thresh = st.slider("Max No-Context Pass Ratio (Too Easy Threshold)", 0.0, 1.0, 0.50, 0.1)
+                with_ctx_thresh = st.slider("Min With-Context Pass Ratio (Answerability Threshold)", 0.0, 1.0, 0.50, 0.1)
+
+
+        
         st.markdown("##### Paths, Deduplication & Output Workflow")
         col_g5, col_g6, col_g7 = st.columns(3)
         with col_g5:
@@ -1378,7 +1454,7 @@ else:
         genqa_btn = st.button("Generate ▶", type="primary", key="genqa_btn")
 
         if genqa_btn:
-            if not genqa_formats:
+            if not st.session_state["qspec_list"]:
                 st.warning("Select at least one question type.")
             else:
                 log_box   = st.empty()
@@ -1419,12 +1495,19 @@ else:
                                        "max_concurrency": genqa_concurrency},
                         })
 
+                    
+                    if not st.session_state.get("qspec_list"):
+                        st.warning("Please add at least one question group specification.")
+                        st.stop()
+
                     # Base generator sequence
                     block_specs.append({
                         "type": "GenerateQuestionBlock",
-                        "params": {"formats": genqa_formats, "n": genqa_n_questions,
-                                   "questions_per_chunk": genqa_qpc,
-                                   "max_concurrency": genqa_concurrency},
+                        "params": {
+                            "format_specs": st.session_state["qspec_list"],  
+                            "questions_per_chunk": genqa_qpc,
+                            "max_concurrency": genqa_concurrency,
+                        },
                     })
 
                     # Inject Competitor Filter if checked
@@ -1452,8 +1535,16 @@ else:
                         block_specs.append({"type": "FaithfulnessJudgeBlock", "params": {"max_concurrency": genqa_concurrency}})
                     if j_semantic:
                         block_specs.append({"type": "SemanticCorrectnessJudgeBlock", "params": {"max_concurrency": genqa_concurrency}})
-                    if j_relevance:
-                        block_specs.append({"type": "RelevanceJudgeBlock", "params": {"max_concurrency": genqa_concurrency}})
+                    if j_empirical:
+                        block_specs.append({
+                            "type": "EmpiricalDifficultyJudgeBlock", 
+                            "params": {
+                                "judge_models": jury_models,
+                                "no_context_threshold": no_ctx_thresh,
+                                "with_context_threshold": with_ctx_thresh,
+                                "drop_failures": False
+                            }
+                        })
 
                     if genqa_dedup != "none":
                         block_specs.append({
