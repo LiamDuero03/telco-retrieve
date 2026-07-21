@@ -23,8 +23,10 @@ class QuestionResult:
     # ── EFFICIENCY METRICS  ───────────────────────────────────────
     latency:           float = 0.0
     search_latency:    float = 0.0   # Time spent query embedding + vector search
+    rerank_latency:    float = 0.0   # Time spent reranking retrieved chunks
     gen_latency:       float = 0.0   # Time spent generating answer
     prompt_tokens:     int   = 0
+    rerank_tokens:     int   = 0
     completion_tokens: int   = 0
     total_tokens:      int   = 0     
     cached_tokens:     int   = 0     

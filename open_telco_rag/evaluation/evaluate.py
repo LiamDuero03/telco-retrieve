@@ -5,6 +5,7 @@ Evaluation orchestrator for Open Telco RAG.
 from __future__ import annotations
 
 import time
+import tiktoken
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -33,6 +34,16 @@ def _build_generator(llm_call: Callable[[str, int], str], model_name: str | None
         model_name = "meta-llama/llama-3.1-8b-instruct"
         
     return OpenRouterGenerator(model=model_name)
+
+def _local_token_count(text: str) -> int:
+    """Calculates tokens locally using the cl100k_base encoding."""
+    if not text: return 0
+    try:
+        enc = tiktoken.get_encoding("cl100k_base")
+        return len(enc.encode(text))
+    except Exception:
+        # Fallback approximation if tiktoken fails
+        return int(len(str(text).split()) * 1.3)
 
 def _build_baseline_generator(llm_call: Callable[[str, int], str]):
     """Generator that answers from LLM knowledge only — no context chunks."""
@@ -67,7 +78,7 @@ def evaluate_question(
     debug:         bool  = False,
     rag_model_name: str | None = None,
     inject_metadata: bool = False, 
-    include_keywords: bool = False,  # <-- ADDED PARAMETER
+    include_keywords: bool = False,  
     search_method: str = "dense",
 ) -> QuestionResult:
     """Run all applicable metrics for one question."""
@@ -101,44 +112,64 @@ def evaluate_question(
             result.gen_latency = time.perf_counter() - gen_start
             result.search_latency = 0.0
         else:
-            # Time the search retrieval pass using search_query
+            # 1. Time the base search retrieval pass (WITHOUT reranker)
             search_start = time.perf_counter()
-            retrieved = search(
-                search_query,  # <-- Uses search_query with keywords if enabled
+            retrieved_candidates = search(
+                search_query, 
                 store=store, 
                 embedder=embedder,
                 top_k=top_k, 
-                reranker=reranker, 
-                rerank_top_k=rerank_top_k,
+                reranker=None,  # <-- Force None to isolate base search time
+                rerank_top_k=top_k,
                 search_method=search_method
             )
             result.search_latency = time.perf_counter() - search_start
             
-            # Time the text generation pass using active_question
+            # 2. Time the Reranking pass & calculate its tokens
+            result.rerank_latency = 0.0
+            result.rerank_tokens = 0
+            
+            if reranker:
+                rerank_start = time.perf_counter()
+                
+                # Reranker processes the query + all retrieved candidate chunks
+                rerank_payload = search_query + " ".join([c.text for c in retrieved_candidates])
+                result.rerank_tokens = _local_token_count(rerank_payload)
+                
+                # Execute reranking explicitly
+                try:
+                    retrieved = reranker.rerank(active_question, retrieved_candidates, top_k=rerank_top_k)
+                except AttributeError:
+                    # Fallback if your reranker wrapper uses a different method name
+                    retrieved = retrieved_candidates[:rerank_top_k]
+                    
+                result.rerank_latency = time.perf_counter() - rerank_start
+            else:
+                retrieved = retrieved_candidates[:rerank_top_k]
+            
+            # 3. Time the text generation pass
             gen_start = time.perf_counter()
             generator = _build_generator(rag_llm_call or llm_call, model_name=rag_model_name)
             gen       = generate(active_question, retrieved, source_type=q.corpus, generator=generator)
             result.gen_latency = time.perf_counter() - gen_start
         
         result.latency = time.perf_counter() - start_time
-        usage = gen.get("usage", {})
         
-        result.prompt_tokens = usage.get("prompt_tokens", 0)
-        result.completion_tokens = usage.get("completion_tokens", 0)
-        result.total_tokens = usage.get("total_tokens", result.prompt_tokens + result.completion_tokens)
+        # 4. Local Token Counting (Replaces API Usage)
+        answer = gen.get("answer", "")
+        
+        # Generator processes the active question + the final filtered chunks
+        prompt_payload = active_question + " ".join([c.text for c in retrieved])
+        
+        result.prompt_tokens = _local_token_count(prompt_payload)
+        result.completion_tokens = _local_token_count(answer)
+        result.total_tokens = result.prompt_tokens + result.completion_tokens
 
-        # Extract nested prompt details (Cached input tokens)
-        prompt_details = usage.get("prompt_tokens_details", {}) or {}
-        result.cached_tokens = prompt_details.get("cached_tokens", 0)
+        # Zero out API-dependent advanced metrics since we are bypassing the API report
+        result.cached_tokens = 0
+        result.reasoning_tokens = 0
+        result.cost = 0.0  # Optional: You can recalculate cost here using result.total_tokens if desired
 
-        # Extract nested completion details (DeepSeek R1 / o1 thinking tokens)
-        comp_details = usage.get("completion_tokens_details", {}) or {}
-        result.reasoning_tokens = comp_details.get("reasoning_tokens", 0)
-
-        # Extract exact OpenRouter cost
-        result.cost = usage.get("cost", 0.0)
-
-        answer         = gen.get("answer", "")
         result.answer  = answer
         result.sources = gen.get("sources", [])
         result.chunks_used = gen.get("chunks_used", len(retrieved))

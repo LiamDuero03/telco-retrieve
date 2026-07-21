@@ -540,9 +540,12 @@ def _update_leaderboard(
     # Calculate averages across all processed questions
     avg_total = statistics.mean([getattr(q, "latency", 0.0) for q in q_results]) if q_results else 0.0
     avg_search = statistics.mean([getattr(q, "search_latency", 0.0) for q in q_results]) if q_results else 0.0
+    avg_rerank = statistics.mean([getattr(q, "rerank_latency", 0.0) for q in q_results]) if q_results else 0.0 # <-- ADDED
     avg_gen = statistics.mean([getattr(q, "gen_latency", 0.0) for q in q_results]) if q_results else 0.0
+    
     total_prompt_tokens = sum([getattr(q, "prompt_tokens", 0) for q in q_results])
     total_completion_tokens = sum([getattr(q, "completion_tokens", 0) for q in q_results])
+    total_rerank_tokens = sum([getattr(q, "rerank_tokens", 0) for q in q_results]) # <-- ADDED
     
     # Sum the advanced token metrics
     total_cached_tokens = sum([getattr(q, "cached_tokens", 0) for q in q_results])
@@ -589,12 +592,16 @@ def _update_leaderboard(
         "top_k":                 result.top_k,
         "n_questions":           result.n_questions,
         "reranker":              reranker_model or "none",
+        "chunks_to_llm":          chunks_to_llm,
+        "include_keywords":      include_keywords,
         "search_method":         search_method,
         "embed_backend":         embed_backend,
-        "avg_search_latency_sec": round(avg_search, 2),  
+        "avg_search_latency_sec": round(avg_search, 2), 
+        "avg_rerank_latency_sec": round(avg_rerank, 2), 
         "avg_gen_latency_sec":    round(avg_gen, 2),     
         "avg_total_latency_sec":  round(avg_total, 2),   
         "total_api_tokens":      total_prompt_tokens + total_completion_tokens,
+        "total_rerank_tokens":    total_rerank_tokens,
         "total_cached_tokens":   total_cached_tokens,       
         "total_reasoning_tokens": total_reasoning_tokens,   
         "run_cost_usd":          round(exact_cost, 6),      

@@ -73,12 +73,13 @@ st.markdown("""
     .eval-row {
         display: flex; justify-content: space-between; align-items: center;
         padding: 8px 14px; border-radius: 8px; margin-bottom: 4px; font-size: 0.85rem;
+        color: #222222 !important;
     }
-    .eval-row-header { background: #f0f0f0; font-weight: 600; }
-    .eval-row-data { background: #fafafa; border: 1px solid #eee; }
-    .eval-metric { flex: 2; }
-    .eval-score { flex: 1; text-align: right; font-family: monospace; }
-    .eval-type { flex: 1; text-align: right; font-size: 0.72rem; color: #999; }
+    .eval-row-header { background: #e2e8f0; font-weight: 600; color: #0f172a !important; }
+    .eval-row-data { background: #f8fafc; border: 1px solid #e2e8f0; color: #1e293b !important; }
+    .eval-metric { flex: 2; color: #0f172a !important; }
+    .eval-score { flex: 1; text-align: right; font-family: monospace; color: #0f172a !important; font-weight: 600; }
+    .eval-type { flex: 1; text-align: right; font-size: 0.75rem; color: #475569 !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -839,7 +840,7 @@ if is_rag:
                 reranker_model = st.selectbox("Reranker Model", ["ms-marco-minilm", "otel-reranker-0.6b", "bge-reranker"])
                 rerank_top_k   = st.number_input("Chunks to pass to LLM", 1, 20, 3, key="eval_rerank_topk")
             else:
-                reranker_model = "0"
+                reranker_model = "none"
                 rerank_top_k   = top_k_eval  
 
 
@@ -943,9 +944,27 @@ if is_rag:
                     total_cached = sum(getattr(q, "cached_tokens", 0) for q in result.question_results)
                     total_reasoning = sum(getattr(q, "reasoning_tokens", 0) for q in result.question_results)
 
-                    avg_search = round(sum(getattr(q, "search_latency", 0.0) for q in result.question_results) / max(1, len(result.question_results)), 2)
-                    avg_gen = round(sum(getattr(q, "gen_latency", 0.0) for q in result.question_results) / max(1, len(result.question_results)), 2)
-                    avg_total = round(sum(getattr(q, "latency", 0.0) for q in result.question_results) / max(1, len(result.question_results)), 2)
+                    # Aggregate local token counts
+                    total_prompt_tokens = sum(getattr(q, "prompt_tokens", 0) for q in result.question_results)
+                    total_completion_tokens = sum(getattr(q, "completion_tokens", 0) for q in result.question_results)
+                    total_rerank_tokens = sum(getattr(q, "rerank_tokens", 0) for q in result.question_results)
+
+                    # Calculate latency averages
+                    num_qs = max(1, len(result.question_results))
+                    avg_search = round(sum(getattr(q, "search_latency", 0.0) for q in result.question_results) / num_qs, 2)
+                    avg_rerank = round(sum(getattr(q, "rerank_latency", 0.0) for q in result.question_results) / num_qs, 2)
+                    avg_gen = round(sum(getattr(q, "gen_latency", 0.0) for q in result.question_results) / num_qs, 2)
+                    avg_total = round(sum(getattr(q, "latency", 0.0) for q in result.question_results) / num_qs, 2)
+
+                    # Dynamic cost fallback if exact API reporting is bypassed by local tokenization
+                    if total_cost == 0.0:
+                        pricing = {
+                            "anthropic/claude-sonnet-4.5": {"prompt": 3.00, "completion": 15.00},
+                            "meta-llama/llama-3.3-70b-instruct": {"prompt": 0.70, "completion": 0.90},
+                            "google/qwen-2.5-coder-32b": {"prompt": 0.35, "completion": 0.35},
+                            "default": {"prompt": 0.70, "completion": 0.90}
+                        }.get(rag_llm_model, {"prompt": 0.70, "completion": 0.90})
+                        total_cost = ((total_prompt_tokens / 1_000_000) * pricing["prompt"]) + ((total_completion_tokens / 1_000_000) * pricing["completion"])
 
                     lb_row = {
                         "timestamp":             __import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -961,15 +980,20 @@ if is_rag:
                         "reranker":              reranker_model,
                         "n_questions":           result.n_questions,
                         "inject_metadata":       inject_metadata,
+                        "include_keywords":      include_keywords,
                         "search_method":         selected_search_method_eval,
                         "embed_backend":         embed_backend,
-                        "avg_search_latency_sec": avg_search,            
+                        "avg_search_latency_sec": avg_search,  
+                        "avg_rerank_latency_sec": avg_rerank,     
                         "avg_gen_latency_sec":    avg_gen,              
                         "avg_total_latency_sec":  avg_total,             
-                        "total_api_tokens":      sum(getattr(q, "prompt_tokens", 0) + getattr(q, "completion_tokens", 0) for q in result.question_results),
-                        "total_cached_tokens":   total_cached,
+                        "prompt_tokens":          total_prompt_tokens,
+                        "completion_tokens":      total_completion_tokens,
+                        "total_api_tokens":       total_prompt_tokens + total_completion_tokens,
+                        "total_cached_tokens":    total_cached,
+                        "total_rerank_tokens":    total_rerank_tokens,
                         "total_reasoning_tokens": total_reasoning,
-                        "run_cost_usd":          round(total_cost, 6),
+                        "run_cost_usd":           round(total_cost, 6),
                         "faithfulness":          round(result.mean_faithfulness, 3),
                         "answer_relevancy":      round(result.mean_answer_relevancy, 3),
                         "mean_similarity":       round(result.mean_similarity, 3),
@@ -1039,17 +1063,19 @@ if is_rag:
                         fig = go.Figure()
                         fig.add_trace(go.Bar(x=qlabels, y=clean, marker_color=color,
                                              text=[f"{v:.2f}" for v in clean],
-                                             textposition="outside", name=title))
+                                             textposition="outside", name=title,
+                                             textfont=dict(color="#333333")))
                         if mean_val >= 0:
-                            fig.add_hline(y=mean_val, line_dash="dash", line_color="#555",
+                            fig.add_hline(y=mean_val, line_dash="dash", line_color="#333333",
                                           line_width=1.5,
                                           annotation_text=f"avg {mean_val:.3f}",
                                           annotation_position="top right",
-                                          annotation_font_size=11)
-                        fig.update_layout(title=dict(text=title, font=dict(size=13)),
+                                          annotation_font_size=11,
+                                          annotation_font_color="#333333")
+                        fig.update_layout(title=dict(text=title, font=dict(size=13, color="#333333")),
                                           yaxis=dict(range=[0, 1.15], gridcolor="#eee",
-                                                     tickformat=".2f"),
-                                          xaxis=dict(tickangle=-45 if len(qrs) > 20 else 0),
+                                                     tickformat=".2f", tickfont=dict(color="#333333")),
+                                          xaxis=dict(tickangle=-45 if len(qrs) > 20 else 0, tickfont=dict(color="#333333")),
                                           height=300, margin=dict(t=45, b=50, l=30, r=20),
                                           plot_bgcolor="white", paper_bgcolor="white",
                                           font=dict(size=11), showlegend=False)
@@ -1140,10 +1166,14 @@ if is_rag:
                             "search_method": "Search Method", 
                             "embed_backend": "Vector Backend",
                             "avg_search_latency_sec": "Search Latency",  
+                            "avg_rerank_latency_sec": "Rerank Latency",
                             "avg_gen_latency_sec": "Gen Latency",        
                             "avg_total_latency_sec": "Total Latency",
+                            "prompt_tokens": "Prompt Tokens",
+                            "completion_tokens": "Completion Tokens",
                             "total_api_tokens": "Total Tokens",
-                            "total_cached_tokens": "Cached Tokens",         
+                            "total_cached_tokens": "Cached Tokens",
+                            "total_rerank_tokens": "Rerank Tokens",       
                             "total_reasoning_tokens": "Reasoning Tokens",   
                             "run_cost_usd": "Cost (USD)",
                             "faithfulness": "Faithful",
@@ -1165,13 +1195,17 @@ if is_rag:
                         col_config.update({k: st.column_config.NumberColumn(format="%+.3f")
                                         for k in ["Δ Correctness","Δ Recall","Δ Avg"]})
                         col_config.update({
-                                        "Search Latency": st.column_config.NumberColumn(format="%.2f s"),  # Updated
-                                        "Gen Latency": st.column_config.NumberColumn(format="%.2f s"),     # Updated
-                                        "Total Latency": st.column_config.NumberColumn(format="%.2f s"),   # Updated
+                                        "Search Latency": st.column_config.NumberColumn(format="%.2f s"),
+                                        "Rerank Latency": st.column_config.NumberColumn(format="%.2f s"),
+                                        "Gen Latency": st.column_config.NumberColumn(format="%.2f s"),
+                                       "Total Latency": st.column_config.NumberColumn(format="%.2f s"),
+                                        "Prompt Tokens": st.column_config.NumberColumn(format="%d"),
+                                        "Completion Tokens": st.column_config.NumberColumn(format="%d"),
                                         "Total Tokens": st.column_config.NumberColumn(format="%d"),
-                                        "Cached Tokens": st.column_config.NumberColumn(format="%d"),     
-                                        "Reasoning Tokens": st.column_config.NumberColumn(format="%d"),  
-                                        "Cost (USD)": st.column_config.NumberColumn(format="$ %.6f")     
+                                        "Cached Tokens": st.column_config.NumberColumn(format="%d"),
+                                        "Rerank Tokens": st.column_config.NumberColumn(format="%d"),
+                                        "Reasoning Tokens": st.column_config.NumberColumn(format="%d"),
+                                        "Cost (USD)": st.column_config.NumberColumn(format="$ %.6f")
                         })
                         st.dataframe(df_display, width="stretch", hide_index=True,
                                      column_config=col_config)
@@ -1200,12 +1234,13 @@ if is_rag:
                             x=avg_by_model["rag_model"], y=avg_by_model["average"],
                             marker_color="#4C9BE8",
                             text=[f"{v:.3f}" for v in avg_by_model["average"]],
-                            textposition="outside"))
-                        fig.update_layout(title="Average score by generator model",
-                                          yaxis=dict(range=[0, 1.15], gridcolor="#eee", tickformat=".2f"),
+                            textposition="outside",
+                            textfont=dict(color="#333333")))
+                        fig.update_layout(title=dict(text="Average score by generator model", font=dict(color="#333333")),
+                                          yaxis=dict(range=[0, 1.15], gridcolor="#eee", tickformat=".2f", tickfont=dict(color="#333333")),
                                           height=320, margin=dict(t=45, b=60, l=30, r=20),
                                           plot_bgcolor="white", paper_bgcolor="white",
-                                          font=dict(size=11), xaxis=dict(tickangle=-20),
+                                          font=dict(size=11), xaxis=dict(tickangle=-20, tickfont=dict(color="#333333")),
                                           showlegend=False)
                         st.plotly_chart(fig, width="stretch")
                         st.caption(f"Evaluator: {df['evaluator_model'].iloc[0]}  ·  "
