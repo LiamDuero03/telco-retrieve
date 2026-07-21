@@ -169,6 +169,8 @@ def main(argv: list[str] | None = None) -> None:
                     help="Simulate domain expert queries by prepending canonical source metadata to the question.")
     p_eval.add_argument("--run-name", default=None,
                         help="Custom label to identify this evaluation run (e.g. 'exp_prompt_v2').")
+    p_eval.add_argument("--include-keywords", action="store_true",
+                        help="Append question keywords to the search query")
 
     # ── info ──────────────────────────────────────────────────────────────────
     p_info = sub.add_parser("info", help="Show database info")
@@ -496,8 +498,10 @@ def _run_evaluate(args) -> None:
                 corpus           = corpus,
                 collection       = col_name,
                 reranker_model   = args.reranker_model if args.rerank else None,
+                rerank_top_k     = getattr(args, "rerank_top_k", result.top_k),
                 questions_file   = getattr(args, "questions_file", None),
                 inject_metadata  = args.inject_metadata,
+                include_keywords = getattr(args, "include_keywords", False),
                 search_method=getattr(args, "search_method", "dense"),
                 embed_backend=embed_backend,
                 run_name         = getattr(args, "run_name", None),
@@ -513,8 +517,10 @@ def _update_leaderboard(
     collection:       str,
     baseline_result   = None,
     reranker_model:   str | None = None,
+    rerank_top_k:     int = 0,
     questions_file:   str | None = None,
     inject_metadata:  bool = False,
+    include_keywords: bool = False,
     search_method:    str = "dense", 
     embed_backend:    str = "local",
     run_name:         str | None = None,) -> None:
@@ -568,6 +574,8 @@ def _update_leaderboard(
         q_file_label = Path(result.questions_file).name
     else:
         q_file_label = f"{corpus}.json"
+
+    chunks_to_llm = rerank_top_k if reranker_model else result.top_k
 
     row = {
         "timestamp":             datetime.now().strftime("%Y-%m-%d %H:%M"),

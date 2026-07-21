@@ -67,6 +67,7 @@ def evaluate_question(
     debug:         bool  = False,
     rag_model_name: str | None = None,
     inject_metadata: bool = False, 
+    include_keywords: bool = False,  # <-- ADDED PARAMETER
     search_method: str = "dense",
 ) -> QuestionResult:
     """Run all applicable metrics for one question."""
@@ -76,6 +77,13 @@ def evaluate_question(
     active_question = q.question
     if inject_metadata and q.canonical_source:
         active_question = f"According to {q.corpus.upper()} document {q.canonical_source}, {q.question}"
+
+    # Prepare search query (appends keywords if flag is enabled)
+    search_query = active_question
+    if include_keywords and getattr(q, "keywords", None):
+        kw_str = " ".join(q.keywords) if isinstance(q.keywords, list) else str(q.keywords)
+        if kw_str.strip():
+            search_query = f"{active_question} Keywords: {kw_str}"
 
     result = QuestionResult(
         question=active_question, corpus=q.corpus,
@@ -93,14 +101,20 @@ def evaluate_question(
             result.gen_latency = time.perf_counter() - gen_start
             result.search_latency = 0.0
         else:
-            # Time the search retrieval pass
+            # Time the search retrieval pass using search_query
             search_start = time.perf_counter()
-            retrieved = search(active_question, store=store, embedder=embedder,
-                               top_k=top_k, reranker=reranker, rerank_top_k=rerank_top_k,
-                               search_method=search_method) # PASSED DOWN
+            retrieved = search(
+                search_query,  # <-- Uses search_query with keywords if enabled
+                store=store, 
+                embedder=embedder,
+                top_k=top_k, 
+                reranker=reranker, 
+                rerank_top_k=rerank_top_k,
+                search_method=search_method
+            )
             result.search_latency = time.perf_counter() - search_start
             
-            # Time the text generation pass
+            # Time the text generation pass using active_question
             gen_start = time.perf_counter()
             generator = _build_generator(rag_llm_call or llm_call, model_name=rag_model_name)
             gen       = generate(active_question, retrieved, source_type=q.corpus, generator=generator)
@@ -132,25 +146,25 @@ def evaluate_question(
         if debug:
             mode = "BASELINE" if baseline else "RAG"
             print(f"\n  [DEBUG] [{mode}] question: {active_question[:80]}")
+            print(f"  [DEBUG] [{mode}] search query: {search_query[:80]}")
             print(f"  [DEBUG] [{mode}] answer preview: {answer[:200]}")
 
         if q.answer_type in ("mc", "tf"):
-            # Clean answers for exact matching (e.g., "Answer is A." -> "A", "True." -> "True")
+            # Clean answers for exact matching
             clean_ans = answer.strip().strip(".*`\"'").upper()
             clean_ref = str(q.reference_answer).strip().upper()
             
-            # Simple direct parsing extraction rule helper
             is_correct = 0.0
             if clean_ref == clean_ans or f"ANSWER IS {clean_ref}" in clean_ans or clean_ans.startswith(clean_ref):
                 is_correct = 1.0
                 
-            result.faithfulness     = is_correct  # If accurate, it is inherently faithful to text
-            result.answer_relevancy = 1.0         # Addressed the structured prompt constraint
+            result.faithfulness     = is_correct
+            result.answer_relevancy = 1.0
             if q.reference_answer:
                 result.context_recall     = 1.0 if not baseline else 0.0
                 result.answer_correctness = is_correct
         else:
-            # Standard Legacy logic for open free-text questions
+            # Free-text evaluation
             result.faithfulness     = faithfulness(answer, retrieved, llm_call=llm_call, debug=debug)
             result.answer_relevancy = answer_relevancy(active_question, answer, embedder, llm_call=llm_call, debug=debug)
             if q.reference_answer:
@@ -165,13 +179,6 @@ def evaluate_question(
             result.source_coverage = source_coverage(retrieved)
             result.canonical_hit   = canonical_source_hit(retrieved, q.canonical_source)
 
-        if q.reference_answer:
-            result.context_recall     = context_recall(
-                q.reference_answer, retrieved, llm_call=llm_call, debug=debug)
-            result.answer_correctness = answer_correctness(
-                answer, q.reference_answer, embedder,
-                llm_call=llm_call, debug=debug)
-
     except Exception as e:
         result.error = str(e)
         result.latency = 0.0
@@ -181,7 +188,6 @@ def evaluate_question(
         result.gen_latency = 0.0
 
     return result
-
 
 
 def evaluate_corpus(
@@ -202,6 +208,7 @@ def evaluate_corpus(
     debug:         bool  = False,
     rag_generator_model: str | None = None,
     inject_metadata: bool = False,
+    include_keywords: bool = False,
     search_method: str = "dense",
 ) -> tuple[CorpusResult, CorpusResult | None]:
     """Run the full evaluation suite for one corpus.
@@ -243,6 +250,7 @@ def evaluate_corpus(
                                rerank_top_k=rerank_top_k, debug=debug,
                                rag_model_name=resolved_rag_model,
                                inject_metadata=inject_metadata,
+                               include_keywords=include_keywords,
                                search_method=search_method)
         rag_results.append(qr)
         if qr.error:

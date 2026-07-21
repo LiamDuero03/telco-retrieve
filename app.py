@@ -123,6 +123,11 @@ def _get_embedder(model_key: str):
     from open_telco_rag.embedders.sentense_transformers import SentenceTransformerEmbedder
     return SentenceTransformerEmbedder(model_key=model_key)
 
+@st.cache_resource(show_spinner=False)
+def _get_reranker(model_key: str):
+    from open_telco_rag.embedders.reranker import load_reranker
+    return load_reranker(model_key)
+
 
 @st.cache_data(show_spinner=False)
 def _load_embedder_keys() -> dict:
@@ -822,12 +827,22 @@ if is_rag:
         rag_llm_model     = llm_model
         metrics_llm_model = METRICS_LLM_OPTIONS[metrics_llm_label]
 
-        col_eval_opts1, col_eval_opts2 = st.columns(2)
+        col_eval_opts1, col_eval_opts2, col_eval_opts3 = st.columns(3)
         with col_eval_opts1:
             include_baseline = st.checkbox("Include baseline (no retrieval)", value=False)
+            inject_metadata  = st.checkbox("Inject domain metadata", value=False)
         with col_eval_opts2:
-            inject_metadata  = st.checkbox("Inject domain metadata into queries", value=False, help="Simulates domain-expert prompting by prepending document IDs to the question.")
-        
+            include_keywords = st.checkbox("Append question keywords to query", value=False)
+            use_reranker     = st.checkbox("Enable Reranker", value=False)
+        with col_eval_opts3:
+            if use_reranker:
+                reranker_model = st.selectbox("Reranker Model", ["ms-marco-minilm", "otel-reranker-0.6b", "bge-reranker"])
+                rerank_top_k   = st.number_input("Chunks to pass to LLM", 1, 20, 3, key="eval_rerank_topk")
+            else:
+                reranker_model = "0"
+                rerank_top_k   = top_k_eval  
+
+
         eval_btn = st.button("Run evaluation ▶", type="primary", key="eval_btn")
 
         if eval_btn:
@@ -860,17 +875,29 @@ if is_rag:
                     log_lines    = []
 
                     import open_telco_rag.evaluation.evaluate as _eval_mod
-                    _orig_eq = _eval_mod.evaluate_question
+                    if hasattr(_eval_mod, "_true_orig_eq"):
+                        _orig_eq = _eval_mod._true_orig_eq
+                    else:
+                        _orig_eq = _eval_mod.evaluate_question
+                        _eval_mod._true_orig_eq = _orig_eq
+
+                    q_counter = [0]
+                    total_expected = n * 2 if include_baseline else n
 
                     def _patched_eq(q, *args, **kwargs):
-                        qr  = _orig_eq(q, *args, **kwargs)
-                        idx = questions.index(q) + 1
-                        progress_bar.progress(idx / n, text=f"Question {idx}/{n}")
+                        qr = _orig_eq(q, *args, **kwargs)
+                        q_counter[0] += 1
+                        idx = q_counter[0]
+                        
+                        # Clamp ratio between 0.0 and 1.0 so it never exceeds 100%
+                        progress_val = min(1.0, idx / total_expected)
+                        progress_bar.progress(progress_val, text=f"Question {idx}/{total_expected}")
+
                         if qr.error:
-                            log_lines.append(f"[{idx}/{n}] ERROR: {qr.error}")
+                            log_lines.append(f"[{idx}/{total_expected}] ERROR: {qr.error}")
                         else:
                             log_lines.append(
-                                f"[{idx}/{n}] faithful={qr.faithfulness:.2f}  "
+                                f"[{idx}/{total_expected}] faithful={qr.faithfulness:.2f}  "
                                 f"relevancy={qr.answer_relevancy:.2f}  "
                                 f"sim={qr.mean_similarity:.3f}  "
                                 f"recall={qr.context_recall:.2f}  "
@@ -881,16 +908,25 @@ if is_rag:
                         return qr
 
                     _eval_mod.evaluate_question = _patched_eq
-                    result, baseline_result = evaluate_corpus(
-                        corpus=source_type, store=store, embedder=embedder,
-                        questions=questions, model=model_key, top_k=top_k_eval,
-                        delay=eval_delay, output_dir=Path(output_dir),
-                        llm_call=llm_call, rag_llm_call=rag_llm_call,
-                        include_baseline=include_baseline,rag_generator_model=rag_llm_model,
-                        inject_metadata=inject_metadata, search_method=selected_search_method_eval,
-                    )
-                    _eval_mod.evaluate_question = _orig_eq
-                    progress_bar.progress(1.0, text="Done ✓")
+                    
+                    try:
+                        # Load the actual reranker object if enabled
+                        active_reranker = _get_reranker(reranker_model) if use_reranker else None
+                        
+                        result, baseline_result = evaluate_corpus(
+                            corpus=source_type, store=store, embedder=embedder,
+                            questions=questions, model=model_key, top_k=top_k_eval,
+                            delay=eval_delay, output_dir=Path(output_dir),
+                            llm_call=llm_call, rag_llm_call=rag_llm_call,
+                            include_baseline=include_baseline, rag_generator_model=rag_llm_model,
+                            inject_metadata=inject_metadata, search_method=selected_search_method_eval,
+                            include_keywords=include_keywords, 
+                            reranker=active_reranker,  
+                            rerank_top_k=rerank_top_k,
+                        )
+                    finally:
+                        # 2. ALWAYS restore the original function, even if the pipeline crashes
+                        _eval_mod.evaluate_question = _orig_eq
 
                     scores = [result.mean_faithfulness, result.mean_answer_relevancy,
                               result.mean_similarity, result.mean_context_recall,
@@ -921,6 +957,8 @@ if is_rag:
                         "collection":            col_name,
                         "questions_file":         q_filename,
                         "top_k":                 top_k_eval,
+                        "chunks_to_llm":         rerank_top_k,                    
+                        "reranker":              reranker_model,
                         "n_questions":           result.n_questions,
                         "inject_metadata":       inject_metadata,
                         "search_method":         selected_search_method_eval,
@@ -1095,6 +1133,10 @@ if is_rag:
                             "evaluator_model": "Evaluator", "embedder": "Embedder",
                             "collection": "Collection","questions_file" :"Question Set",
                             "inject_metadata": "Metadata Injected",
+                            "include_keywords": "Keywords Added",       
+                            "top_k": "Retrieved",                       
+                            "reranker": "Reranker",                     
+                            "chunks_to_llm": "LLM Chunks",
                             "search_method": "Search Method", 
                             "embed_backend": "Vector Backend",
                             "avg_search_latency_sec": "Search Latency",  
