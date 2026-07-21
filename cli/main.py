@@ -167,6 +167,8 @@ def main(argv: list[str] | None = None) -> None:
                       help="Backend for computing embeddings (default: local)")
     p_eval.add_argument("--inject-metadata", action="store_true",
                     help="Simulate domain expert queries by prepending canonical source metadata to the question.")
+    p_eval.add_argument("--run-name", default=None,
+                        help="Custom label to identify this evaluation run (e.g. 'exp_prompt_v2').")
 
     # ── info ──────────────────────────────────────────────────────────────────
     p_info = sub.add_parser("info", help="Show database info")
@@ -498,6 +500,7 @@ def _run_evaluate(args) -> None:
                 inject_metadata  = args.inject_metadata,
                 search_method=getattr(args, "search_method", "dense"),
                 embed_backend=embed_backend,
+                run_name         = getattr(args, "run_name", None),
             )
 
 
@@ -514,7 +517,7 @@ def _update_leaderboard(
     inject_metadata:  bool = False,
     search_method:    str = "dense", 
     embed_backend:    str = "local",
-) -> None:
+    run_name:         str | None = None,) -> None:
     """Append one row to the leaderboard JSON file."""
     import json
     from datetime import datetime
@@ -568,6 +571,7 @@ def _update_leaderboard(
 
     row = {
         "timestamp":             datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "run_name":              run_name.strip() if run_name else "default",
         "rag_model":             rag_model,
         "evaluator_model":       evaluator_model,
         "embedder":              result.model,

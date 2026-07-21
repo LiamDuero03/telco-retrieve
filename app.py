@@ -780,11 +780,34 @@ if is_rag:
         st.caption(f"RAG generation uses the sidebar LLM ({llm_label}). Metrics scoring uses the model selected below.")
         col_e1, col_e2 = st.columns(2)
         with col_e1:
-            questions_file = st.text_input("Questions file (.json)",
-                                           value="configs/eval_questions/3gpp_r19_qna.json")
+            from pathlib import Path
+            eval_q_dir = Path("configs/eval_questions")
+            available_eval_files = [str(p) for p in sorted(eval_q_dir.glob("*.json"))] if eval_q_dir.exists() else []
+
+            if available_eval_files:
+                eval_options = available_eval_files + ["Custom path..."]
+                selected_eval_file = st.selectbox(
+                    "Questions file (.json)",
+                    options=eval_options,
+                    key="eval_questions_file_select",
+                    help="Select a validated QnA dataset from configs/eval_questions/"
+                )
+                if selected_eval_file == "Custom path...":
+                    questions_file = st.text_input("Custom Questions file path", value="configs/eval_questions/3gpp_r19_qna.json", key="eval_questions_custom_path")
+                else:
+                    questions_file = selected_eval_file
+            else:
+                questions_file = st.text_input("Questions file (.json)", value="configs/eval_questions/3gpp_r19_qna.json", key="eval_questions_text_input")
+
             top_k_eval = st.number_input("Top K", 1, 20, 5, key="eval_topk")
             output_dir = st.text_input("Output directory", value="results/gui")
         with col_e2:
+            eval_run_name = st.text_input(
+                "Run name",
+                value="",
+                placeholder="e.g. exp_prompt_v2",
+                help="Custom label to identify this experiment run on the leaderboard."
+            )
             METRICS_LLM_OPTIONS = _load_llm_keys() 
             metrics_llm_label = st.selectbox("Metrics evaluation model",
                                              list(METRICS_LLM_OPTIONS.keys()))
@@ -890,6 +913,7 @@ if is_rag:
 
                     lb_row = {
                         "timestamp":             __import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M"),
+                        "run_name":              eval_run_name.strip() or "default", 
                         "rag_model":             rag_llm_model,
                         "evaluator_model":       metrics_llm_model,
                         "embedder":              model_key,
@@ -1067,6 +1091,7 @@ if is_rag:
 
                         display_cols = {
                             "rank": "Rank", "rag_model": "Generator",
+                            "run_name": "Run Name",
                             "evaluator_model": "Evaluator", "embedder": "Embedder",
                             "collection": "Collection","questions_file" :"Question Set",
                             "inject_metadata": "Metadata Injected",
@@ -1488,11 +1513,31 @@ else:
                 pass
             return None
 
-        # ── File picker ───────────────────────────────────────────────────
-        default_draft   = st.session_state.get("last_draft_path", "")
-        review_path_str = st.text_input("Draft QnA file (.json)", value=default_draft,
-                                         placeholder="draft_questions/draft_oran_n20_....json",
-                                         key="review_path")
+        # ── Dropdown / File picker for Drafts ──────────────────────────────
+        draft_dir = _Path2("draft_questions")
+        available_drafts = [str(p) for p in sorted(draft_dir.glob("*.json"))] if draft_dir.exists() else []
+        default_draft = st.session_state.get("last_draft_path", "")
+
+        if available_drafts:
+            # Auto-select the most recently generated draft if available
+            default_idx = available_drafts.index(default_draft) if default_draft in available_drafts else 0
+            draft_options = available_drafts + ["Custom path..."]
+            
+            selected_draft = st.selectbox(
+                "Select Draft QnA set (.json)",
+                options=draft_options,
+                index=default_idx,
+                key="review_draft_select",
+                help="Select an unapproved draft QnA file from draft_questions/"
+            )
+            if selected_draft == "Custom path...":
+                review_path_str = st.text_input("Custom Draft QnA path", value=default_draft, key="review_custom_path")
+            else:
+                review_path_str = selected_draft
+        else:
+            review_path_str = st.text_input("Draft QnA file (.json)", value=default_draft,
+                                            placeholder="draft_questions/draft_oran.json",
+                                            key="review_path_fallback")
 
         col_rv1, col_rv2 = st.columns(2)
         with col_rv1:
