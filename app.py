@@ -1176,7 +1176,7 @@ if is_rag:
 # QNA GENERATION PIPELINE TABS
 # ══════════════════════════════════════════════════════════════════════════════
 else:
-    tab_genqa, tab_review = st.tabs(["Generate QnA", "Review QnA"])
+    tab_genqa, tab_review, tab_qna_info = st.tabs(["Generate QnA", "Review QnA", "QnA Info"])
 
     # ── GENERATE QNA ─────────────────────────────────────────────────────────
     with tab_genqa:
@@ -1263,14 +1263,15 @@ else:
             j_relevance = st.checkbox("Relevance Judge", value=False, help="Confirms questions target primary technical elements.")
 
         st.markdown("##### Paths, Deduplication & Output Workflow")
-        col_g5, col_g6 = st.columns(2)
+        col_g5, col_g6, col_g7 = st.columns(3)
         with col_g5:
-            #genqa_input_dir = st.text_input("Source documents directory (optional)", value=f"data/{source_type}", key="genqa_input_dir")
             dedup_options = ["exact", "prefix", "none"]
             genqa_dedup = st.selectbox("Dedup mode", dedup_options, index=0, key="genqa_dedup")
         with col_g6:
             genqa_output_dir = st.text_input("Output directory", value="draft_questions", key="genqa_output_dir")
             skip_review = st.checkbox("Skip Manual Review (Auto-approve and merge directly)", value=False)
+        with col_g7:
+            genqa_set_name = st.text_input("QnA Set Name", value=f"{source_type}", key="genqa_set_name", help="Custom name for your question set (used for the output filename).")
 
         genqa_btn = st.button("Generate ▶", type="primary", key="genqa_btn")
 
@@ -1367,7 +1368,9 @@ else:
                     qa_pairs = flow.generate(source, source_type, log=_log)
                     _log(f"Generated {len(qa_pairs)} questions")
 
-                    eval_path = _Path("configs/eval_questions") / f"{source_type}.json"
+                    # Retrieve and clean the custom set name
+                    safe_set_name = genqa_set_name.strip() or source_type
+                    eval_path = _Path("configs/eval_questions") / f"{safe_set_name}.json"
 
                     # Check for Auto-Merge / Skip Review functionality
                     if skip_review:
@@ -1389,10 +1392,20 @@ else:
                         _log(f"Successfully auto-merged {len(qa_pairs)} items into {eval_path}")
                         st.success(f"Successfully auto-merged {len(qa_pairs)} questions directly into evaluation set! ✓")
                     else:
-                        # Standard sequence: Save temporary review file layout
-                        merged   = merge_with_existing(qa_pairs, eval_path)
-                        out_path = save_draft(merged, _Path(genqa_output_dir), source_type,
-                                              n_questions=len(qa_pairs), model="automated_jury_flow")
+                        # Standard sequence: Save temporary review file layout via core utility
+                        safe_set_name = genqa_set_name.strip() or source_type
+                        eval_path = _Path("configs/eval_questions") / f"{safe_set_name}.json"
+                        
+                        merged = merge_with_existing(qa_pairs, eval_path)
+                        
+                        out_path = save_draft(
+                            merged, 
+                            _Path(genqa_output_dir), 
+                            source_type,
+                            n_questions=len(qa_pairs), 
+                            model="automated_jury_flow",
+                            set_name=safe_set_name,  
+                        )
                         _log(f"Saved draft -> {out_path}")
                         st.success(f"Generated {len(qa_pairs)} draft questions -> {out_path}")
                         st.session_state["last_draft_path"] = str(out_path)
@@ -1600,8 +1613,10 @@ else:
                             f"{rejected_count} rejected · {pending_count} pending**")
 
                 if st.button("💾 Merge approved into eval set", type="primary", key="merge_btn"):
-                    corpus_name = questions[0]["corpus"] if questions else source_type
-                    eval_path   = _Path2("configs/eval_questions") / f"{corpus_name}.json"
+                    draft_name = review_path.name
+                    target_name = draft_name[6:] if draft_name.startswith("draft_") else draft_name
+                    
+                    eval_path = _Path2("configs/eval_questions") / target_name
                     eval_path.parent.mkdir(parents=True, exist_ok=True)
                     existing = {"questions": []}
                     if eval_path.exists():
@@ -1619,3 +1634,61 @@ else:
                     eval_path.write_text(_json2.dumps(existing, indent=2, ensure_ascii=False),
                                          encoding="utf-8")
                     st.success(f"Merged {len(to_add)} questions into {eval_path}")
+
+    # ── QNA INFO ─────────────────────────────────────────────────────────────
+    with tab_qna_info:
+        st.caption("Overview of generated and validated QnA sets across directories.")
+        if st.button("Refresh", key="qna_info_refresh"):
+            st.rerun()
+
+        import json as _json_info
+        from pathlib import Path as _Path_info
+
+        def _render_qna_directory(dir_path_str: str, title: str, is_draft: bool = False):
+            dir_path = _Path_info(dir_path_str)
+            st.markdown(f"#### {title}")
+            
+            if not dir_path.exists() or not dir_path.is_dir():
+                st.info(f"Directory `{dir_path_str}` does not exist yet.")
+                return
+
+            files = list(dir_path.glob("*.json"))
+            if not files:
+                st.info(f"No QnA sets found in `{dir_path_str}`.")
+                return
+
+            total_q = 0
+            for f in sorted(files):
+                try:
+                    data = _json_info.loads(f.read_text(encoding="utf-8"))
+                    qs = data.get("questions", [])
+                    num_qs = len(qs)
+                    total_q += num_qs
+                    val_qs = sum(1 for q in qs if q.get("validated") is True)
+
+                    # Toggle styling based on set status
+                    badge = "Draft" if is_draft else "Validated"
+                    badge_style = "background:#fff8e1;color:#8a6200;border-color:#f0d080;" if is_draft else "background:#e8f5e9;color:#2e7d32;border-color:#a5d6a7;"
+                    
+                    st.markdown(
+                        f"<div class='col-row'>"
+                        f"<span class='col-name'>📄 {f.name} "
+                        f"<span class='model-tag' style='{badge_style}'>{badge}</span></span>"
+                        f"<span class='col-count'>{val_qs}/{num_qs} validated</span></div>",
+                        unsafe_allow_html=True
+                    )
+                except Exception:
+                    st.markdown(
+                        f"<div class='col-row'>"
+                        f"<span class='col-name'>📄 {f.name}</span>"
+                        f"<span class='col-count' style='color:#e74c3c;'>Error reading file</span></div>",
+                        unsafe_allow_html=True
+                    )
+            st.caption(f"**Total questions across {len(files)} sets:** {total_q}")
+
+        _render_qna_directory("configs/eval_questions", "Validated QnA Sets")
+        st.markdown("---")
+        
+        # Fallback directory if genqa_output_dir is out of scope 
+        target_draft_dir = genqa_output_dir if "genqa_output_dir" in locals() else "draft_questions"
+        _render_qna_directory(target_draft_dir, "Draft QnA Sets", is_draft=True)
