@@ -92,6 +92,8 @@ def main(argv: list[str] | None = None) -> None:
                           help="Multi-method search routing pass algorithm selection.")
     p_search.add_argument("--embed-backend", choices=["local", "openrouter"], default="local",
                       help="Backend for computing embeddings (default: local)")
+    p_search.add_argument("--resolve-parents", action="store_true",
+                      help="Expand retrieved child chunks into full parent contexts")
 
     # ── ask ───────────────────────────────────────────────────────────────────
     p_ask = sub.add_parser("ask", help="Ask a question (search + generate)")
@@ -110,6 +112,8 @@ def main(argv: list[str] | None = None) -> None:
                           help="Multi-method search routing pass algorithm selection.")
     p_ask.add_argument("--embed-backend", choices=["local", "openrouter"], default="local",
                       help="Backend for computing embeddings (default: local)")
+    p_ask.add_argument("--resolve-parents", action="store_true",
+                   help="Expand retrieved child chunks into full parent contexts")
 
     # ── evaluate ──────────────────────────────────────────────────────────────
     p_eval = sub.add_parser("evaluate", help="Run evaluation suite on a corpus")
@@ -171,6 +175,8 @@ def main(argv: list[str] | None = None) -> None:
                         help="Custom label to identify this evaluation run (e.g. 'exp_prompt_v2').")
     p_eval.add_argument("--include-keywords", action="store_true",
                         help="Append question keywords to the search query")
+    p_eval.add_argument("--resolve-parents", action="store_true",
+                    help="Expand retrieved child chunks into full parent contexts")
 
     # ── info ──────────────────────────────────────────────────────────────────
     p_info = sub.add_parser("info", help="Show database info")

@@ -272,21 +272,18 @@ def ingest(
 
 
 # ── Search ────────────────────────────────────────────────────────────────────
-
 def search(
-    query:        str,
-    store:        VectorStore,
-    embedder:     Embedder,
-    top_k:        int   = 8,
-    threshold:    float = 1.0,
-    reranker            = None,
-    rerank_top_k: int   = 5,
-    search_method: str  = "dense",
+    query:           str,
+    store:           VectorStore,
+    embedder:        Embedder,
+    top_k:           int   = 8,
+    threshold:       float = 1.0,
+    reranker               = None,
+    rerank_top_k:    int   = 5,
+    search_method:   str   = "dense",
+    resolve_parents: bool  = False,  
 ) -> list[SearchResult]:
-    """Embed a query and retrieve nearest neighbours.
-    
-    Delegates retrieval strategies out to the modular core search layer.
-    """
+    """Embed a query and retrieve nearest neighbours."""
     from open_telco_rag.core.retrieval import execute_retrieval
     
     return execute_retrieval(
@@ -297,7 +294,8 @@ def search(
         threshold=threshold,
         reranker=reranker,
         rerank_top_k=rerank_top_k,
-        search_method=search_method
+        search_method=search_method, 
+        resolve_parents=resolve_parents, 
     )
 
 # ── Generate ──────────────────────────────────────────────────────────────────

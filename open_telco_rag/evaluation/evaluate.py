@@ -80,6 +80,7 @@ def evaluate_question(
     inject_metadata: bool = False, 
     include_keywords: bool = False,  
     search_method: str = "dense",
+    resolve_parents:  bool = False,
 ) -> QuestionResult:
     """Run all applicable metrics for one question."""
     from open_telco_rag.core.pipeline import search, generate
@@ -119,9 +120,10 @@ def evaluate_question(
                 store=store, 
                 embedder=embedder,
                 top_k=top_k, 
-                reranker=None,  # <-- Force None to isolate base search time
+                reranker=None,  
                 rerank_top_k=top_k,
-                search_method=search_method
+                search_method=search_method,
+                resolve_parents=resolve_parents
             )
             result.search_latency = time.perf_counter() - search_start
             
@@ -241,6 +243,7 @@ def evaluate_corpus(
     inject_metadata: bool = False,
     include_keywords: bool = False,
     search_method: str = "dense",
+    resolve_parents:  bool = False,
 ) -> tuple[CorpusResult, CorpusResult | None]:
     """Run the full evaluation suite for one corpus.
 
@@ -282,7 +285,8 @@ def evaluate_corpus(
                                rag_model_name=resolved_rag_model,
                                inject_metadata=inject_metadata,
                                include_keywords=include_keywords,
-                               search_method=search_method)
+                               search_method=search_method,
+                               resolve_parents=resolve_parents,)
         rag_results.append(qr)
         if qr.error:
             print(f"    [ERROR] {qr.error}")

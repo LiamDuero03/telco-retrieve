@@ -487,6 +487,10 @@ if is_rag:
                 index=0,
                 key="ask_search_method"
             )
+            
+        # 1. ADD THE CHECKBOX HERE
+        resolve_parents_ask = st.checkbox("Expand Parent Chunks (Hierarchical)", value=False, key="ask_resolve_parents")
+        
         ask_btn = st.button("Ask ✦", type="primary")
 
         if ask_btn and question.strip():
@@ -495,9 +499,12 @@ if is_rag:
                     from open_telco_rag.core.pipeline import generate, search
                     embedder = _get_embedder(model_key, backend=embed_backend)
                     store    = _get_store(source_type, model_key, db_path, collection_override)
+                    
+                    # 2. PASS IT INTO SEARCH HERE
                     results  = search(question, store=store, embedder=embedder,
                                       top_k=top_k_ask, threshold=threshold_ask,
-                                      search_method=selected_search_method)
+                                      search_method=selected_search_method,
+                                      resolve_parents=resolve_parents_ask)
                     answer   = generate(question, results, source_type=source_type,
                                         generator=_build_generator(llm_model))
 
@@ -559,6 +566,10 @@ if is_rag:
                 index=0,
                 key="search_search_method"
             )
+            
+        # 1. ADD THE CHECKBOX HERE
+        resolve_parents_search = st.checkbox("Expand Parent Chunks (Hierarchical)", value=False, key="search_resolve_parents")
+        
         search_btn = st.button("Search", type="primary", key="search_btn")
 
         if search_btn and query.strip():
@@ -567,9 +578,12 @@ if is_rag:
                     from open_telco_rag.core.pipeline import search
                     embedder = _get_embedder(model_key, backend=embed_backend)
                     store    = _get_store(source_type, model_key, db_path, collection_override)
+                    
+                    # 2. PASS IT INTO SEARCH HERE
                     results  = search(query, store=store, embedder=embedder,
                                       top_k=top_k_search, threshold=threshold_search,
-                                      search_method=selected_search_method_s)
+                                      search_method=selected_search_method_s,
+                                      resolve_parents=resolve_parents_search)
                     if not results:
                         st.info("No results found.")
                     else:
@@ -832,6 +846,7 @@ if is_rag:
         with col_eval_opts1:
             include_baseline = st.checkbox("Include baseline (no retrieval)", value=False)
             inject_metadata  = st.checkbox("Inject domain metadata", value=False)
+            resolve_parents_eval = st.checkbox("Expand Parent Chunks (Hierarchical)", value=False)
         with col_eval_opts2:
             include_keywords = st.checkbox("Append question keywords to query", value=False)
             use_reranker     = st.checkbox("Enable Reranker", value=False)
@@ -889,7 +904,6 @@ if is_rag:
                         try:
                             qr = _orig_eq(q, *args, **kwargs)
                         except Exception as e:
-                            # Failsafe if evaluate_question completely crashes
                             from open_telco_rag.evaluation.results import QuestionResult
                             qr = QuestionResult(
                                 question=q.question, 
@@ -937,6 +951,7 @@ if is_rag:
                             include_keywords=include_keywords, 
                             reranker=active_reranker,  
                             rerank_top_k=rerank_top_k,
+                            resolve_parents=resolve_parents_eval,
                         )
                     finally:
                         # 2. ALWAYS restore the original function, even if the pipeline crashes

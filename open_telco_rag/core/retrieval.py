@@ -1,35 +1,64 @@
-"""Algorithmic retrieval strategies — Vector, BM25, and Rank Fusion."""
-
 from __future__ import annotations
 import math
 from typing import Any
 from open_telco_rag.types import SearchResult, Embedder
+
+
+def _resolve_parent_chunks(results: list[SearchResult]) -> list[SearchResult]:
+    """If results contain child chunks from hierarchical parent-child chunking,
+    substitute child text with full parent text and deduplicate by parent_id.
+    """
+    resolved: list[SearchResult] = []
+    seen_parents: set[str] = set()
+
+    for r in results:
+        meta = r.metadata or {}
+        parent_id = meta.get("parent_id")
+        full_parent_text = meta.get("full_parent_text")
+
+        if parent_id and full_parent_text:
+            if parent_id in seen_parents:
+                continue
+            seen_parents.add(parent_id)
+            # Create a new SearchResult with full parent text substituted
+            resolved.append(SearchResult(
+                text=full_parent_text,
+                distance=r.distance,
+                metadata=meta,
+                doc_id=r.doc_id,
+            ))
+        else:
+            resolved.append(r)
+
+    return resolved
+
 
 def reciprocal_rank_fusion(dense_results: list[SearchResult], bm25_results: list[SearchResult], k: int = 60) -> list[SearchResult]:
     """Combines dense vector and sparse keyword scores using Reciprocal Rank Fusion."""
     fused_scores: dict[str, float] = {}
     
     for rank, item in enumerate(dense_results):
-        fused_scores[item.id] = fused_scores.get(item.id, 0.0) + 1.0 / (k + rank + 1)
+        fused_scores[item.doc_id] = fused_scores.get(item.doc_id, 0.0) + 1.0 / (k + rank + 1)
         
     for rank, item in enumerate(bm25_results):
-        fused_scores[item.id] = fused_scores.get(item.id, 0.0) + 1.0 / (k + rank + 1)
+        fused_scores[item.doc_id] = fused_scores.get(item.doc_id, 0.0) + 1.0 / (k + rank + 1)
         
-    all_items = {item.id: item for item in dense_results + bm25_results}
+    all_items = {item.doc_id: item for item in dense_results + bm25_results}
     sorted_ids = sorted(fused_scores.items(), key=lambda x: x[1], reverse=True)
     
     return [all_items[idx] for idx, _ in sorted_ids]
 
 
 def execute_retrieval(
-    query:         str,
-    store:         Any,
-    embedder:      Embedder,
-    top_k:         int   = 8,
-    threshold:     float = 1.0,
-    reranker             = None,
-    rerank_top_k:  int   = 5,
-    search_method: str   = "dense",
+    query:           str,
+    store:           Any,
+    embedder:        Embedder,
+    top_k:           int   = 8,
+    threshold:       float = 1.0,
+    reranker               = None,
+    rerank_top_k:    int   = 5,
+    search_method:   str   = "dense",
+    resolve_parents: bool  = False,  
 ) -> list[SearchResult]:
     """Orchestrates search pipeline routing handling Dense, BM25 keyword, and Hybrid models."""
     search_method = search_method.lower()
@@ -43,10 +72,7 @@ def execute_retrieval(
         vector = embedder.embed([query])[0]
         dense_results = store.search(vector, n_results=candidate_k)
         
-        # --- PROFESSIONAL THRESHOLD HANDLING ---
-        # If threshold is 1.0 (default CLI behavior), let everything pass
         if 0.0 < threshold < 1.0:
-            # Detect space metric from the store metadata if available, fallback to "l2"
             space = "l2"
             if hasattr(store, "metadata") and store.metadata:
                 space = store.metadata.get("hnsw:space", "l2").lower()
@@ -54,10 +80,8 @@ def execute_retrieval(
                 space = store._collection.metadata.get("hnsw:space", "l2").lower()
 
             if space == "cosine":
-                # Cosine distance = 1 - cosine similarity
                 distance_limit = 1.0 - threshold
             else:
-                # L2 distance conversion: similarity = 1 / (1 + distance)
                 distance_limit = (1.0 / threshold) - 1.0
 
             dense_results = [r for r in dense_results if r.distance < distance_limit]
@@ -94,13 +118,13 @@ def execute_retrieval(
             for idx, score in sorted_scores:
                 pseudo_distance = 1.0 / (1.0 + score)
                 bm25_results.append(SearchResult(
-                    id=ids[idx],
+                    doc_id=ids[idx],
                     text=documents[idx],
                     metadata=metadatas[idx] if metadatas else {},
                     distance=pseudo_distance
                 ))
 
-    # 3. Apply Multi-Method Fusion Selection
+    # 3. Multi-Method Fusion Selection
     if search_method == "dense":
         final_candidates = dense_results
     elif search_method == "bm25":
@@ -115,5 +139,9 @@ def execute_retrieval(
         final_candidates = reranker.rerank(query, final_candidates, top_k=rerank_top_k)
     else:
         final_candidates = final_candidates[:top_k]
+
+    # 5. Expand to Parent Contexts if requested
+    if resolve_parents:
+        final_candidates = _resolve_parent_chunks(final_candidates)
 
     return final_candidates
