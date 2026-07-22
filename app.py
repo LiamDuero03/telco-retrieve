@@ -1775,10 +1775,20 @@ else:
 
                 if ("review_state" not in st.session_state or
                         st.session_state.get("review_file") != str(review_path)):
-                    st.session_state["review_state"] = {
-                        i: {"status": "pending", "answer": q.get("reference_answer", "") or ""}
-                        for i, q in enumerate(questions)
-                    }
+                    
+                    st.session_state["review_state"] = {}
+                    for i, q in enumerate(questions):
+                        # Use explicitly saved review_status if available, otherwise infer from validated flag
+                        if "review_status" in q:
+                            initial_status = q["review_status"]
+                        else:
+                            initial_status = "approved" if q.get("validated") is True else "pending"
+                        
+                        st.session_state["review_state"][i] = {
+                            "status": initial_status, 
+                            "answer": q.get("reference_answer", "") or ""
+                        }
+                        
                     st.session_state["review_file"] = str(review_path)
 
                 for i, q in enumerate(questions):
@@ -1792,14 +1802,21 @@ else:
 
                     # ── Status Badge for Header ─────────────────────────────
                     status_badge = {
-                        "pending":   "⏳ PENDING",
-                        "approved":  "✅ APPROVED",
-                        "corrected": "✏️ CORRECTED",
-                        "rejected":  "❌ REJECTED",
-                    }.get(state["status"], "⏳ PENDING")
+                        "pending":   "👤 Needs Review",
+                        "approved":  "✅ Approved",
+                        "corrected": "✏️ Corrected",
+                        "rejected":  "❌ Rejected",
+                    }.get(state["status"], "👤 Needs Review")
 
-                    val_badge = (" ✅ validated" if val_passed is True
-                                 else " ⚠️ validation flagged" if val_passed is False else "")
+                    if val_passed is True:
+                        val_badge = " · [🤖 LLM-Passed]"
+                    elif val_passed is False:
+                        val_badge = " · [⚠️ LLM-Flagged]"
+                    else:
+                        val_badge = ""
+                    
+                    # Include the status badge directly in the expander header
+                    header = f"[{status_badge}] · Q{i+1} · [{fmt} / {difficulty}]{val_badge} · {q['question'][:50]}..."
                     
                     # Include the status badge directly in the expander header
                     header = f"[{status_badge}] · Q{i+1} · [{fmt} / {difficulty}]{val_badge} · {q['question'][:50]}..."
@@ -1890,50 +1907,56 @@ else:
                             f"{rejected_count} rejected · {pending_count} pending**")
 
                 is_draft = "draft_questions" in review_path.parts
-                btn_label = "💾 Merge approved into eval set" if is_draft else "💾 Save updates to eval set"
-                
-                if st.button(btn_label, type="primary", key="merge_btn"):
-                    if is_draft:
-                        # Standard Draft Mode: Merge into eval set
-                        draft_name = review_path.name
-                        target_name = draft_name[6:] if draft_name.startswith("draft_") else draft_name
-                        
+                all_reviewed = all(s["status"] != "pending" for s in st.session_state["review_state"].values())
+
+                if st.button("💾 Save updates", type="primary", key="save_updates_btn"):
+                    updated_questions = []
+                    for i, q in enumerate(questions):
+                        state = st.session_state["review_state"][i]
+                        q2 = dict(q)
+                        q2["reference_answer"] = state["answer"]
+                        q2["review_status"] = state["status"]
+                        q2["validated"] = state["status"] in ("approved", "corrected")
+                        if state["status"] == "corrected":
+                            q2["generated"] = True
+                        updated_questions.append(q2)
+                    
+                    # 1. ALWAYS save back to the exact same file being viewed
+                    review_path.write_text(_json2.dumps({"questions": updated_questions}, indent=2, ensure_ascii=False), encoding="utf-8")
+                    st.success(f"Saved updates to {review_path.name}")
+                    
+                    # 2. If it's a draft and completely finished, trigger the promotion popup
+                    if is_draft and all_reviewed:
+                        st.session_state["prompt_promote"] = True
+                    else:
+                        st.session_state["prompt_promote"] = False
+
+                # ── The "Popup" (Conditional UI for Promotion) ──
+                if st.session_state.get("prompt_promote"):
+                    st.warning("🎉 All questions in this draft have been reviewed! Would you like to move this to the official evaluation set?")
+                    col_p1, col_p2 = st.columns(2)
+                    
+                    if col_p1.button("Yes, promote to eval set", type="primary"):
+                        target_name = review_path.name[6:] if review_path.name.startswith("draft_") else review_path.name
                         eval_path = _Path2("configs/eval_questions") / target_name
                         eval_path.parent.mkdir(parents=True, exist_ok=True)
-                        existing = {"questions": []}
-                        if eval_path.exists():
-                            existing = _json2.loads(eval_path.read_text(encoding="utf-8"))
-                        to_add = []
-                        for i, q in enumerate(questions):
-                            state = st.session_state["review_state"][i]
-                            if state["status"] in ("approved", "corrected"):
-                                q2 = dict(q)
-                                q2["reference_answer"] = state["answer"]
-                                q2["validated"] = True
-                                q2["generated"] = state["status"] == "corrected"
-                                to_add.append(q2)
-                        existing["questions"].extend(to_add)
-                        eval_path.write_text(_json2.dumps(existing, indent=2, ensure_ascii=False),
-                                             encoding="utf-8")
-                        st.success(f"Merged {len(to_add)} questions into {eval_path}")
-                    else:
-                        # Editing Mode: Overwrite an already validated set
-                        to_keep = []
-                        for i, q in enumerate(questions):
-                            state = st.session_state["review_state"][i]
-                            
-                            # Dropping any questions explicitly marked as "Rejected"
-                            if state["status"] != "rejected":
-                                q2 = dict(q)
-                                q2["reference_answer"] = state["answer"]
-                                if state["status"] == "corrected":
-                                    q2["generated"] = True
-                                to_keep.append(q2)
                         
-                        review_path.write_text(_json2.dumps({"questions": to_keep}, indent=2, ensure_ascii=False),
-                                             encoding="utf-8")
-                        dropped_count = len(questions) - len(to_keep)
-                        st.success(f"Saved {len(to_keep)} questions to {review_path} (Dropped {dropped_count} rejected)")
+                        # Load the latest saved questions and filter out rejected ones for the final production set
+                        current_data = _json2.loads(review_path.read_text(encoding="utf-8"))
+                        final_qs = [q for q in current_data["questions"] if q.get("review_status") != "rejected"]
+                        
+                        eval_path.write_text(_json2.dumps({"questions": final_qs}, indent=2, ensure_ascii=False), encoding="utf-8")
+                        review_path.unlink() # Delete the draft
+                        
+                        st.session_state["prompt_promote"] = False
+                        st.session_state.pop("review_state", None)
+                        st.session_state.pop("review_file", None)
+                        st.success(f"Moved successfully to {eval_path}!")
+                        st.rerun()
+                        
+                    if col_p2.button("No, keep as draft"):
+                        st.session_state["prompt_promote"] = False
+                        st.rerun()
 
     # ── QNA INFO ─────────────────────────────────────────────────────────────
     with tab_qna_info:
