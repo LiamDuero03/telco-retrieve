@@ -240,7 +240,7 @@ open-telco-rag ask "What does TS 28.312 define for intent?" \
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--source-type` | `dense` | type of data source |
+| `--source-type` | `oran` | Source type |
 | `--model` | `minilm` | Embedding model key |
 | `--db-path` | `chroma_db` | ChromaDB storage path |
 | `--search-method` | `dense` | Multi-method search routing pass algorithm selection: `dense`, `bm25`, or `hybrid` |
@@ -317,7 +317,18 @@ open-telco-rag delete my_collection --db-path chroma_db
 | Flag | Default | Description |
 |------|---------|-------------|
 | `collection` | required | Name of the ChromaDB collection to permanently delete |
-| `--db-path` | `chroma_db` | ChromaDB storage path
+| `--db-path` | `chroma_db` | ChromaDB storage path |
+
+### Info options
+
+```bash
+open-telco-rag info --db-path chroma_db --collection oran_bge
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--db-path` | `chroma_db` | ChromaDB storage path |
+| `--collection` | `None` | Collection name to inspect |
 
 
 ---

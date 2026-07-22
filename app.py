@@ -886,7 +886,20 @@ if is_rag:
                     total_expected = n * 2 if include_baseline else n
 
                     def _patched_eq(q, *args, **kwargs):
-                        qr = _orig_eq(q, *args, **kwargs)
+                        try:
+                            qr = _orig_eq(q, *args, **kwargs)
+                        except Exception as e:
+                            # Failsafe if evaluate_question completely crashes
+                            from open_telco_rag.evaluation.results import QuestionResult
+                            qr = QuestionResult(
+                                question=q.question, 
+                                corpus=q.corpus, 
+                                answer="", 
+                                sources=[], 
+                                chunks_used=0, 
+                                error=f"Fatal evaluation crash: {str(e)}"
+                            )
+                            
                         q_counter[0] += 1
                         idx = q_counter[0]
                         
@@ -905,7 +918,7 @@ if is_rag:
                                 f"correct={qr.answer_correctness:.2f}"
                             )
                         log_area.markdown("<div class='log-box'>" + "\n".join(log_lines[-20:]) + "</div>",
-                                         unsafe_allow_html=True)
+                                        unsafe_allow_html=True)
                         return qr
 
                     _eval_mod.evaluate_question = _patched_eq
@@ -1002,17 +1015,14 @@ if is_rag:
                         "average":               avg,
                         "bl_faithfulness":       _bl(baseline_result.mean_faithfulness)       if baseline_result else None,
                         "bl_answer_relevancy":   _bl(baseline_result.mean_answer_relevancy)   if baseline_result else None,
-                        "bl_context_recall":     _bl(baseline_result.mean_context_recall)     if baseline_result else None,
                         "bl_answer_correctness": _bl(baseline_result.mean_answer_correctness) if baseline_result else None,
                         "bl_average":            round(sum(v for v in [
                                                      baseline_result.mean_faithfulness,
                                                      baseline_result.mean_answer_relevancy,
-                                                     baseline_result.mean_context_recall,
                                                      baseline_result.mean_answer_correctness,
                                                  ] if v >= 0) / max(1, sum(1 for v in [
                                                      baseline_result.mean_faithfulness,
                                                      baseline_result.mean_answer_relevancy,
-                                                     baseline_result.mean_context_recall,
                                                      baseline_result.mean_answer_correctness,
                                                  ] if v >= 0)), 3) if baseline_result else None,
                     }
@@ -1150,7 +1160,6 @@ if is_rag:
                         has_baseline = "bl_average" in df.columns and df["bl_average"].notna().any()
                         if has_baseline:
                             df["Δ correctness"] = (df["answer_correctness"] - df["bl_answer_correctness"]).round(3)
-                            df["Δ recall"]      = (df["context_recall"]     - df["bl_context_recall"]).round(3)
                             df["Δ avg"]         = (df["average"]            - df["bl_average"]).round(3)
 
                         display_cols = {
@@ -1183,17 +1192,16 @@ if is_rag:
                         }
                         if has_baseline:
                             display_cols.update({
-                                "bl_answer_correctness": "BL Correctness",
-                                "bl_context_recall": "BL Recall", "bl_average": "BL Avg",
-                                "Δ correctness": "Δ Correctness", "Δ recall": "Δ Recall",
+                                "bl_answer_correctness": "BL Correctness", "bl_average": "BL Avg",
+                                "Δ correctness": "Δ Correctness",
                                 "Δ avg": "Δ Avg",
                             })
                         df_display = df[[c for c in display_cols if c in df.columns]].rename(columns=display_cols)
                         col_config = {k: st.column_config.NumberColumn(format="%.3f")
                                     for k in ["RAG Avg","Faithful","Relevancy","Similarity",
-                                                "Recall","Correctness","BL Correctness","BL Recall","BL Avg"]}
+                                                "Recall","Correctness","BL Correctness","BL Avg"]}
                         col_config.update({k: st.column_config.NumberColumn(format="%+.3f")
-                                        for k in ["Δ Correctness","Δ Recall","Δ Avg"]})
+                                        for k in ["Δ Correctness","Δ Avg"]})
                         col_config.update({
                                         "Search Latency": st.column_config.NumberColumn(format="%.2f s"),
                                         "Rerank Latency": st.column_config.NumberColumn(format="%.2f s"),
