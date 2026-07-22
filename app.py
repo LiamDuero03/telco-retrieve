@@ -1475,6 +1475,14 @@ else:
             if not st.session_state["qspec_list"]:
                 st.warning("Select at least one question type.")
             else:
+                # ── 1. Create Progress Bar FIRST so it appears ABOVE CMD log box ──
+                gen_progress_bar = st.progress(0.0, text="Initializing async pipeline...")
+                
+                def _progress_cb(current, total, text):
+                    ratio = min(1.0, max(0.0, current / max(1, total)))
+                    gen_progress_bar.progress(ratio, text=text)
+
+                # ── 2. Create Log Box SECOND so CMD output displays BELOW progress bar ──
                 log_box   = st.empty()
                 log_lines = [f"Corpus: {source_type}  ·  source: {qna_source}", ""]
 
@@ -1513,7 +1521,6 @@ else:
                                        "max_concurrency": genqa_concurrency},
                         })
 
-                    
                     if not st.session_state.get("qspec_list"):
                         st.warning("Please add at least one question group specification.")
                         st.stop()
@@ -1535,7 +1542,7 @@ else:
                             "params": {"num_competitors": num_competitors}
                         })
 
-                    # Inject Validate Answerable Block Mode]
+                    # Inject Validate Answerable Block Mode
                     if validate_answer_mode != "Disabled":
                         block_specs.append({
                             "type": "ValidateAnswerableBlock",
@@ -1560,7 +1567,7 @@ else:
                                 "judge_models": jury_models,
                                 "no_context_threshold": no_ctx_thresh,
                                 "with_context_threshold": with_ctx_thresh,
-                                "drop_failures": False
+                                "drop_failures": skip_review
                             }
                         })
 
@@ -1573,22 +1580,33 @@ else:
                     flow.set_model_config(generator="openrouter", model=qna_gen_model)
                     
                     # Bind validation credentials if any judge or validate pass is active
-                    if any([j_grounding, j_domain, j_answerability, j_faithfulness, j_semantic, j_relevance]) or validate_answer_mode != "Disabled":
+                    if any([j_grounding, j_domain, j_answerability, j_faithfulness, j_semantic, j_empirical]) or validate_answer_mode != "Disabled":
                         flow.set_validation_model_config(generator="openrouter", model=qna_val_model)
 
-                    qa_pairs = flow.generate(source, source_type, log=_log)
-                    _log(f"Generated {len(qa_pairs)} questions")
+                    # Execute flow passing the progress callback
+                    qa_pairs = flow.generate(source, source_type, log=_log, progress=_progress_cb)
+                    gen_progress_bar.progress(1.0, text="Generation Complete! ✓")
+                    _log(f"Generated {len(qa_pairs)} candidate questions")
 
                     # Retrieve and clean the custom set name
                     safe_set_name = genqa_set_name.strip() or source_type
                     eval_path = _Path("configs/eval_questions") / f"{safe_set_name}.json"
 
-                    # Check for Auto-Merge / Skip Review functionality
+                    # ── 3. Auto-Merge / Skip Review: STRICT FILTERING ──
+                    # ── Auto-Merge / Skip Review: STRICT FILTERING ──
                     if skip_review:
-                        _log("Skip review active: Auto-approving and merging directly into production eval set...")
-                        for q in qa_pairs:
+                        # Filter out questions that explicitly failed validation
+                        approved_qa_pairs = [q for q in qa_pairs if q.get("validation_passed", True) is not False]
+                        dropped_count = len(qa_pairs) - len(approved_qa_pairs)
+
+                        if dropped_count > 0:
+                            _log(f"Dropped {dropped_count} question(s) that failed validation checks.")
+
+                        _log(f"Auto-approving and merging {len(approved_qa_pairs)} passed questions into production eval set...")
+                        
+                        for q in approved_qa_pairs:
                             q["validated"] = True
-                            q["generated"] = False  # Set to approved target layout status
+                            q["generated"] = False  # Set to approved status
                         
                         eval_path.parent.mkdir(parents=True, exist_ok=True)
                         existing = {"questions": []}
@@ -1598,12 +1616,13 @@ else:
                             except Exception:
                                 existing = {"questions": []}
                         
-                        existing["questions"].extend(qa_pairs)
+                        existing["questions"].extend(approved_qa_pairs)
                         eval_path.write_text(json.dumps(existing, indent=2, ensure_ascii=False), encoding="utf-8")
-                        _log(f"Successfully auto-merged {len(qa_pairs)} items into {eval_path}")
-                        st.success(f"Successfully auto-merged {len(qa_pairs)} questions directly into evaluation set! ✓")
+                        
+                        _log(f"Successfully auto-merged {len(approved_qa_pairs)} items into {eval_path}")
+                        st.success(f"Successfully auto-merged {len(approved_qa_pairs)} questions! (Dropped {dropped_count} failed items) ✓")
                     else:
-                        # Standard sequence: Save temporary review file layout via core utility
+                        # Standard Draft Mode
                         safe_set_name = genqa_set_name.strip() or source_type
                         eval_path = _Path("configs/eval_questions") / f"{safe_set_name}.json"
                         
@@ -1701,27 +1720,37 @@ else:
 
         # ── Dropdown / File picker for Drafts ──────────────────────────────
         draft_dir = _Path2("draft_questions")
-        available_drafts = [str(p) for p in sorted(draft_dir.glob("*.json"))] if draft_dir.exists() else []
-        default_draft = st.session_state.get("last_draft_path", "")
+        eval_dir  = _Path2("configs/eval_questions")
+        draft_files = [str(p) for p in sorted(draft_dir.glob("*.json"))] if draft_dir.exists() else []        
+        eval_files  = [str(p) for p in sorted(eval_dir.glob("*.json"))] if eval_dir.exists() else []
+        available_files = draft_files + eval_files
+        default_file = st.session_state.get("last_file_path", "")
 
-        if available_drafts:
-            # Auto-select the most recently generated draft if available
-            default_idx = available_drafts.index(default_draft) if default_draft in available_drafts else 0
-            draft_options = available_drafts + ["Custom path..."]
+        def _format_file_label(p_str):
+            if p_str == "Custom path...": return p_str
+            p = _Path2(p_str)
+            if "draft_questions" in p.parts: return f"📝 [Draft] {p.name}"
+            if "eval_questions" in p.parts:  return f"✅ [Validated] {p.name}"
+            return p.name
+
+        if available_files:
+            default_idx = available_files.index(default_file) if default_file in available_files else 0
+            file_options = available_files + ["Custom path..."]
             
-            selected_draft = st.selectbox(
-                "Select Draft QnA set (.json)",
-                options=draft_options,
+            selected_file = st.selectbox(
+                "Select QnA set (.json)",
+                options=file_options,
                 index=default_idx,
-                key="review_draft_select",
-                help="Select an unapproved draft QnA file from draft_questions/"
+                format_func=_format_file_label,
+                key="review_file_select",
+                help="Select a draft to approve, or an already validated set to review/edit."
             )
-            if selected_draft == "Custom path...":
-                review_path_str = st.text_input("Custom Draft QnA path", value=default_draft, key="review_custom_path")
+            if selected_file == "Custom path...":
+                review_path_str = st.text_input("Custom QnA path", value=default_file, key="review_custom_path")
             else:
-                review_path_str = selected_draft
+                review_path_str = selected_file
         else:
-            review_path_str = st.text_input("Draft QnA file (.json)", value=default_draft,
+            review_path_str = st.text_input("QnA file (.json)", value=default_file,
                                             placeholder="draft_questions/draft_oran.json",
                                             key="review_path_fallback")
 
@@ -1761,9 +1790,19 @@ else:
                     corpus_q   = q.get("corpus", source_type)
                     state      = st.session_state["review_state"][i]
 
+                    # ── Status Badge for Header ─────────────────────────────
+                    status_badge = {
+                        "pending":   "⏳ PENDING",
+                        "approved":  "✅ APPROVED",
+                        "corrected": "✏️ CORRECTED",
+                        "rejected":  "❌ REJECTED",
+                    }.get(state["status"], "⏳ PENDING")
+
                     val_badge = (" ✅ validated" if val_passed is True
                                  else " ⚠️ validation flagged" if val_passed is False else "")
-                    header = f"Q{i+1} · [{fmt} / {difficulty}]{val_badge} · {q['question'][:60]}..."
+                    
+                    # Include the status badge directly in the expander header
+                    header = f"[{status_badge}] · Q{i+1} · [{fmt} / {difficulty}]{val_badge} · {q['question'][:50]}..."
 
                     with st.expander(header):
                         st.markdown(f"**Question:** {q['question']}")
@@ -1784,14 +1823,12 @@ else:
                             )
                         with col_s2:
                             if portal_url:
-                                st.link_button("🌐 Open portal", portal_url,
-                                               width="stretch")
+                                st.link_button("🌐 Open portal", portal_url, width="stretch")
                         with col_s3:
                             if deep_link and deep_link != portal_url:
-                                st.link_button("📄 Open doc", deep_link,
-                                               width="stretch")
+                                st.link_button("📄 Open doc", deep_link, width="stretch")
 
-                        # ── Source chunk text ─────────────────────────────
+                        # ── Source chunk text (Fixed High-Contrast Styling) ──────────
                         if chunk_id:
                             with st.expander("📖 View source chunk text", expanded=False):
                                 chunk_text = _fetch_chunk_text(
@@ -1799,9 +1836,9 @@ else:
                                 )
                                 if chunk_text:
                                     st.markdown(
-                                        f"<div style='background:#f8f8f8; border:1px solid #e0e0e0; "
-                                        f"border-left:3px solid #1a6bbf; border-radius:6px; "
-                                        f"padding:0.75rem 1rem; font-size:0.82rem; "
+                                        f"<div style='background:#f8fafc; color:#0f172a; "
+                                        f"border:1px solid #cbd5e1; border-left:4px solid #1a6bbf; "
+                                        f"border-radius:6px; padding:0.75rem 1rem; font-size:0.82rem; "
                                         f"line-height:1.6; white-space:pre-wrap; "
                                         f"font-family:monospace;'>{chunk_text[:3000]}</div>",
                                         unsafe_allow_html=True,
@@ -1827,11 +1864,20 @@ else:
                             value=state["answer"], key=f"answer_{i}", height=80)
                         state["answer"] = edited_answer
 
+                        # ── Action Buttons with Instant UI Refresh ─────────
                         col_r1, col_r2, col_r3 = st.columns(3)
-                        if col_r1.button("✅ Approve",        key=f"approve_{i}"): state["status"] = "approved"
-                        if col_r2.button("✏️ Mark corrected", key=f"correct_{i}"): state["status"] = "corrected"
-                        if col_r3.button("❌ Reject",          key=f"reject_{i}"):  state["status"] = "rejected"
-                        st.caption(f"Status: **{state['status']}**")
+                        if col_r1.button("✅ Approve", key=f"approve_{i}"): 
+                            state["status"] = "approved"
+                            st.rerun()
+                        if col_r2.button("✏️ Mark corrected", key=f"correct_{i}"): 
+                            state["status"] = "corrected"
+                            st.rerun()
+                        if col_r3.button("❌ Reject", key=f"reject_{i}"):  
+                            state["status"] = "rejected"
+                            st.rerun()
+                        
+                        st.caption(f"Current Status: **{state['status'].upper()}**")
+
 
                 st.markdown("---")
                 approved_count = sum(1 for s in st.session_state["review_state"].values()
@@ -1843,28 +1889,51 @@ else:
                 st.markdown(f"**{approved_count} approved/corrected · "
                             f"{rejected_count} rejected · {pending_count} pending**")
 
-                if st.button("💾 Merge approved into eval set", type="primary", key="merge_btn"):
-                    draft_name = review_path.name
-                    target_name = draft_name[6:] if draft_name.startswith("draft_") else draft_name
-                    
-                    eval_path = _Path2("configs/eval_questions") / target_name
-                    eval_path.parent.mkdir(parents=True, exist_ok=True)
-                    existing = {"questions": []}
-                    if eval_path.exists():
-                        existing = _json2.loads(eval_path.read_text(encoding="utf-8"))
-                    to_add = []
-                    for i, q in enumerate(questions):
-                        state = st.session_state["review_state"][i]
-                        if state["status"] in ("approved", "corrected"):
-                            q2 = dict(q)
-                            q2["reference_answer"] = state["answer"]
-                            q2["validated"] = True
-                            q2["generated"] = state["status"] == "corrected"
-                            to_add.append(q2)
-                    existing["questions"].extend(to_add)
-                    eval_path.write_text(_json2.dumps(existing, indent=2, ensure_ascii=False),
-                                         encoding="utf-8")
-                    st.success(f"Merged {len(to_add)} questions into {eval_path}")
+                is_draft = "draft_questions" in review_path.parts
+                btn_label = "💾 Merge approved into eval set" if is_draft else "💾 Save updates to eval set"
+                
+                if st.button(btn_label, type="primary", key="merge_btn"):
+                    if is_draft:
+                        # Standard Draft Mode: Merge into eval set
+                        draft_name = review_path.name
+                        target_name = draft_name[6:] if draft_name.startswith("draft_") else draft_name
+                        
+                        eval_path = _Path2("configs/eval_questions") / target_name
+                        eval_path.parent.mkdir(parents=True, exist_ok=True)
+                        existing = {"questions": []}
+                        if eval_path.exists():
+                            existing = _json2.loads(eval_path.read_text(encoding="utf-8"))
+                        to_add = []
+                        for i, q in enumerate(questions):
+                            state = st.session_state["review_state"][i]
+                            if state["status"] in ("approved", "corrected"):
+                                q2 = dict(q)
+                                q2["reference_answer"] = state["answer"]
+                                q2["validated"] = True
+                                q2["generated"] = state["status"] == "corrected"
+                                to_add.append(q2)
+                        existing["questions"].extend(to_add)
+                        eval_path.write_text(_json2.dumps(existing, indent=2, ensure_ascii=False),
+                                             encoding="utf-8")
+                        st.success(f"Merged {len(to_add)} questions into {eval_path}")
+                    else:
+                        # Editing Mode: Overwrite an already validated set
+                        to_keep = []
+                        for i, q in enumerate(questions):
+                            state = st.session_state["review_state"][i]
+                            
+                            # Dropping any questions explicitly marked as "Rejected"
+                            if state["status"] != "rejected":
+                                q2 = dict(q)
+                                q2["reference_answer"] = state["answer"]
+                                if state["status"] == "corrected":
+                                    q2["generated"] = True
+                                to_keep.append(q2)
+                        
+                        review_path.write_text(_json2.dumps({"questions": to_keep}, indent=2, ensure_ascii=False),
+                                             encoding="utf-8")
+                        dropped_count = len(questions) - len(to_keep)
+                        st.success(f"Saved {len(to_keep)} questions to {review_path} (Dropped {dropped_count} rejected)")
 
     # ── QNA INFO ─────────────────────────────────────────────────────────────
     with tab_qna_info:
