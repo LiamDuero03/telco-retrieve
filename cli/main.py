@@ -361,7 +361,8 @@ def _run_search(args) -> None:
         top_k        = args.top_k,
         reranker     = reranker,
         rerank_top_k = args.rerank_top_k,
-        search_method = getattr(args, "search_method", "dense")
+        search_method = getattr(args, "search_method", "dense"),
+        resolve_parents = getattr(args, "resolve_parents", False),
     )
 
     if not results:
@@ -414,7 +415,8 @@ def _run_ask(args) -> None:
         top_k        = args.top_k,
         reranker     = reranker,
         rerank_top_k = args.rerank_top_k,
-        search_method = getattr(args, "search_method", "dense")
+        search_method = getattr(args, "search_method", "dense"),
+        resolve_parents = getattr(args, "resolve_parents", False),
     )
     answer = generate(args.question, results, source_type=args.source_type)
 
@@ -500,6 +502,7 @@ def _run_evaluate(args) -> None:
             rag_generator_model=rag_generator_model,
             inject_metadata   = args.inject_metadata,
             search_method=getattr(args, "search_method", "dense"),
+            resolve_parents   = getattr(args, "resolve_parents", False),
         )
 
         if not args.no_leaderboard:
@@ -664,6 +667,8 @@ def _run_info(args) -> None:
 
 def _run_delete_collection(args) -> None:
     import chromadb
+    from open_telco_rag.stores.fts import FTSStore
+    
     client = chromadb.PersistentClient(path=args.db_path)
     
     print(f"\nAttempting to delete collection '{args.collection}' from '{args.db_path}'...")
@@ -677,6 +682,7 @@ def _run_delete_collection(args) -> None:
             return
 
         client.delete_collection(name=args.collection)
+        FTSStore(path=args.db_path, collection_name=args.collection).delete()
         print(f"✅ Successfully deleted collection '{args.collection}'.")
     except Exception as e:
         print(f"❌ Failed to delete collection: {e}")

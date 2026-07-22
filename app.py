@@ -1306,6 +1306,9 @@ if is_rag:
                         if st.button("🗑️ Delete", key=f"del_{col.name}", help=f"Permanently delete {col.name}"):
                             try:
                                 client.delete_collection(col.name)
+
+                                from open_telco_rag.stores.fts import FTSStore
+                                FTSStore(path=db_path, collection_name=col.name).delete()
                                 st.success(f"Successfully deleted collection: {col.name}")
                                 st.rerun() # Refresh the UI immediately
                             except Exception as e:

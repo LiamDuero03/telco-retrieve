@@ -2,6 +2,7 @@ from __future__ import annotations
 import math
 from typing import Any
 from open_telco_rag.types import SearchResult, Embedder
+from open_telco_rag.stores.fts import FTSStore
 
 
 def _resolve_parent_chunks(results: list[SearchResult]) -> list[SearchResult]:
@@ -88,41 +89,29 @@ def execute_retrieval(
 
     # 2. Execute BM25 Keyword Filter Pass
     if search_method in ["bm25", "hybrid"]:
-        all_records = store._collection.get(include=["documents", "metadatas"])
-        documents = all_records.get("documents", [])
-        ids = all_records.get("ids", [])
-        metadatas = all_records.get("metadatas", [])
+        store_path = getattr(store, "path", "chroma_db")
+        store_col = getattr(store, "collection_name", "documents")
+        
+        fts_store = FTSStore(path=store_path, collection_name=store_col)
+        bm25_hits = fts_store.search(query, top_k=candidate_k)
 
-        if documents:
-            query_terms = [w.lower() for w in query.split() if len(w) > 1]
-            doc_tokens = [[w.lower() for w in doc.split()] for doc in documents]
-            avg_doc_len = sum(len(d) for d in doc_tokens) / len(doc_tokens) if doc_tokens else 1
+        if bm25_hits:
+            hit_ids = [doc_id for doc_id, _ in bm25_hits]
+            chroma_records = store._collection.get(ids=hit_ids, include=["documents", "metadatas"])
             
-            k1, b = 1.5, 0.75
-            scores = []
-
-            for idx, tokens in enumerate(doc_tokens):
-                score = 0.0
-                doc_len = len(tokens)
-                for term in query_terms:
-                    tf = tokens.count(term)
-                    if tf > 0:
-                        df = sum(1 for d in doc_tokens if term in d)
-                        idf = math.log((len(doc_tokens) - df + 0.5) / (df + 0.5) + 1.0)
-                        score += idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * (doc_len / avg_doc_len)))
-                if score > 0:
-                    scores.append((idx, score))
-
-            sorted_scores = sorted(scores, key=lambda x: x[1], reverse=True)[:candidate_k]
+            id_to_doc = dict(zip(chroma_records["ids"], chroma_records["documents"]))
+            id_to_meta = dict(zip(chroma_records["ids"], chroma_records["metadatas"]))
             
-            for idx, score in sorted_scores:
-                pseudo_distance = 1.0 / (1.0 + score)
-                bm25_results.append(SearchResult(
-                    doc_id=ids[idx],
-                    text=documents[idx],
-                    metadata=metadatas[idx] if metadatas else {},
-                    distance=pseudo_distance
-                ))
+            for doc_id, score in bm25_hits:
+                if doc_id in id_to_doc:
+                    pseudo_distance = 1.0 / (1.0 + score)
+                    bm25_results.append(SearchResult(
+                        doc_id=doc_id,
+                        text=id_to_doc[doc_id],
+                        metadata=id_to_meta.get(doc_id, {}),
+                        distance=pseudo_distance
+                    ))
+
 
     # 3. Multi-Method Fusion Selection
     if search_method == "dense":
