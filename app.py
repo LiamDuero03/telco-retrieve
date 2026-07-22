@@ -1703,14 +1703,13 @@ else:
 
             return portal, deep_link
 
-        def _fetch_chunk_text(chunk_id: str, corpus: str, db_path_str: str,
-                               model_key_str: str) -> str | None:
+        def _fetch_chunk_text(chunk_id: str, db_path_str: str, collection_name: str) -> str | None:
             if not chunk_id:
                 return None
             try:
                 import chromadb
                 client     = chromadb.PersistentClient(path=db_path_str)
-                collection = client.get_collection(f"{corpus}_{model_key_str}")
+                collection = client.get_collection(collection_name)
                 result     = collection.get(ids=[chunk_id], include=["documents", "metadatas"])
                 if result["documents"]:
                     return result["documents"][0]
@@ -1753,16 +1752,6 @@ else:
             review_path_str = st.text_input("QnA file (.json)", value=default_file,
                                             placeholder="draft_questions/draft_oran.json",
                                             key="review_path_fallback")
-
-        col_rv1, col_rv2 = st.columns(2)
-        with col_rv1:
-            review_db_path = st.text_input("ChromaDB path (for chunk lookup)",
-                                            value="chroma_db", key="review_db_path")
-        with col_rv2:
-            review_embedder = st.selectbox("Embedder (collection)",
-                                            options=list(_load_embedder_keys().keys()),
-                                            format_func=lambda k: _load_embedder_keys()[k],
-                                            key="review_embedder")
 
         if review_path_str:
             review_path = _Path2(review_path_str)
@@ -1815,10 +1804,7 @@ else:
                     else:
                         val_badge = ""
                     
-                    # Include the status badge directly in the expander header
-                    header = f"[{status_badge}] · Q{i+1} · [{fmt} / {difficulty}]{val_badge} · {q['question'][:50]}..."
-                    
-                    # Include the status badge directly in the expander header
+                    # Include the status badge directly in the expander header (Duplication removed)
                     header = f"[{status_badge}] · Q{i+1} · [{fmt} / {difficulty}]{val_badge} · {q['question'][:50]}..."
 
                     with st.expander(header):
@@ -1848,9 +1834,15 @@ else:
                         # ── Source chunk text (Fixed High-Contrast Styling) ──────────
                         if chunk_id:
                             with st.expander("📖 View source chunk text", expanded=False):
+                                # Dynamically resolve the target collection from the sidebar inputs
+                                target_col = qna_collection.strip() if qna_collection else f"{corpus_q}_{model_key}"
+                                
                                 chunk_text = _fetch_chunk_text(
-                                    chunk_id, corpus_q, review_db_path, review_embedder,
+                                    chunk_id=chunk_id, 
+                                    db_path_str=db_path, 
+                                    collection_name=target_col
                                 )
+                                
                                 if chunk_text:
                                     st.markdown(
                                         f"<div style='background:#f8fafc; color:#0f172a; "
