@@ -177,6 +177,12 @@ def main(argv: list[str] | None = None) -> None:
     p_info.add_argument("--db-path",    default="chroma_db", help="ChromaDB path")
     p_info.add_argument("--collection", default=None,        help="Collection name")
 
+
+    # ── delete-collection ─────────────────────────────────────────────────────
+    p_delete = sub.add_parser("delete", help="Delete a collection from the vector database")
+    p_delete.add_argument("collection", help="The name of the collection to delete")
+    p_delete.add_argument("--db-path", default="chroma_db", help="ChromaDB path (default: chroma_db)")
+
     args = parser.parse_args(argv)
 
     if not args.command:
@@ -193,6 +199,8 @@ def main(argv: list[str] | None = None) -> None:
         _run_evaluate(args)
     elif args.command == "info":
         _run_info(args)
+    elif args.command == "delete":
+        _run_delete_collection(args)
 
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
@@ -508,6 +516,8 @@ def _run_evaluate(args) -> None:
             )
 
 
+
+
 def _update_leaderboard(
     leaderboard_path: Path,
     result,
@@ -644,6 +654,26 @@ def _run_info(args) -> None:
     for col in collections:
         c = client.get_collection(col.name)
         print(f"  {col.name}: {c.count()} chunks")
+
+
+def _run_delete_collection(args) -> None:
+    import chromadb
+    client = chromadb.PersistentClient(path=args.db_path)
+    
+    print(f"\nAttempting to delete collection '{args.collection}' from '{args.db_path}'...")
+    
+    try:
+        # Check if it exists first to provide a better error message
+        existing_collections = [c.name for c in client.list_collections()]
+        if args.collection not in existing_collections:
+            print(f"❌ Error: Collection '{args.collection}' does not exist.")
+            print(f"Available collections: {', '.join(existing_collections) if existing_collections else 'None'}")
+            return
+
+        client.delete_collection(name=args.collection)
+        print(f"✅ Successfully deleted collection '{args.collection}'.")
+    except Exception as e:
+        print(f"❌ Failed to delete collection: {e}")
 
 
 if __name__ == "__main__":

@@ -1248,6 +1248,7 @@ if is_rag:
             except Exception as e:
                 st.error(f"Could not load leaderboard: {e}")
 
+
     # ── DB INFO ───────────────────────────────────────────────────────────────
     with tab_info:
         if st.button("Refresh", key="info_refresh"):
@@ -1257,18 +1258,35 @@ if is_rag:
             client      = chromadb.PersistentClient(path=db_path)
             collections = client.list_collections()
             total       = sum(client.get_collection(c.name).count() for c in collections)
+            
             m1, m2, m3 = st.columns(3)
             m1.metric("Collections", len(collections))
             m2.metric("Total chunks", f"{total:,}")
             m3.metric("DB path", db_path)
             st.markdown("---")
+            
             if collections:
                 for col in sorted(collections, key=lambda c: c.name):
                     c = client.get_collection(col.name)
-                    st.markdown(f"<div class='col-row'>"
-                                f"<span class='col-name'>{col.name}</span>"
-                                f"<span class='col-count'>{c.count():,} chunks</span></div>",
-                                unsafe_allow_html=True)
+                    
+                    # Create columns to align the data with the delete button
+                    info_col, action_col = st.columns([5, 1])
+                    
+                    with info_col:
+                        st.markdown(f"<div class='col-row'>"
+                                    f"<span class='col-name'>{col.name}</span>"
+                                    f"<span class='col-count'>{c.count():,} chunks</span></div>",
+                                    unsafe_allow_html=True)
+                    
+                    with action_col:
+                        # Add a delete button with a unique key for each collection
+                        if st.button("🗑️ Delete", key=f"del_{col.name}", help=f"Permanently delete {col.name}"):
+                            try:
+                                client.delete_collection(col.name)
+                                st.success(f"Successfully deleted collection: {col.name}")
+                                st.rerun() # Refresh the UI immediately
+                            except Exception as e:
+                                st.error(f"Failed to delete {col.name}: {e}")
             else:
                 st.info(f"No collections found in '{db_path}'. Run ingest first.")
         except Exception as e:
@@ -1857,6 +1875,7 @@ else:
         import json as _json_info
         from pathlib import Path as _Path_info
 
+
         def _render_qna_directory(dir_path_str: str, title: str, is_draft: bool = False):
             dir_path = _Path_info(dir_path_str)
             st.markdown(f"#### {title}")
@@ -1883,20 +1902,43 @@ else:
                     badge = "Draft" if is_draft else "Validated"
                     badge_style = "background:#fff8e1;color:#8a6200;border-color:#f0d080;" if is_draft else "background:#e8f5e9;color:#2e7d32;border-color:#a5d6a7;"
                     
-                    st.markdown(
-                        f"<div class='col-row'>"
-                        f"<span class='col-name'>📄 {f.name} "
-                        f"<span class='model-tag' style='{badge_style}'>{badge}</span></span>"
-                        f"<span class='col-count'>{val_qs}/{num_qs} validated</span></div>",
-                        unsafe_allow_html=True
-                    )
+                    # Create columns to align the data with the delete button
+                    info_col, action_col = st.columns([5, 1])
+                    
+                    with info_col:
+                        st.markdown(
+                            f"<div class='col-row'>"
+                            f"<span class='col-name'>📄 {f.name} "
+                            f"<span class='model-tag' style='{badge_style}'>{badge}</span></span>"
+                            f"<span class='col-count'>{val_qs}/{num_qs} validated</span></div>",
+                            unsafe_allow_html=True
+                        )
+                    with action_col:
+                        # Add a physical delete button for the JSON file
+                        if st.button("🗑️ Delete", key=f"del_qna_{f.name}_{title}", help=f"Permanently delete {f.name}"):
+                            try:
+                                f.unlink()
+                                st.success(f"Successfully deleted QnA set: {f.name}")
+                                st.rerun() # Refresh the UI immediately
+                            except Exception as e:
+                                st.error(f"Failed to delete {f.name}: {e}")
+                                
                 except Exception:
-                    st.markdown(
-                        f"<div class='col-row'>"
-                        f"<span class='col-name'>📄 {f.name}</span>"
-                        f"<span class='col-count' style='color:#e74c3c;'>Error reading file</span></div>",
-                        unsafe_allow_html=True
-                    )
+                    info_col, action_col = st.columns([5, 1])
+                    with info_col:
+                        st.markdown(
+                            f"<div class='col-row'>"
+                            f"<span class='col-name'>📄 {f.name}</span>"
+                            f"<span class='col-count' style='color:#e74c3c;'>Error reading file</span></div>",
+                            unsafe_allow_html=True
+                        )
+                    with action_col:
+                        if st.button("🗑️ Delete", key=f"del_err_{f.name}_{title}"):
+                            try:
+                                f.unlink()
+                                st.rerun()
+                            except Exception:
+                                pass
             st.caption(f"**Total questions across {len(files)} sets:** {total_q}")
 
         _render_qna_directory("configs/eval_questions", "Validated QnA Sets")
