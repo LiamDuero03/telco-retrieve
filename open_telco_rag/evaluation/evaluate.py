@@ -5,6 +5,7 @@ Evaluation orchestrator for Open Telco RAG.
 from __future__ import annotations
 
 import time
+import tiktoken
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -33,6 +34,16 @@ def _build_generator(llm_call: Callable[[str, int], str], model_name: str | None
         model_name = "meta-llama/llama-3.1-8b-instruct"
         
     return OpenRouterGenerator(model=model_name)
+
+def _local_token_count(text: str) -> int:
+    """Calculates tokens locally using the cl100k_base encoding."""
+    if not text: return 0
+    try:
+        enc = tiktoken.get_encoding("cl100k_base")
+        return len(enc.encode(text))
+    except Exception:
+        # Fallback approximation if tiktoken fails
+        return int(len(str(text).split()) * 1.3)
 
 def _build_baseline_generator(llm_call: Callable[[str, int], str]):
     """Generator that answers from LLM knowledge only — no context chunks."""
@@ -67,7 +78,9 @@ def evaluate_question(
     debug:         bool  = False,
     rag_model_name: str | None = None,
     inject_metadata: bool = False, 
+    include_keywords: bool = False,  
     search_method: str = "dense",
+    resolve_parents:  bool = False,
 ) -> QuestionResult:
     """Run all applicable metrics for one question."""
     from open_telco_rag.core.pipeline import search, generate
@@ -76,6 +89,13 @@ def evaluate_question(
     active_question = q.question
     if inject_metadata and q.canonical_source:
         active_question = f"According to {q.corpus.upper()} document {q.canonical_source}, {q.question}"
+
+    # Prepare search query (appends keywords if flag is enabled)
+    search_query = active_question
+    if include_keywords and getattr(q, "keywords", None):
+        kw_str = " ".join(q.keywords) if isinstance(q.keywords, list) else str(q.keywords)
+        if kw_str.strip():
+            search_query = f"{active_question} Keywords: {kw_str}"
 
     result = QuestionResult(
         question=active_question, corpus=q.corpus,
@@ -93,38 +113,65 @@ def evaluate_question(
             result.gen_latency = time.perf_counter() - gen_start
             result.search_latency = 0.0
         else:
-            # Time the search retrieval pass
+            # 1. Time the base search retrieval pass (WITHOUT reranker)
             search_start = time.perf_counter()
-            retrieved = search(active_question, store=store, embedder=embedder,
-                               top_k=top_k, reranker=reranker, rerank_top_k=rerank_top_k,
-                               search_method=search_method) # PASSED DOWN
+            retrieved_candidates = search(
+                search_query, 
+                store=store, 
+                embedder=embedder,
+                top_k=top_k, 
+                reranker=None,  
+                rerank_top_k=top_k,
+                search_method=search_method,
+                resolve_parents=resolve_parents
+            )
             result.search_latency = time.perf_counter() - search_start
             
-            # Time the text generation pass
+            # 2. Time the Reranking pass & calculate its tokens
+            result.rerank_latency = 0.0
+            result.rerank_tokens = 0
+            
+            if reranker:
+                rerank_start = time.perf_counter()
+                
+                # Reranker processes the query + all retrieved candidate chunks
+                rerank_payload = search_query + " ".join([c.text for c in retrieved_candidates])
+                result.rerank_tokens = _local_token_count(rerank_payload)
+                
+                # Execute reranking explicitly
+                try:
+                    retrieved = reranker.rerank(active_question, retrieved_candidates, top_k=rerank_top_k)
+                except AttributeError:
+                    # Fallback if your reranker wrapper uses a different method name
+                    retrieved = retrieved_candidates[:rerank_top_k]
+                    
+                result.rerank_latency = time.perf_counter() - rerank_start
+            else:
+                retrieved = retrieved_candidates[:rerank_top_k]
+            
+            # 3. Time the text generation pass
             gen_start = time.perf_counter()
             generator = _build_generator(rag_llm_call or llm_call, model_name=rag_model_name)
             gen       = generate(active_question, retrieved, source_type=q.corpus, generator=generator)
             result.gen_latency = time.perf_counter() - gen_start
         
         result.latency = time.perf_counter() - start_time
-        usage = gen.get("usage", {})
         
-        result.prompt_tokens = usage.get("prompt_tokens", 0)
-        result.completion_tokens = usage.get("completion_tokens", 0)
-        result.total_tokens = usage.get("total_tokens", result.prompt_tokens + result.completion_tokens)
+        # 4. Local Token Counting (Replaces API Usage)
+        answer = gen.get("answer", "")
+        
+        # Generator processes the active question + the final filtered chunks
+        prompt_payload = active_question + " ".join([c.text for c in retrieved])
+        
+        result.prompt_tokens = _local_token_count(prompt_payload)
+        result.completion_tokens = _local_token_count(answer)
+        result.total_tokens = result.prompt_tokens + result.completion_tokens
 
-        # Extract nested prompt details (Cached input tokens)
-        prompt_details = usage.get("prompt_tokens_details", {}) or {}
-        result.cached_tokens = prompt_details.get("cached_tokens", 0)
+        # Zero out API-dependent advanced metrics since we are bypassing the API report
+        result.cached_tokens = 0
+        result.reasoning_tokens = 0
+        result.cost = 0.0  # Optional: You can recalculate cost here using result.total_tokens if desired
 
-        # Extract nested completion details (DeepSeek R1 / o1 thinking tokens)
-        comp_details = usage.get("completion_tokens_details", {}) or {}
-        result.reasoning_tokens = comp_details.get("reasoning_tokens", 0)
-
-        # Extract exact OpenRouter cost
-        result.cost = usage.get("cost", 0.0)
-
-        answer         = gen.get("answer", "")
         result.answer  = answer
         result.sources = gen.get("sources", [])
         result.chunks_used = gen.get("chunks_used", len(retrieved))
@@ -132,13 +179,30 @@ def evaluate_question(
         if debug:
             mode = "BASELINE" if baseline else "RAG"
             print(f"\n  [DEBUG] [{mode}] question: {active_question[:80]}")
+            print(f"  [DEBUG] [{mode}] search query: {search_query[:80]}")
             print(f"  [DEBUG] [{mode}] answer preview: {answer[:200]}")
 
-        # Use active_question for relevancy scoring
-        result.faithfulness     = faithfulness(answer, retrieved,
-                                               llm_call=llm_call, debug=debug)
-        result.answer_relevancy = answer_relevancy(active_question, answer, embedder,
-                                                   llm_call=llm_call, debug=debug)
+        if q.answer_type in ("mc", "tf"):
+            # Clean answers for exact matching
+            clean_ans = answer.strip().strip(".*`\"'").upper()
+            clean_ref = str(q.reference_answer).strip().upper()
+            
+            is_correct = 0.0
+            if clean_ref == clean_ans or f"ANSWER IS {clean_ref}" in clean_ans or clean_ans.startswith(clean_ref):
+                is_correct = 1.0
+                
+            result.faithfulness     = is_correct
+            result.answer_relevancy = 1.0
+            if q.reference_answer:
+                result.context_recall     = 1.0 if not baseline else 0.0
+                result.answer_correctness = is_correct
+        else:
+            # Free-text evaluation
+            result.faithfulness     = faithfulness(answer, retrieved, llm_call=llm_call, debug=debug)
+            result.answer_relevancy = answer_relevancy(active_question, answer, embedder, llm_call=llm_call, debug=debug)
+            if q.reference_answer:
+                result.context_recall     = context_recall(q.reference_answer, retrieved, llm_call=llm_call, debug=debug)
+                result.answer_correctness = answer_correctness(answer, q.reference_answer, embedder, llm_call=llm_call, debug=debug)
 
         if not baseline:
             mean_s, min_s, max_s  = cosine_sim_stats(retrieved)
@@ -147,13 +211,6 @@ def evaluate_question(
             result.max_similarity  = max_s
             result.source_coverage = source_coverage(retrieved)
             result.canonical_hit   = canonical_source_hit(retrieved, q.canonical_source)
-
-        if q.reference_answer:
-            result.context_recall     = context_recall(
-                q.reference_answer, retrieved, llm_call=llm_call, debug=debug)
-            result.answer_correctness = answer_correctness(
-                answer, q.reference_answer, embedder,
-                llm_call=llm_call, debug=debug)
 
     except Exception as e:
         result.error = str(e)
@@ -164,7 +221,6 @@ def evaluate_question(
         result.gen_latency = 0.0
 
     return result
-
 
 
 def evaluate_corpus(
@@ -185,7 +241,9 @@ def evaluate_corpus(
     debug:         bool  = False,
     rag_generator_model: str | None = None,
     inject_metadata: bool = False,
+    include_keywords: bool = False,
     search_method: str = "dense",
+    resolve_parents:  bool = False,
 ) -> tuple[CorpusResult, CorpusResult | None]:
     """Run the full evaluation suite for one corpus.
 
@@ -226,7 +284,9 @@ def evaluate_corpus(
                                rerank_top_k=rerank_top_k, debug=debug,
                                rag_model_name=resolved_rag_model,
                                inject_metadata=inject_metadata,
-                               search_method=search_method)
+                               include_keywords=include_keywords,
+                               search_method=search_method,
+                               resolve_parents=resolve_parents,)
         rag_results.append(qr)
         if qr.error:
             print(f"    [ERROR] {qr.error}")

@@ -233,6 +233,7 @@ def chunk_parent_child(
     parent_size: int = 2048,
     child_size: int = 512,
     source_type: str = "",
+    **kwargs: Any,
 ) -> list[Chunk]:
     """Strategy 3: Two-Tier Retrieval. Identifies large parent segments 
     and breaks them down into small, highly targeted child vectors.

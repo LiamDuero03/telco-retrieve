@@ -142,7 +142,7 @@ streamlit run app.py
 | Tab | Purpose |
 |-----|---------|
 | Generate QnA | Build a generation pipeline (sampling strategy, question types, concurrency, summarization, validation) and generate draft evaluation questions |
-| Review QnA | Review each draft question against its source chunk text, open the source document or SDO portal, approve / correct / reject, and merge into the eval set |
+| Review QnA | Review and edit draft or already-validated QnA sets (`configs/eval_questions/`), view source chunk text with document links, approve / correct / reject questions, save updates in place, and promote completed drafts to official evaluation sets |
 
 The QnA Generation pipeline requires [telco-qna-generation](https://github.com/Znbne/telco-qna-generation) to be installed:
 
@@ -178,6 +178,7 @@ open-telco-rag search <query>    Search the vector database
 open-telco-rag ask <question>    Ask a question (search + generate)
 open-telco-rag evaluate <corpus> Run evaluation suite
 open-telco-rag info              Show database info
+open-telco-rag delete <collection> Delete a collection from the vector database
 ```
 
 ### Ingest options
@@ -210,7 +211,11 @@ open-telco-rag ingest oran \
 | `--use-marker` | off | Use Datalab Marker API for PDF preprocessing |
 | `--collection` | `source_model` | Override collection name |
 | `--embed-backend` | `local` | Backend for computing vector embeddings: `local` (CPU/GPU) or `openrouter` (Cloud APIs) |
-| `--batch-size` | 64 / 5000 | Parallel payload size. Defaults to 64 locally, or 5000 for high-throughput OpenRouter bulk ingestion |
+| `--batch-size` | 64 / 500 | Parallel payload size. Defaults to 64 locally, or 500 for high-throughput OpenRouter bulk ingestion |
+
+Ingest also builds a per-collection SQLite FTS5 BM25 index alongside ChromaDB, enabling `--search-method bm25` and `--search-method hybrid` retrieval.
+
+
 
 ### Marker preprocessing
 
@@ -237,6 +242,9 @@ open-telco-rag ask "What does TS 28.312 define for intent?" \
 
 | Flag | Default | Description |
 |------|---------|-------------|
+| `--source-type` | `oran` | Source type |
+| `--model` | `minilm` | Embedding model key |
+| `--db-path` | `chroma_db` | ChromaDB storage path |
 | `--search-method` | `dense` | Multi-method search routing pass algorithm selection: `dense`, `bm25`, or `hybrid` |
 | `--top-k` | 5 / 8 | Chunks to retrieve |
 | `--rerank` | off | Enable reranking after retrieval |
@@ -244,6 +252,7 @@ open-telco-rag ask "What does TS 28.312 define for intent?" \
 | `--rerank-top-k` | 5 | Chunks to keep after reranking |
 | `--collection` | `source_model` | Override collection name |
 | `--embed-backend` | `local` | Backend for computing vector embeddings (`local` or `openrouter`) |
+| `--resolve-parents` | off | Expand retrieved child chunks into full parent contexts |
 
 ### Reranker models
 
@@ -274,20 +283,57 @@ open-telco-rag evaluate 3gpp \
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--model` | `minilm` | Embedding model key |
-| `--collection` | `corpus_model` | Override collection name |
-| `--questions-file` | corpus default | Path to QnA JSON file |
-| `--top-k` | 5 | Chunks to retrieve per question |
-| `--rag-generator` | openrouter | LLM provider for answer generation |
-| `--rag-generator-model` | — | Model for answer generation |
-| `--generator` | openrouter | LLM provider for metric scoring |
-| `--generator-model` | — | Model for metric scoring |
-| `--rerank` | off | Enable reranking during evaluation |
-| `--reranker-model` | `ms-marco-minilm` | Reranker model key |
-| `--include-baseline` | off | Run no-retrieval baseline pass |
-| `--leaderboard` | `results/leaderboard.json` | Leaderboard output path |
-`--embed-backend` | `local` | Backend for computing vector embeddings (`local` or `openrouter`) |
-| `--inject-metadata` | off | Simulates domain expert queries by dynamically prepending canonical source IDs to evaluation questions |
+| `--model` | `minilm` | Embedding model key. |
+| `--db-path` | `chroma_db` | ChromaDB storage path. |
+| `--collection` | `corpus_model` | Override collection name (e.g., `3gpp_r19_marker_bge`). |
+| `--questions-file` | `configs/eval_questions/{corpus}.json` | Path to a custom QnA JSON file. |
+| `--top-k` | `5` | Chunks to retrieve per question. |
+| `--threshold` | `0.5` | Similarity threshold for `coverage_ratio` metric. |
+| `--output` | `results` | Directory to save result JSON files. |
+| `--delay` | `1.0` | Seconds between questions for rate-limiting API calls. |
+| `--no-save` | `off` | Print summary only, do not save JSON results. |
+| `--generator` | `openrouter` | LLM provider for evaluation metrics (`claude` or `openrouter`). |
+| `--generator-model` | `None` | Model for evaluation metrics (Claude default: `claude-sonnet-4-20250514`, OpenRouter default: `meta-llama/llama-3.3-70b-instruct`). |
+| `--rag-generator` | `None` | LLM provider for RAG answer generation (defaults to `--generator`). |
+| `--rag-generator-model` | `None` | Model for RAG answer generation (defaults to `--generator-model`). |
+| `--debug` | `off` | Log raw LLM responses for every metric call. |
+| `--leaderboard` | `results/leaderboard.json` | Path to leaderboard JSON file. |
+| `--no-leaderboard` | `off` | Do not update the leaderboard file. |
+| `--include-baseline` | `off` | Run second pass with no retrieval and store baseline metrics alongside RAG metrics. |
+| `--rerank` | `off` | Enable reranking during evaluation retrieval. |
+| `--rerank-top-k` | `5` | Chunks to keep after reranking. |
+| `--reranker-model` | `ms-marco-minilm` | Reranker model key from `configs/reranker_models.json` (telecom: `otel-reranker-0.6b`). |
+| `--embed-backend` | `local` | Backend for computing vector embeddings (`local` or `openrouter`). |
+| `--inject-metadata` | `off` | Simulate domain expert queries by prepending canonical source metadata to the question. |
+| `--run-name` | `None` | Custom label to identify this evaluation run (e.g., `exp_prompt_v2`). |
+| `--include-keywords` | `off` | Append question keywords to the search query. |
+| `--resolve-parents` | `off` | Expand retrieved child chunks into full parent contexts. |
+
+---
+
+### Delete collection options
+
+```bash
+open-telco-rag delete my_collection --db-path chroma_db
+```
+
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `collection` | required | Name of the ChromaDB collection to permanently delete |
+| `--db-path` | `chroma_db` | ChromaDB storage path |
+
+### Info options
+
+```bash
+open-telco-rag info --db-path chroma_db --collection oran_bge
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--db-path` | `chroma_db` | ChromaDB storage path |
+| `--collection` | `None` | Collection name to inspect |
+
 
 ---
 

@@ -6,6 +6,7 @@ import csv
 import json
 import os
 import time
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -14,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 from dotenv import load_dotenv
 
 from open_telco_rag.types import Chunk, IngestStats, SearchResult
+from open_telco_rag.stores.fts import FTSStore
 
 if TYPE_CHECKING:
     from open_telco_rag.types import Embedder, Source, VectorStore
@@ -61,6 +63,15 @@ def ingest(
     _init_log(log_file)
     print(f"\nFound {len(files)} files | model: {embedder.model_key}")
     print(f"Logging to: {log_file}\n")
+
+    # ── INITIALIZE SPARSE FTS5 STORE ──
+    store_path = getattr(store, "path", "chroma_db")
+    store_col  = getattr(store, "collection_name", "documents")
+    fts_store  = FTSStore(path=store_path, collection_name=store_col)
+
+    if not resume:
+        print(f"  [FTS5] Resume disabled — clearing existing BM25 index for '{store_col}'...")
+        fts_store.clear()
 
     # ── PHASE 1: CHUNK ACCUMULATION ──
     global_texts = []
@@ -217,31 +228,32 @@ def ingest(
         files_to_log.append((file_path, file_size_kb, len(chunks), sum(chunk_lens)//len(chunk_lens), chunking_time_ms, expansion_ratio))
         files_processed_this_run.append(rel)
 
-    # ── PHASE 2: GLOBAL BULK EMBEDDING ──
+    # ── PHASE 2: GLOBAL BULK EMBEDDING & INDEXING ──
     total_chunks = len(global_texts)
     if total_chunks > 0:
         print(f"\n{'-'*60}")
-        print(f"Phase 2: Bulk embedding {total_chunks} total chunks...")
+        print(f"Phase 2: Bulk embedding & indexing {total_chunks} total chunks...")
         print(f"Batch size: {batch_size} chunks per API call")
         print(f"{'-'*60}")
 
-        start_embed_time = time.perf_counter()
-        
         try:
             for batch_start in range(0, total_chunks, batch_size):
                 batch_end = min(batch_start + batch_size, total_chunks)
-                print(f"  Embedding batch [{batch_start}/{total_chunks}] (Size: {batch_end - batch_start})...")
+                print(f"  Indexing batch [{batch_start}/{total_chunks}] (Size: {batch_end - batch_start})...")
                 
                 batch_texts = global_texts[batch_start:batch_end]
-                batch_ids = global_ids[batch_start:batch_end]
+                batch_ids   = global_ids[batch_start:batch_end]
                 batch_metas = global_metadatas[batch_start:batch_end]
 
-                # Single bulk call to OpenRouter / Local model!
+                # Single bulk call to OpenRouter / Local model
                 batch_embeds = embedder.embed(batch_texts)
                 
-                # Write to vector database
+                # 1. Write to Dense Vector Database (Chroma)
                 store.add(ids=batch_ids, embeddings=batch_embeds, documents=batch_texts, metadatas=batch_metas)
                 stats.chunks_stored += len(batch_texts)
+
+                # 2. Write to Sparse Keyword Database (SQLite FTS5)
+                fts_store.add(ids=batch_ids, documents=batch_texts)
 
             # Execution was successful! Log files and mark progress
             for log_item in files_to_log:
@@ -258,7 +270,7 @@ def ingest(
             print(f"\n[FATAL ERROR] Bulk Embedding/Database storage failed: {e}")
             stats.error_files += len(files_processed_this_run)
             for f_path, f_size, _, _, _, _ in files_to_log:
-                _log_row(log_file, f_path, f_size, "error", error=f"bulk embed fail: {e}", model=embedder.model_key)
+                _log_row(log_file, f_path, f_size, "error", error=f"bulk embed/fts fail: {e}", model=embedder.model_key)
 
     # Summary
     print(f"\n{'='*60}")
@@ -272,21 +284,18 @@ def ingest(
 
 
 # ── Search ────────────────────────────────────────────────────────────────────
-
 def search(
-    query:        str,
-    store:        VectorStore,
-    embedder:     Embedder,
-    top_k:        int   = 8,
-    threshold:    float = 1.0,
-    reranker            = None,
-    rerank_top_k: int   = 5,
-    search_method: str  = "dense",
+    query:           str,
+    store:           VectorStore,
+    embedder:        Embedder,
+    top_k:           int   = 8,
+    threshold:       float = 1.0,
+    reranker               = None,
+    rerank_top_k:    int   = 5,
+    search_method:   str   = "dense",
+    resolve_parents: bool  = False,  
 ) -> list[SearchResult]:
-    """Embed a query and retrieve nearest neighbours.
-    
-    Delegates retrieval strategies out to the modular core search layer.
-    """
+    """Embed a query and retrieve nearest neighbours."""
     from open_telco_rag.core.retrieval import execute_retrieval
     
     return execute_retrieval(
@@ -297,7 +306,8 @@ def search(
         threshold=threshold,
         reranker=reranker,
         rerank_top_k=rerank_top_k,
-        search_method=search_method
+        search_method=search_method, 
+        resolve_parents=resolve_parents, 
     )
 
 # ── Generate ──────────────────────────────────────────────────────────────────
@@ -355,4 +365,3 @@ def _log_row(
             "chunking_time_ms": round(chunking_time_ms, 2), 
             "expansion_ratio":  round(expansion_ratio, 3),
         })
-        

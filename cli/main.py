@@ -60,7 +60,7 @@ def main(argv: list[str] | None = None) -> None:
                           default="none",
                           help="Select a metadata/content enrichment strategy dynamically mapped from enrichment_strategies.json.")
     p_ingest.add_argument("--enrichment-model",
-                          default="openai/gpt-4o-mini",
+                          default="google/qwen-2.5-coder-32b", 
                           help="The LLM model string to use when running an LLM-based enrichment strategy.")
     p_ingest.add_argument("--strategy",
                           choices=_load_chunking_strategies(),
@@ -92,6 +92,8 @@ def main(argv: list[str] | None = None) -> None:
                           help="Multi-method search routing pass algorithm selection.")
     p_search.add_argument("--embed-backend", choices=["local", "openrouter"], default="local",
                       help="Backend for computing embeddings (default: local)")
+    p_search.add_argument("--resolve-parents", action="store_true",
+                      help="Expand retrieved child chunks into full parent contexts")
 
     # ── ask ───────────────────────────────────────────────────────────────────
     p_ask = sub.add_parser("ask", help="Ask a question (search + generate)")
@@ -110,6 +112,8 @@ def main(argv: list[str] | None = None) -> None:
                           help="Multi-method search routing pass algorithm selection.")
     p_ask.add_argument("--embed-backend", choices=["local", "openrouter"], default="local",
                       help="Backend for computing embeddings (default: local)")
+    p_ask.add_argument("--resolve-parents", action="store_true",
+                   help="Expand retrieved child chunks into full parent contexts")
 
     # ── evaluate ──────────────────────────────────────────────────────────────
     p_eval = sub.add_parser("evaluate", help="Run evaluation suite on a corpus")
@@ -167,11 +171,23 @@ def main(argv: list[str] | None = None) -> None:
                       help="Backend for computing embeddings (default: local)")
     p_eval.add_argument("--inject-metadata", action="store_true",
                     help="Simulate domain expert queries by prepending canonical source metadata to the question.")
+    p_eval.add_argument("--run-name", default=None,
+                        help="Custom label to identify this evaluation run (e.g. 'exp_prompt_v2').")
+    p_eval.add_argument("--include-keywords", action="store_true",
+                        help="Append question keywords to the search query")
+    p_eval.add_argument("--resolve-parents", action="store_true",
+                    help="Expand retrieved child chunks into full parent contexts")
 
     # ── info ──────────────────────────────────────────────────────────────────
     p_info = sub.add_parser("info", help="Show database info")
     p_info.add_argument("--db-path",    default="chroma_db", help="ChromaDB path")
     p_info.add_argument("--collection", default=None,        help="Collection name")
+
+
+    # ── delete-collection ─────────────────────────────────────────────────────
+    p_delete = sub.add_parser("delete", help="Delete a collection from the vector database")
+    p_delete.add_argument("collection", help="The name of the collection to delete")
+    p_delete.add_argument("--db-path", default="chroma_db", help="ChromaDB path (default: chroma_db)")
 
     args = parser.parse_args(argv)
 
@@ -189,6 +205,8 @@ def main(argv: list[str] | None = None) -> None:
         _run_evaluate(args)
     elif args.command == "info":
         _run_info(args)
+    elif args.command == "delete":
+        _run_delete_collection(args)
 
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
@@ -343,7 +361,8 @@ def _run_search(args) -> None:
         top_k        = args.top_k,
         reranker     = reranker,
         rerank_top_k = args.rerank_top_k,
-        search_method = getattr(args, "search_method", "dense")
+        search_method = getattr(args, "search_method", "dense"),
+        resolve_parents = getattr(args, "resolve_parents", False),
     )
 
     if not results:
@@ -396,7 +415,8 @@ def _run_ask(args) -> None:
         top_k        = args.top_k,
         reranker     = reranker,
         rerank_top_k = args.rerank_top_k,
-        search_method = getattr(args, "search_method", "dense")
+        search_method = getattr(args, "search_method", "dense"),
+        resolve_parents = getattr(args, "resolve_parents", False),
     )
     answer = generate(args.question, results, source_type=args.source_type)
 
@@ -482,6 +502,7 @@ def _run_evaluate(args) -> None:
             rag_generator_model=rag_generator_model,
             inject_metadata   = args.inject_metadata,
             search_method=getattr(args, "search_method", "dense"),
+            resolve_parents   = getattr(args, "resolve_parents", False),
         )
 
         if not args.no_leaderboard:
@@ -494,11 +515,16 @@ def _run_evaluate(args) -> None:
                 corpus           = corpus,
                 collection       = col_name,
                 reranker_model   = args.reranker_model if args.rerank else None,
+                rerank_top_k     = getattr(args, "rerank_top_k", result.top_k),
                 questions_file   = getattr(args, "questions_file", None),
                 inject_metadata  = args.inject_metadata,
+                include_keywords = getattr(args, "include_keywords", False),
                 search_method=getattr(args, "search_method", "dense"),
                 embed_backend=embed_backend,
+                run_name         = getattr(args, "run_name", None),
             )
+
+
 
 
 def _update_leaderboard(
@@ -510,11 +536,13 @@ def _update_leaderboard(
     collection:       str,
     baseline_result   = None,
     reranker_model:   str | None = None,
+    rerank_top_k:     int = 0,
     questions_file:   str | None = None,
     inject_metadata:  bool = False,
+    include_keywords: bool = False,
     search_method:    str = "dense", 
     embed_backend:    str = "local",
-) -> None:
+    run_name:         str | None = None,) -> None:
     """Append one row to the leaderboard JSON file."""
     import json
     from datetime import datetime
@@ -531,18 +559,34 @@ def _update_leaderboard(
     # Calculate averages across all processed questions
     avg_total = statistics.mean([getattr(q, "latency", 0.0) for q in q_results]) if q_results else 0.0
     avg_search = statistics.mean([getattr(q, "search_latency", 0.0) for q in q_results]) if q_results else 0.0
+    avg_rerank = statistics.mean([getattr(q, "rerank_latency", 0.0) for q in q_results]) if q_results else 0.0 # <-- ADDED
     avg_gen = statistics.mean([getattr(q, "gen_latency", 0.0) for q in q_results]) if q_results else 0.0
+    
     total_prompt_tokens = sum([getattr(q, "prompt_tokens", 0) for q in q_results])
     total_completion_tokens = sum([getattr(q, "completion_tokens", 0) for q in q_results])
+    total_rerank_tokens = sum([getattr(q, "rerank_tokens", 0) for q in q_results]) # <-- ADDED
     
-    # NEW: Sum the advanced token metrics
+    # Sum the advanced token metrics
     total_cached_tokens = sum([getattr(q, "cached_tokens", 0) for q in q_results])
     total_reasoning_tokens = sum([getattr(q, "reasoning_tokens", 0) for q in q_results])
     
-    # NEW: Use exact API cost if provided by OpenRouter, otherwise fallback to estimation
+    # Extract exact API cost if provided by OpenRouter, otherwise dynamic fallback based on model pricing matrix
     exact_cost = sum([getattr(q, "cost", 0.0) for q in q_results])
     if exact_cost == 0.0:
-        exact_cost = ((total_prompt_tokens / 1_000_000) * 0.70) + ((total_completion_tokens / 1_000_000) * 0.90)
+        # Dynamic lookup fallback dictionary per million tokens mapping
+        PRICING_MATRIX = {
+            "anthropic/claude-sonnet-4.5": {"prompt": 3.00, "completion": 15.00},
+            "meta-llama/llama-3.3-70b-instruct": {"prompt": 0.70, "completion": 0.90},
+            "google/qwen-2.5-coder-32b": {"prompt": 0.35, "completion": 0.35},
+            "default": {"prompt": 0.70, "completion": 0.90}
+        }
+        
+        # Cleanly match model attributes or apply secure generic defaults fallback layout
+        pricing = PRICING_MATRIX.get(rag_model, PRICING_MATRIX["default"])
+        
+        prompt_cost = (total_prompt_tokens / 1_000_000) * pricing["prompt"]
+        completion_cost = (total_completion_tokens / 1_000_000) * pricing["completion"]
+        exact_cost = prompt_cost + completion_cost
     
     # Extract the filename or fallback to default
     q_file_label = "default"
@@ -553,8 +597,11 @@ def _update_leaderboard(
     else:
         q_file_label = f"{corpus}.json"
 
+    chunks_to_llm = rerank_top_k if reranker_model else result.top_k
+
     row = {
         "timestamp":             datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "run_name":              run_name.strip() if run_name else "default",
         "rag_model":             rag_model,
         "evaluator_model":       evaluator_model,
         "embedder":              result.model,
@@ -564,12 +611,16 @@ def _update_leaderboard(
         "top_k":                 result.top_k,
         "n_questions":           result.n_questions,
         "reranker":              reranker_model or "none",
+        "chunks_to_llm":          chunks_to_llm,
+        "include_keywords":      include_keywords,
         "search_method":         search_method,
         "embed_backend":         embed_backend,
-        "avg_search_latency_sec": round(avg_search, 2),  
+        "avg_search_latency_sec": round(avg_search, 2), 
+        "avg_rerank_latency_sec": round(avg_rerank, 2), 
         "avg_gen_latency_sec":    round(avg_gen, 2),     
         "avg_total_latency_sec":  round(avg_total, 2),   
         "total_api_tokens":      total_prompt_tokens + total_completion_tokens,
+        "total_rerank_tokens":    total_rerank_tokens,
         "total_cached_tokens":   total_cached_tokens,       
         "total_reasoning_tokens": total_reasoning_tokens,   
         "run_cost_usd":          round(exact_cost, 6),      
@@ -612,6 +663,29 @@ def _run_info(args) -> None:
     for col in collections:
         c = client.get_collection(col.name)
         print(f"  {col.name}: {c.count()} chunks")
+
+
+def _run_delete_collection(args) -> None:
+    import chromadb
+    from open_telco_rag.stores.fts import FTSStore
+    
+    client = chromadb.PersistentClient(path=args.db_path)
+    
+    print(f"\nAttempting to delete collection '{args.collection}' from '{args.db_path}'...")
+    
+    try:
+        # Check if it exists first to provide a better error message
+        existing_collections = [c.name for c in client.list_collections()]
+        if args.collection not in existing_collections:
+            print(f"❌ Error: Collection '{args.collection}' does not exist.")
+            print(f"Available collections: {', '.join(existing_collections) if existing_collections else 'None'}")
+            return
+
+        client.delete_collection(name=args.collection)
+        FTSStore(path=args.db_path, collection_name=args.collection).delete()
+        print(f"✅ Successfully deleted collection '{args.collection}'.")
+    except Exception as e:
+        print(f"❌ Failed to delete collection: {e}")
 
 
 if __name__ == "__main__":

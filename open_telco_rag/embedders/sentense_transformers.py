@@ -56,4 +56,6 @@ class SentenceTransformerEmbedder:
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         self._load()
-        return self._model.encode(texts, show_progress_bar=False).tolist()
+        # Force the model to  the entire pipeline batch concurrently
+        return self._model.encode(texts, batch_size=len(texts), show_progress_bar=False).tolist()
+    
