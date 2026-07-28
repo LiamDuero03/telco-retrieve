@@ -1342,8 +1342,12 @@ else:
                      "boundary: one chunk per document section (heading-based).",
             )
         with col_g2:
-            genqa_n_chunks = st.number_input("Chunks to sample", 1, 1000, 30, key="genqa_n_chunks")
-
+            genqa_n_chunks = st.number_input(
+                "Initial chunk pool size", 
+                min_value=1, max_value=1000, value=50, 
+                key="genqa_n_chunks",
+                help="How many chunks to load upfront. If the LLM skips files, the pipeline will automatically fetch more until the target question count is met."
+            )
         st.markdown("##### Question Generation Specs Builder")
         st.caption("Construct a custom mix of question types, quantities, and MCQ option counts:")
 

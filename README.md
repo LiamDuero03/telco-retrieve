@@ -211,7 +211,9 @@ open-telco-rag ingest oran \
 | `--use-marker` | off | Use Datalab Marker API for PDF preprocessing |
 | `--collection` | `source_model` | Override collection name |
 | `--embed-backend` | `local` | Backend for computing vector embeddings: `local` (CPU/GPU) or `openrouter` (Cloud APIs) |
-| `--batch-size` | 64 / 5000 | Parallel payload size. Defaults to 64 locally, or 5000 for high-throughput OpenRouter bulk ingestion |
+| `--batch-size` | 64 / 500 | Parallel payload size. Defaults to 64 locally, or 500 for high-throughput OpenRouter bulk ingestion |
+
+Ingest also builds a per-collection SQLite FTS5 BM25 index alongside ChromaDB, enabling `--search-method bm25` and `--search-method hybrid` retrieval.
 
 
 
@@ -250,6 +252,7 @@ open-telco-rag ask "What does TS 28.312 define for intent?" \
 | `--rerank-top-k` | 5 | Chunks to keep after reranking |
 | `--collection` | `source_model` | Override collection name |
 | `--embed-backend` | `local` | Backend for computing vector embeddings (`local` or `openrouter`) |
+| `--resolve-parents` | off | Expand retrieved child chunks into full parent contexts |
 
 ### Reranker models
 
@@ -304,6 +307,7 @@ open-telco-rag evaluate 3gpp \
 | `--inject-metadata` | `off` | Simulate domain expert queries by prepending canonical source metadata to the question. |
 | `--run-name` | `None` | Custom label to identify this evaluation run (e.g., `exp_prompt_v2`). |
 | `--include-keywords` | `off` | Append question keywords to the search query. |
+| `--resolve-parents` | `off` | Expand retrieved child chunks into full parent contexts. |
 
 ---
 
