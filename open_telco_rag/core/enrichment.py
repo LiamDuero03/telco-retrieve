@@ -8,6 +8,7 @@ from enum import Enum
 from typing import Any
 from open_telco_rag.types import Chunk
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any, List, Dict
 
 class EnrichmentStrategy(str, Enum):
     """Supported strategies for chunk metadata/content enrichment."""
@@ -78,31 +79,62 @@ def enrich_llm_metadata(chunks: list[Chunk], llm_client: Any = None, **kwargs: A
     return chunks
 
 
-def enrich_acronym_expansion(chunks: list[Chunk], **kwargs) -> list[Chunk]:
+def load_glossary(file_path: str) -> Dict[str, str]:
+    """Loads and returns the glossary dictionary from a JSON file."""
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print(f"Warning: Glossary file '{file_path}' not found. Using empty dictionary.")
+        return {}
+    except json.JSONDecodeError as e:
+        print(f"Error parsing JSON from '{file_path}': {e}")
+        return {}
+
+
+def enrich_acronym_expansion(chunks: List[Chunk], **kwargs: Any) -> List[Chunk]:
+    """Appends acronym expansions utilizing strict word-boundary evaluations.
+
+    Optimized for large glossaries by compiling a single regex pattern.
     """
-    Appends acronym expansions utilizing strict word-boundary evaluations.
-    """
-    acronym_dictionary = {
-        "RAN": "Radio Access Network",
-        "RIC": "RAN Intelligent Controller",
-        "O-RAN": "Open Radio Access Network",
-        "3GPP": "3rd Generation Partnership Project",
-        "SMO": "Service Management and Orchestration"
-    }
-    
+    # Accept a massive parsed dictionary via kwargs, fallback to loading from file
+    glossary_path = kwargs.get("glossary_path", "3gpp:glossary.json")
+    acronym_dictionary = kwargs.get("glossary_dict") or load_glossary(glossary_path)
+
+    if not acronym_dictionary:
+        return chunks
+
+    # Pre-compilation: Sort by length descending to match longest acronyms first
+    # This prevents shorter acronyms (like "RAN") from prematurely matching inside "O-RAN"
+    sorted_acronyms = sorted(acronym_dictionary.keys(), key=len, reverse=True)
+    escaped_acronyms = [re.escape(a) for a in sorted_acronyms]
+
+    # Create a single regex pattern to find ANY of the acronyms in O(1) passes per chunk
+    master_pattern = re.compile(r"\b(" + "|".join(escaped_acronyms) + r")\b")
+
     for chunk in chunks:
-        found_expansions = []
-        for acronym, expansion in acronym_dictionary.items():
-            # Strict word boundary regex pattern check
-            pattern = r"\b" + re.escape(acronym) + r"\b"
-            if re.search(pattern, chunk.text):
-                found_expansions.append(f"{acronym}: {expansion}")
-                
-        if found_expansions:
-            suffix_string = "\n\n[Acronym Expansions]:\n* " + "\n* ".join(found_expansions)
+        # Find all unique matches in the chunk text in one sweep
+        matches = set(master_pattern.findall(chunk.text))
+
+        if matches:
+            # Map the found acronyms back to their definitions
+            found_expansions = [
+                f"{acronym}: {acronym_dictionary[acronym]}" for acronym in matches
+            ]
+
+            # Append the structured suffix to the chunk payload
+            suffix_string = "\n\n[Acronym Expansions]:\n* " + "\n* ".join(
+                sorted(found_expansions)
+            )
             chunk.text += suffix_string
-            
+
+            if not hasattr(chunk, "metadata") or chunk.metadata is None:
+                chunk.metadata = {}
+            chunk.metadata["acronyms_expanded"] = list(matches)
+
     return chunks
+
+
 
 def enrich_metadata_tagging(chunks: list[Chunk], **kwargs: Any) -> list[Chunk]:
     """Strategy 3: Structural metadata ingestion. Updates the chunk's 
