@@ -186,7 +186,6 @@ def _get_store(source_type: str, model_key: str, db_path: str,
     from open_telco_rag.stores.chroma import ChromaStore
     col = collection.strip() if collection and collection.strip() else f"{source_type}_{model_key}"
     
-    
     return ChromaStore(
         path=db_path, 
         collection_name=col, 
@@ -488,7 +487,6 @@ if is_rag:
                 key="ask_search_method"
             )
             
-        # 1. ADD THE CHECKBOX HERE
         resolve_parents_ask = st.checkbox("Expand Parent Chunks (Hierarchical)", value=False, key="ask_resolve_parents")
         
         ask_btn = st.button("Ask ✦", type="primary")
@@ -500,7 +498,6 @@ if is_rag:
                     embedder = _get_embedder(model_key, backend=embed_backend)
                     store    = _get_store(source_type, model_key, db_path, collection_override)
                     
-                    # 2. PASS IT INTO SEARCH HERE
                     results  = search(question, store=store, embedder=embedder,
                                       top_k=top_k_ask, threshold=threshold_ask,
                                       search_method=selected_search_method,
@@ -567,7 +564,6 @@ if is_rag:
                 key="search_search_method"
             )
             
-        # 1. ADD THE CHECKBOX HERE
         resolve_parents_search = st.checkbox("Expand Parent Chunks (Hierarchical)", value=False, key="search_resolve_parents")
         
         search_btn = st.button("Search", type="primary", key="search_btn")
@@ -579,7 +575,6 @@ if is_rag:
                     embedder = _get_embedder(model_key, backend=embed_backend)
                     store    = _get_store(source_type, model_key, db_path, collection_override)
                     
-                    # 2. PASS IT INTO SEARCH HERE
                     results  = search(query, store=store, embedder=embedder,
                                       top_k=top_k_search, threshold=threshold_search,
                                       search_method=selected_search_method_s,
@@ -604,9 +599,8 @@ if is_rag:
         elif search_btn:
             st.warning("Please enter a query.")
 
-# ── INGEST ───────────────────────────────────────────────────────────────
+    # ── INGEST ───────────────────────────────────────────────────────────────
     with tab_ingest:
-        # ── SECTION 1: GLOBAL DATA SETUP ──────────────────────────────────────
         col_i0_1, col_i0_2 = st.columns(2)
         with col_i0_1:
             selected_source_type = st.selectbox(
@@ -625,15 +619,12 @@ if is_rag:
             ingest_collection = st.text_input("Collection name",
                                               placeholder=f"{selected_source_type}_{model_key}")
 
-        # ── SECTION 2: CHUNKING CONFIGURATION ─────────────────────────────────
         st.markdown("---")
         st.markdown("##### Chunking Parameters")
 
-        # Load dynamic strategies from JSON configs
         chunk_strat_dict = _load_chunking_strategies()
         enrich_strat_dict = _load_enrichment_strategies()
         
-        # ── ROW 1: Strategy & Distance Metric Side-by-Side ──
         col_strat, col_dist = st.columns(2)
         
         with col_strat:
@@ -655,10 +646,8 @@ if is_rag:
                 help="l2 = Euclidean, cosine = angular matching (recommended for prepended text descriptions)."
             )
 
-        # Parse labels based on the selected strategy row above
         unit_label = strat_meta["unit"].capitalize()
 
-        # ── ROW 2: Chunk Size & Overlap Side-by-Side ──
         col_size, col_overlap = st.columns(2)
         
         with col_size:
@@ -685,11 +674,9 @@ if is_rag:
                     help="Not utilized by this configuration strategy."
                 )
 
-        # ── DYNAMIC ENRICHMENT CONFIGURATIONS ───────────────────────
         st.markdown("---")
         st.markdown("##### Chunk Enrichment (Pre-Embedding Process)")
         col_en1, col_en2 = st.columns(2)
-        #col_en1, col_en2 = col_i1, col_i2 
         
         with col_en1:
             selected_enrichment = st.selectbox(
@@ -702,7 +689,6 @@ if is_rag:
             st.caption(f"💡 {enrich_strat_dict[selected_enrichment]['help_text']}")
             
         with col_en2:
-            # Dynamically gray out the model selection if the chosen strategy doesn't require an LLM
             req_llm = enrich_strat_dict[selected_enrichment].get("requires_llm", False)
             selected_enrichment_model = st.selectbox(
                 "Enrichment Model (If LLM strategy chosen)",
@@ -858,7 +844,6 @@ if is_rag:
                 reranker_model = "none"
                 rerank_top_k   = top_k_eval  
 
-
         eval_btn = st.button("Run evaluation ▶", type="primary", key="eval_btn")
 
         if eval_btn:
@@ -917,7 +902,6 @@ if is_rag:
                         q_counter[0] += 1
                         idx = q_counter[0]
                         
-                        # Clamp ratio between 0.0 and 1.0 so it never exceeds 100%
                         progress_val = min(1.0, idx / total_expected)
                         progress_bar.progress(progress_val, text=f"Question {idx}/{total_expected}")
 
@@ -938,7 +922,6 @@ if is_rag:
                     _eval_mod.evaluate_question = _patched_eq
                     
                     try:
-                        # Load the actual reranker object if enabled
                         active_reranker = _get_reranker(reranker_model) if use_reranker else None
                         
                         result, baseline_result = evaluate_corpus(
@@ -954,7 +937,6 @@ if is_rag:
                             resolve_parents=resolve_parents_eval,
                         )
                     finally:
-                        # 2. ALWAYS restore the original function, even if the pipeline crashes
                         _eval_mod.evaluate_question = _orig_eq
 
                     scores = [result.mean_faithfulness, result.mean_answer_relevancy,
@@ -972,19 +954,16 @@ if is_rag:
                     total_cached = sum(getattr(q, "cached_tokens", 0) for q in result.question_results)
                     total_reasoning = sum(getattr(q, "reasoning_tokens", 0) for q in result.question_results)
 
-                    # Aggregate local token counts
                     total_prompt_tokens = sum(getattr(q, "prompt_tokens", 0) for q in result.question_results)
                     total_completion_tokens = sum(getattr(q, "completion_tokens", 0) for q in result.question_results)
                     total_rerank_tokens = sum(getattr(q, "rerank_tokens", 0) for q in result.question_results)
 
-                    # Calculate latency averages
                     num_qs = max(1, len(result.question_results))
                     avg_search = round(sum(getattr(q, "search_latency", 0.0) for q in result.question_results) / num_qs, 2)
                     avg_rerank = round(sum(getattr(q, "rerank_latency", 0.0) for q in result.question_results) / num_qs, 2)
                     avg_gen = round(sum(getattr(q, "gen_latency", 0.0) for q in result.question_results) / num_qs, 2)
                     avg_total = round(sum(getattr(q, "latency", 0.0) for q in result.question_results) / num_qs, 2)
 
-                    # Dynamic cost fallback if exact API reporting is bypassed by local tokenization
                     if total_cost == 0.0:
                         pricing = {
                             "anthropic/claude-sonnet-4.5": {"prompt": 3.00, "completion": 15.00},
@@ -1130,7 +1109,7 @@ if is_rag:
 
     # ── LEADERBOARD ──────────────────────────────────────────────────────────
     with tab_lb:
-        st.caption("Evaluation results across generator models, embedders, and corpora — sorted by average score.")
+        st.caption("Evaluation results across generator models, embedders, and corpora — sorted by answer correctness.")
         import json as _json
         from pathlib import Path as _Path
         lb_path = _Path("results/leaderboard.json")
@@ -1170,12 +1149,11 @@ if is_rag:
                     if df.empty:
                         st.info("No results match the selected filters.")
                     else:
-                        df = df.sort_values("average", ascending=False).reset_index(drop=True)
+                        df = df.sort_values("answer_correctness", ascending=False).reset_index(drop=True)
                         df.insert(0, "rank", range(1, len(df) + 1))
-                        has_baseline = "bl_average" in df.columns and df["bl_average"].notna().any()
+                        has_baseline = "bl_answer_correctness" in df.columns and df["bl_answer_correctness"].notna().any()
                         if has_baseline:
                             df["Δ correctness"] = (df["answer_correctness"] - df["bl_answer_correctness"]).round(3)
-                            df["Δ avg"]         = (df["average"]            - df["bl_average"]).round(3)
 
                         display_cols = {
                             "rank": "Rank", "rag_model": "Generator",
@@ -1203,20 +1181,18 @@ if is_rag:
                             "faithfulness": "Faithful",
                             "answer_relevancy": "Relevancy", "mean_similarity": "Similarity",
                             "context_recall": "Recall", "answer_correctness": "Correctness",
-                            "average": "RAG Avg",
                         }
                         if has_baseline:
                             display_cols.update({
-                                "bl_answer_correctness": "BL Correctness", "bl_average": "BL Avg",
+                                "bl_answer_correctness": "BL Correctness",
                                 "Δ correctness": "Δ Correctness",
-                                "Δ avg": "Δ Avg",
                             })
                         df_display = df[[c for c in display_cols if c in df.columns]].rename(columns=display_cols)
                         col_config = {k: st.column_config.NumberColumn(format="%.3f")
-                                    for k in ["RAG Avg","Faithful","Relevancy","Similarity",
-                                                "Recall","Correctness","BL Correctness","BL Avg"]}
+                                    for k in ["Faithful","Relevancy","Similarity",
+                                                "Recall","Correctness","BL Correctness"]}
                         col_config.update({k: st.column_config.NumberColumn(format="%+.3f")
-                                        for k in ["Δ Correctness","Δ Avg"]})
+                                        for k in ["Δ Correctness"]})
                         col_config.update({
                                         "Search Latency": st.column_config.NumberColumn(format="%.2f s"),
                                         "Rerank Latency": st.column_config.NumberColumn(format="%.2f s"),
@@ -1237,7 +1213,7 @@ if is_rag:
                             all_rows = _json.loads(lb_path.read_text(encoding="utf-8"))
                             row_labels = {
                                 i: f"{r.get('timestamp','?')}  ·  {r.get('rag_model','?')}  ·  "
-                                   f"{r.get('corpus','?')}  ·  avg={r.get('average','?')}"
+                                   f"{r.get('corpus','?')}  ·  correctness={r.get('answer_correctness','?')}"
                                 for i, r in enumerate(all_rows)
                             }
                             selected_label = st.selectbox("Select row to remove",
@@ -1251,15 +1227,15 @@ if is_rag:
                                 st.rerun()
 
                         st.markdown("---")
-                        avg_by_model = (df.groupby("rag_model")["average"].mean()
+                        corr_by_model = (df.groupby("rag_model")["answer_correctness"].mean()
                                         .sort_values(ascending=False).reset_index())
                         fig = go.Figure(go.Bar(
-                            x=avg_by_model["rag_model"], y=avg_by_model["average"],
+                            x=corr_by_model["rag_model"], y=corr_by_model["answer_correctness"],
                             marker_color="#4C9BE8",
-                            text=[f"{v:.3f}" for v in avg_by_model["average"]],
+                            text=[f"{v:.3f}" for v in corr_by_model["answer_correctness"]],
                             textposition="outside",
                             textfont=dict(color="#333333")))
-                        fig.update_layout(title=dict(text="Average score by generator model", font=dict(color="#333333")),
+                        fig.update_layout(title=dict(text="Mean answer correctness by generator model", font=dict(color="#333333")),
                                           yaxis=dict(range=[0, 1.15], gridcolor="#eee", tickformat=".2f", tickfont=dict(color="#333333")),
                                           height=320, margin=dict(t=45, b=60, l=30, r=20),
                                           plot_bgcolor="white", paper_bgcolor="white",
@@ -1292,7 +1268,6 @@ if is_rag:
                 for col in sorted(collections, key=lambda c: c.name):
                     c = client.get_collection(col.name)
                     
-                    # Create columns to align the data with the delete button
                     info_col, action_col = st.columns([5, 1])
                     
                     with info_col:
@@ -1302,7 +1277,6 @@ if is_rag:
                                     unsafe_allow_html=True)
                     
                     with action_col:
-                        # Add a delete button with a unique key for each collection
                         if st.button("🗑️ Delete", key=f"del_{col.name}", help=f"Permanently delete {col.name}"):
                             try:
                                 client.delete_collection(col.name)
@@ -1310,7 +1284,7 @@ if is_rag:
                                 from open_telco_rag.stores.fts import FTSStore
                                 FTSStore(path=db_path, collection_name=col.name).delete()
                                 st.success(f"Successfully deleted collection: {col.name}")
-                                st.rerun() # Refresh the UI immediately
+                                st.rerun()
                             except Exception as e:
                                 st.error(f"Failed to delete {col.name}: {e}")
             else:
@@ -1351,14 +1325,12 @@ else:
         st.markdown("##### Question Generation Specs Builder")
         st.caption("Construct a custom mix of question types, quantities, and MCQ option counts:")
 
-        # Initialize question spec list in session state if not already set
         if "qspec_list" not in st.session_state:
             st.session_state["qspec_list"] = [
                 {"format": "open", "n": 10, "num_mc_options": 4},
                 {"format": "mc", "n": 5, "num_mc_options": 4},
             ]
 
-        # Container to render dynamic rows
         specs_to_delete = []
 
         for idx, spec in enumerate(st.session_state["qspec_list"]):
@@ -1397,7 +1369,6 @@ else:
                 if st.button("🗑️", key=f"qspec_del_{idx}", help="Remove this question group"):
                     specs_to_delete.append(idx)
 
-        # Handle removals
         if specs_to_delete:
             for d_idx in sorted(specs_to_delete, reverse=True):
                 st.session_state["qspec_list"].pop(d_idx)
@@ -1486,8 +1457,6 @@ else:
                 no_ctx_thresh = st.slider("Max No-Context Pass Ratio (Too Easy Threshold)", 0.0, 1.0, 0.50, 0.1)
                 with_ctx_thresh = st.slider("Min With-Context Pass Ratio (Answerability Threshold)", 0.0, 1.0, 0.50, 0.1)
 
-
-        
         st.markdown("##### Paths, Deduplication & Output Workflow")
         col_g5, col_g6, col_g7 = st.columns(3)
         with col_g5:
@@ -1505,14 +1474,12 @@ else:
             if not st.session_state["qspec_list"]:
                 st.warning("Select at least one question type.")
             else:
-                # ── 1. Create Progress Bar FIRST so it appears ABOVE CMD log box ──
                 gen_progress_bar = st.progress(0.0, text="Initializing async pipeline...")
                 
                 def _progress_cb(current, total, text):
                     ratio = min(1.0, max(0.0, current / max(1, total)))
                     gen_progress_bar.progress(ratio, text=text)
 
-                # ── 2. Create Log Box SECOND so CMD output displays BELOW progress bar ──
                 log_box   = st.empty()
                 log_lines = [f"Corpus: {source_type}  ·  source: {qna_source}", ""]
 
@@ -1539,7 +1506,6 @@ else:
                     source = make_source(**src_kwargs)
                     _log(f"Source: {qna_source} ({source.count():,} chunks)")
 
-                    # Assemble block array sequences sequentially
                     block_specs = [
                         {"type": "SampleChunksBlock",
                          "params": {"strategy": genqa_sampling, "n_chunks": genqa_n_chunks}},
@@ -1555,7 +1521,6 @@ else:
                         st.warning("Please add at least one question group specification.")
                         st.stop()
 
-                    # Base generator sequence
                     block_specs.append({
                         "type": "GenerateQuestionBlock",
                         "params": {
@@ -1565,21 +1530,18 @@ else:
                         },
                     })
 
-                    # Inject Competitor Filter if checked
                     if use_competitor:
                         block_specs.append({
                             "type": "CompetitorFilterBlock",
                             "params": {"num_competitors": num_competitors}
                         })
 
-                    # Inject Validate Answerable Block Mode
                     if validate_answer_mode != "Disabled":
                         block_specs.append({
                             "type": "ValidateAnswerableBlock",
                             "params": {"drop_failures": (validate_answer_mode == "Drop Failures")}
                         })
 
-                    # Dynamically inject active modular judges
                     if j_grounding:
                         block_specs.append({"type": "GroundingJudgeBlock", "params": {"max_concurrency": genqa_concurrency}})
                     if j_domain:
@@ -1609,23 +1571,17 @@ else:
                     flow = Flow.from_dict({"name": "gui_flow", "blocks": block_specs})
                     flow.set_model_config(generator="openrouter", model=qna_gen_model)
                     
-                    # Bind validation credentials if any judge or validate pass is active
                     if any([j_grounding, j_domain, j_answerability, j_faithfulness, j_semantic, j_empirical]) or validate_answer_mode != "Disabled":
                         flow.set_validation_model_config(generator="openrouter", model=qna_val_model)
 
-                    # Execute flow passing the progress callback
                     qa_pairs = flow.generate(source, source_type, log=_log, progress=_progress_cb)
                     gen_progress_bar.progress(1.0, text="Generation Complete! ✓")
                     _log(f"Generated {len(qa_pairs)} candidate questions")
 
-                    # Retrieve and clean the custom set name
                     safe_set_name = genqa_set_name.strip() or source_type
                     eval_path = _Path("configs/eval_questions") / f"{safe_set_name}.json"
 
-                    # ── 3. Auto-Merge / Skip Review: STRICT FILTERING ──
-                    # ── Auto-Merge / Skip Review: STRICT FILTERING ──
                     if skip_review:
-                        # Filter out questions that explicitly failed validation
                         approved_qa_pairs = [q for q in qa_pairs if q.get("validation_passed", True) is not False]
                         dropped_count = len(qa_pairs) - len(approved_qa_pairs)
 
@@ -1636,7 +1592,7 @@ else:
                         
                         for q in approved_qa_pairs:
                             q["validated"] = True
-                            q["generated"] = False  # Set to approved status
+                            q["generated"] = False
                         
                         eval_path.parent.mkdir(parents=True, exist_ok=True)
                         existing = {"questions": []}
@@ -1652,7 +1608,6 @@ else:
                         _log(f"Successfully auto-merged {len(approved_qa_pairs)} items into {eval_path}")
                         st.success(f"Successfully auto-merged {len(approved_qa_pairs)} questions! (Dropped {dropped_count} failed items) ✓")
                     else:
-                        # Standard Draft Mode
                         safe_set_name = genqa_set_name.strip() or source_type
                         eval_path = _Path("configs/eval_questions") / f"{safe_set_name}.json"
                         
@@ -1684,7 +1639,6 @@ else:
         import json as _json2
         from pathlib import Path as _Path2
 
-        # ── Source URL builder per SDO ────────────────────────────────────
         SDO_PORTAL_URLS = {
             "oran":    "https://orandownloadsweb.azurewebsites.net/specifications",
             "3gpp":    "https://www.3gpp.org/ftp/Specs/archive/",
@@ -1747,7 +1701,6 @@ else:
                 pass
             return None
 
-        # ── Dropdown / File picker for Drafts ──────────────────────────────
         draft_dir = _Path2("draft_questions")
         eval_dir  = _Path2("configs/eval_questions")
         draft_files = [str(p) for p in sorted(draft_dir.glob("*.json"))] if draft_dir.exists() else []        
@@ -1797,7 +1750,6 @@ else:
                     
                     st.session_state["review_state"] = {}
                     for i, q in enumerate(questions):
-                        # Use explicitly saved review_status if available, otherwise infer from validated flag
                         if "review_status" in q:
                             initial_status = q["review_status"]
                         else:
@@ -1819,7 +1771,6 @@ else:
                     corpus_q   = q.get("corpus", source_type)
                     state      = st.session_state["review_state"][i]
 
-                    # ── Status Badge for Header ─────────────────────────────
                     status_badge = {
                         "pending":   "👤 Needs Review",
                         "approved":  "✅ Approved",
@@ -1834,13 +1785,11 @@ else:
                     else:
                         val_badge = ""
                     
-                    # Include the status badge directly in the expander header (Duplication removed)
                     header = f"[{status_badge}] · Q{i+1} · [{fmt} / {difficulty}]{val_badge} · {q['question'][:50]}..."
 
                     with st.expander(header):
                         st.markdown(f"**Question:** {q['question']}")
 
-                        # ── Source reference row ──────────────────────────
                         source_doc = q.get("source_document", "—")
                         canonical  = q.get("canonical_source", "—")
                         chunk_idx  = chunk_id.split("::")[-1] if "::" in chunk_id else "—"
@@ -1861,10 +1810,8 @@ else:
                             if deep_link and deep_link != portal_url:
                                 st.link_button("📄 Open doc", deep_link, width="stretch")
 
-                        # ── Source chunk text (Fixed High-Contrast Styling) ──────────
                         if chunk_id:
                             with st.expander("📖 View source chunk text", expanded=False):
-                                # Dynamically resolve the target collection from the sidebar inputs
                                 target_col = qna_collection.strip() if qna_collection else f"{corpus_q}_{model_key}"
                                 
                                 chunk_text = _fetch_chunk_text(
@@ -1903,7 +1850,6 @@ else:
                             value=state["answer"], key=f"answer_{i}", height=80)
                         state["answer"] = edited_answer
 
-                        # ── Action Buttons with Instant UI Refresh ─────────
                         col_r1, col_r2, col_r3 = st.columns(3)
                         if col_r1.button("✅ Approve", key=f"approve_{i}"): 
                             state["status"] = "approved"
@@ -1943,17 +1889,14 @@ else:
                             q2["generated"] = True
                         updated_questions.append(q2)
                     
-                    # 1. ALWAYS save back to the exact same file being viewed
                     review_path.write_text(_json2.dumps({"questions": updated_questions}, indent=2, ensure_ascii=False), encoding="utf-8")
                     st.success(f"Saved updates to {review_path.name}")
                     
-                    # 2. If it's a draft and completely finished, trigger the promotion popup
                     if is_draft and all_reviewed:
                         st.session_state["prompt_promote"] = True
                     else:
                         st.session_state["prompt_promote"] = False
 
-                # ── The "Popup" (Conditional UI for Promotion) ──
                 if st.session_state.get("prompt_promote"):
                     st.warning("🎉 All questions in this draft have been reviewed! Would you like to move this to the official evaluation set?")
                     col_p1, col_p2 = st.columns(2)
@@ -1963,12 +1906,11 @@ else:
                         eval_path = _Path2("configs/eval_questions") / target_name
                         eval_path.parent.mkdir(parents=True, exist_ok=True)
                         
-                        # Load the latest saved questions and filter out rejected ones for the final production set
                         current_data = _json2.loads(review_path.read_text(encoding="utf-8"))
                         final_qs = [q for q in current_data["questions"] if q.get("review_status") != "rejected"]
                         
                         eval_path.write_text(_json2.dumps({"questions": final_qs}, indent=2, ensure_ascii=False), encoding="utf-8")
-                        review_path.unlink() # Delete the draft
+                        review_path.unlink()
                         
                         st.session_state["prompt_promote"] = False
                         st.session_state.pop("review_state", None)
@@ -1988,7 +1930,6 @@ else:
 
         import json as _json_info
         from pathlib import Path as _Path_info
-
 
         def _render_qna_directory(dir_path_str: str, title: str, is_draft: bool = False):
             dir_path = _Path_info(dir_path_str)
@@ -2012,11 +1953,9 @@ else:
                     total_q += num_qs
                     val_qs = sum(1 for q in qs if q.get("validated") is True)
 
-                    # Toggle styling based on set status
                     badge = "Draft" if is_draft else "Validated"
                     badge_style = "background:#fff8e1;color:#8a6200;border-color:#f0d080;" if is_draft else "background:#e8f5e9;color:#2e7d32;border-color:#a5d6a7;"
                     
-                    # Create columns to align the data with the delete button
                     info_col, action_col = st.columns([5, 1])
                     
                     with info_col:
@@ -2028,12 +1967,11 @@ else:
                             unsafe_allow_html=True
                         )
                     with action_col:
-                        # Add a physical delete button for the JSON file
                         if st.button("🗑️ Delete", key=f"del_qna_{f.name}_{title}", help=f"Permanently delete {f.name}"):
                             try:
                                 f.unlink()
                                 st.success(f"Successfully deleted QnA set: {f.name}")
-                                st.rerun() # Refresh the UI immediately
+                                st.rerun()
                             except Exception as e:
                                 st.error(f"Failed to delete {f.name}: {e}")
                                 
@@ -2058,6 +1996,5 @@ else:
         _render_qna_directory("configs/eval_questions", "Validated QnA Sets")
         st.markdown("---")
         
-        # Fallback directory if genqa_output_dir is out of scope 
         target_draft_dir = genqa_output_dir if "genqa_output_dir" in locals() else "draft_questions"
         _render_qna_directory(target_draft_dir, "Draft QnA Sets", is_draft=True)
