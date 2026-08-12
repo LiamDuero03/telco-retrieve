@@ -105,8 +105,24 @@ class OpenRouterGenerator:
         question:    str,
         results:     list,
         source_type: str = "telecom",
+        response_schema: dict | None = None,
     ) -> dict:
         """Generate a grounded answer from retrieved chunks.
+
+        response_schema, when given, requests SCHEMA-CONSTRAINED
+        structured output — see LocalGenerator.generate()'s own docstring
+        for the full rationale (root-cause fix for mc/tf scoring, see
+        evaluation/evaluate.py's _mc_response_schema()/_match_
+        deterministic_answer()). Sent the same way: response_format:
+        {"type": "json_schema", ...} — the same field core/enrichment.py's
+        enrich_llm_metadata() already sends OpenRouter successfully (there
+        with the generic {"type": "json_object"} mode). Whether a
+        SPECIFIC model routed through OpenRouter actually enforces the
+        schema (vs. the provider silently ignoring it) varies per
+        upstream model/provider — a non-conformant response just isn't
+        valid structured JSON, which evaluate.py's _parse_structured_
+        verdict() treats as a signal to fall back to prose parsing, not
+        an error here.
 
         Returns:
             dict with keys: answer, sources, chunks_used, retrieved_chunks
@@ -137,6 +153,21 @@ class OpenRouterGenerator:
             "Answer:"
         )
 
+        payload = {
+            "model":       self.model,
+            "max_tokens":  self.max_tokens,
+            "temperature": self.temperature,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user",   "content": user_prompt},
+            ],
+        }
+        if response_schema is not None:
+            payload["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": "verdict", "schema": response_schema, "strict": True},
+            }
+
         response = requests.post(
             f"{OPENROUTER_BASE_URL}/chat/completions",
             headers={
@@ -145,21 +176,17 @@ class OpenRouterGenerator:
                 "HTTP-Referer":   self.site_url,
                 "X-Title":        self.site_name,
             },
-            json={
-                "model":       self.model,
-                "max_tokens":  self.max_tokens,
-                "temperature": self.temperature,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user",   "content": user_prompt},
-                ],
-            },
+            json=payload,
             timeout=60,
         )
         response.raise_for_status()
         data = response.json()
 
-        answer = data["choices"][0]["message"]["content"].strip()
+        content = data["choices"][0]["message"].get("content")
+        # Same None -> "" coercion as LocalGenerator.generate() -- a
+        # reasoning model routed through OpenRouter can also return
+        # "content": null on a thin token budget.
+        answer = (content or "").strip()
 
         # Extract and compute cost based on specific pricing structures
         self.last_usage = data.get("usage", {})

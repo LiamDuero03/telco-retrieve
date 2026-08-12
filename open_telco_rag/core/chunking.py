@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import re
 from enum import Enum
@@ -85,19 +86,10 @@ def chunk_hierarchical_markdown(
         # Check if the part is a heading line
         header_match = re.match(r"^(#{1,5})\s+(.*)$", part.strip())
         if header_match:
-            level = len(header_match.group(1))
-            heading_text = header_match.group(2).strip()
-            
-            # Update current level and clear deeper sub-levels to maintain stack hierarchy
-            current_headers[level] = heading_text
-            for l in range(level + 1, 6):
-                current_headers[l] = None
-                
-            # Build stateful breadcrumb string
-            active_breadcrumbs = [current_headers[i] for i in range(1, 6) if current_headers[i]]
-            active_heading_attr = " > ".join(active_breadcrumbs) if active_breadcrumbs else "None"
-            
-            # Flush existing accumulated blocks before starting the new heading sector
+            # Flush the block accumulated under the PREVIOUS heading context
+            # BEFORE updating active_heading_attr to the incoming heading —
+            # otherwise this flush mislabels content with the heading that's
+            # about to start, not the one it was actually written under.
             if current_text_block.strip():
                 chunks.append(Chunk(
                     text=current_text_block.strip(),
@@ -107,7 +99,19 @@ def chunk_hierarchical_markdown(
                 ))
                 global_idx += 1
                 current_text_block = ""
-                
+
+            level = len(header_match.group(1))
+            heading_text = header_match.group(2).strip()
+
+            # Update current level and clear deeper sub-levels to maintain stack hierarchy
+            current_headers[level] = heading_text
+            for l in range(level + 1, 6):
+                current_headers[l] = None
+
+            # Build stateful breadcrumb string
+            active_breadcrumbs = [current_headers[i] for i in range(1, 6) if current_headers[i]]
+            active_heading_attr = " > ".join(active_breadcrumbs) if active_breadcrumbs else "None"
+
             # Keep the header title inline inside the chunk text payload
             current_text_block += part + "\n"
         else:
@@ -281,11 +285,7 @@ def chunk_parent_child(
             global_child_idx += 1
 
     return hierarchical_chunks
-import re
-import concurrent.futures
-from typing import Any
-import tiktoken
-from open_telco_rag.types import Chunk
+
 
 def chunk_lumber_chunker(
     text: str,
@@ -293,6 +293,8 @@ def chunk_lumber_chunker(
     model_name: str = "openai/gpt-4o-mini",
     source_type: str = "",
     theta: int = 550,  # Optimal token context window from the paper
+    **kwargs: Any,  # absorbs chunk_size/overlap etc. forwarded generically by the CLI —
+                    # this strategy uses theta instead, not character/token sizing
 ) -> list[Chunk]:
     """Strategy 4: Lumber Chunker adapted for 3GPP Technical Specs.
     Splits by major Markdown headers to process sections concurrently,
@@ -465,7 +467,14 @@ def chunk_document(
 
     # --- TOKEN BUDGET ADJUSTMENT PASS ---
     strategy_str = strategy.value
-    enrichment = kwargs.get("enrichment", "none")  # Extract enrichment string if passed from master sweep
+    # pop (not get): "enrichment" is chunk_document's own bookkeeping key,
+    # used only for the budget calculation below — it's never a parameter
+    # any individual chunker function accepts, and chunk_sliding_window_tokens
+    # (unlike its sibling strategies) has no **kwargs to silently absorb it.
+    # Left as kwargs.get() before, this crashed with TypeError the moment
+    # anyone passed enrichment=... directly to chunk_document() with
+    # strategy="sliding_window_tokens".
+    enrichment = kwargs.pop("enrichment", "none")  # Extract enrichment string if passed from master sweep
 
     if strategy == ChunkingStrategy.SLIDING_WINDOW_TOKENS:
         # Map generic size parameters to specific token keyword arguments

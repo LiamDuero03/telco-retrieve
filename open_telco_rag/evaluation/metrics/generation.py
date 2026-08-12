@@ -18,7 +18,15 @@ from open_telco_rag.evaluation._claude import claude_call, parse_json
 logger = logging.getLogger(__name__)
 
 # Phrases that indicate the RAG failed to retrieve relevant content.
-# These answers should not score highly on relevancy or faithfulness.
+# These answers should not score highly on relevancy or faithfulness --
+# and, for mc/tf questions, are the SAME signal used by evaluate.py's
+# _match_deterministic_answer() to classify an answer as "abstained"
+# rather than "incorrect" (see that function's own docstring). Shared
+# here, not duplicated, so both call sites recognize exactly the same set
+# of phrasings — extended with a few more "I can't determine this"-style
+# phrasings _build_generation_question()'s own mc/tf instruction
+# ("...say so explicitly instead of guessing") is likely to elicit,
+# beyond the original retrieval-failure-specific wording.
 _NOT_FOUND_PHRASES = [
     "does not contain",
     "not provided in",
@@ -29,6 +37,11 @@ _NOT_FOUND_PHRASES = [
     "not in the context",
     "context does not",
     "provided context does not",
+    "cannot determine",
+    "unable to determine",
+    "insufficient information",
+    "not enough information",
+    "no way to determine",
 ]
 
 def _is_not_found_answer(answer: str) -> bool:
@@ -86,6 +99,8 @@ Answer:
         if not isinstance(claims, list) or not claims:
             return 0.0
     except Exception as e:
+        logger.warning("faithfulness: decompose_claims raised %s: %s — scoring 0.0",
+                        type(e).__name__, e)
         if debug:
             _debug_log("faithfulness", "decompose_claims → exception", str(e))
         return 0.0
@@ -117,6 +132,8 @@ Claims:
         verdicts = verdicts[:len(claims)]
         return sum(1 for v in verdicts if v is True) / len(verdicts)
     except Exception as e:
+        logger.warning("faithfulness: verify_claims raised %s: %s — scoring 0.0",
+                        type(e).__name__, e)
         if debug:
             _debug_log("faithfulness", "verify_claims → exception", str(e))
         return 0.0
@@ -162,13 +179,20 @@ Answer:
         if debug:
             _debug_log("answer_relevancy", "reverse_questions → raw response", raw)
         reverse_qs = parse_json(raw)
-        if not isinstance(reverse_qs, list):
+        # An EMPTY (but validly-parsed) list would otherwise reach
+        # np.mean([]) below, which returns NaN rather than raising —
+        # silently poisoning answer_relevancy instead of the clean 0.0
+        # faithfulness() already returns for the analogous empty-claims
+        # case above.
+        if not isinstance(reverse_qs, list) or not reverse_qs:
             return 0.0
         reverse_qs = [str(q) for q in reverse_qs[:n_reverse]]
         if debug:
             _debug_log("answer_relevancy", "reverse_questions → parsed",
                        "\n  ".join(reverse_qs))
     except Exception as e:
+        logger.warning("answer_relevancy: reverse_questions raised %s: %s — scoring 0.0",
+                        type(e).__name__, e)
         if debug:
             _debug_log("answer_relevancy", "reverse_questions → exception", str(e))
         return 0.0
@@ -184,6 +208,8 @@ Answer:
             sims.append(cos)
         return float(np.mean(sims))
     except Exception as e:
+        logger.warning("answer_relevancy: embedding raised %s: %s — scoring 0.0",
+                        type(e).__name__, e)
         if debug:
             _debug_log("answer_relevancy", "embedding → exception", str(e))
         return 0.0

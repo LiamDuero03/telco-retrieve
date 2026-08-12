@@ -1,3 +1,5 @@
+"""Per-SDO Source implementations (types.Source): load/clean/metadata for
+each standards body's corpus (O-RAN, 3GPP, CAMARA, TM Forum, ITU, ETSI, GSMA)."""
 from open_telco_rag.sources.oran import ORANSource
 from open_telco_rag.sources.tgpp import TPPSource
 from open_telco_rag.sources.camara import CAMARASource

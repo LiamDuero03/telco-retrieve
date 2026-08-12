@@ -1,3 +1,5 @@
+"""Search implementation: dense/bm25/hybrid retrieval, reranking, and
+parent-chunk resolution for hierarchical parent-child chunking."""
 from __future__ import annotations
 import math
 from typing import Any
