@@ -24,12 +24,22 @@ class ChromaStore:
         self.path            = str(path)
         self.collection_name = collection_name
         self._client         = chromadb.PersistentClient(path=self.path)
-        
-        
+
+
         self._collection     = self._client.get_or_create_collection(
             name=collection_name,
             metadata=metadata
         )
+
+        # Queried once at construction rather than hardcoded: Chroma raises
+        # ValueError("Batch size of N is greater than max batch size of M")
+        # if a single add()/upsert() call exceeds this, and M isn't a fixed
+        # constant across chromadb/sqlite versions (it's derived from
+        # sqlite3's SQLITE_MAX_VARIABLE_NUMBER, which changed in newer
+        # sqlite builds) -- callers that need to split large writes into
+        # sub-batches (see ingest()/ingest_multi_enrichment() in
+        # core/pipeline.py) must size against the real value, not a guess.
+        self.max_batch_size  = self._client.get_max_batch_size()
 
     def add(
         self,
@@ -38,6 +48,7 @@ class ChromaStore:
         documents:  list[str],
         metadatas:  list[dict],
     ) -> None:
+        """Upserts (not insert-only) — re-adding an existing id overwrites it."""
         self._collection.upsert(
             ids=ids,
             embeddings=embeddings,

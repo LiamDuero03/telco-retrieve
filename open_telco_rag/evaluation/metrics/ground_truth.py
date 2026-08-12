@@ -7,12 +7,15 @@ Tier 2 metrics — ground truth required.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Callable
 
 import numpy as np
 
 from open_telco_rag.evaluation._claude import claude_call, parse_json
 from open_telco_rag.evaluation.metrics.generation import _debug_log
+
+logger = logging.getLogger(__name__)
 
 
 def context_recall(
@@ -63,6 +66,7 @@ Context:
                        f"total={total} supported={supported}")
         return min(1.0, supported / total) if total > 0 else 0.0
     except Exception as e:
+        logger.warning("context_recall raised %s: %s — scoring 0.0", type(e).__name__, e)
         if debug:
             _debug_log("context_recall", "exception", str(e))
         return 0.0
@@ -119,6 +123,8 @@ Reference answer:
         f1        = (2 * precision * recall / (precision + recall)
                      if (precision + recall) > 0 else 0.0)
     except Exception as e:
+        logger.warning("answer_correctness: f1 raised %s: %s — scoring 0.0",
+                        type(e).__name__, e)
         if debug:
             _debug_log("answer_correctness", "f1 → exception", str(e))
         f1 = 0.0
@@ -131,6 +137,8 @@ Reference answer:
                       (np.linalg.norm(a_emb) * np.linalg.norm(r_emb) + 1e-10))
         sem   = max(0.0, sem)
     except Exception as e:
+        logger.warning("answer_correctness: embedding raised %s: %s — scoring 0.0",
+                        type(e).__name__, e)
         if debug:
             _debug_log("answer_correctness", "embedding → exception", str(e))
         sem = 0.0

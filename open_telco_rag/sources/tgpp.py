@@ -11,16 +11,27 @@ from open_telco_rag.core.cleaning import base_clean
 class TPPSource:
     """Loads, cleans and extracts metadata from 3GPP TSpec-LLM Markdown files."""
 
-    SUPPORTED_EXTENSIONS = [".md"]
+    # .md = TSpec-LLM marked/converted files (structured, has heading markup)
+    # .docx = original 3GPP Word docs (unstructured baseline, flat text only)
+    SUPPORTED_EXTENSIONS = [".md", ".docx"]
 
     def supported_extensions(self) -> list[str]:
         return self.SUPPORTED_EXTENSIONS
 
     def load(self, path: Path) -> str:
-        """Load Markdown file as plain text."""
+        """Load a source file as plain text.
+
+        .md files are read as-is (they carry markdown heading structure).
+        .docx files are loaded as a flat, unstructured baseline via
+        `_load_docx` — paragraph text only, no heading markup preserved —
+        intentionally, to serve as the "no markdown structure" comparison arm.
+        """
         path = Path(path)
-        if path.suffix.lower() == ".md":
+        suffix = path.suffix.lower()
+        if suffix == ".md":
             return path.read_text(encoding="utf-8", errors="ignore")
+        if suffix == ".docx":
+            return self._load_docx(path)
         raise ValueError(f"Unsupported file type: {path.suffix}")
 
     def clean(self, text: str) -> str:

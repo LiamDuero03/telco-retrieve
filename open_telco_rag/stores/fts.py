@@ -1,4 +1,4 @@
-"""SQLite FTS5 inverted index sparse vector/keyword store."""
+"""SQLite FTS5 inverted index sparse store (Optimized for High-Speed Disk I/O)."""
 
 from __future__ import annotations
 
@@ -18,34 +18,46 @@ class FTSStore:
         self.collection_name = collection_name
         self.db_path = self.path / f"{self.collection_name}_fts.db"
         
-        # Ensure parent directory exists
         self.path.mkdir(parents=True, exist_ok=True)
+        self._conn = None  # Persistent connection handle
         self._init_db()
 
+    def _get_conn(self) -> sqlite3.Connection:
+        """Returns or creates a persistent SQLite connection handle."""
+        if self._conn is None:
+            self._conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+            cursor = self._conn.cursor()
+            cursor.execute("PRAGMA journal_mode = WAL;")
+            cursor.execute("PRAGMA synchronous = OFF;")
+            
+            # OPTIMIZATION: Allocate 128MB CPU RAM cache for B-tree index construction
+            cursor.execute("PRAGMA cache_size = -128000;")
+            cursor.execute("PRAGMA temp_store = MEMORY;")
+            self._conn.commit()
+        return self._conn
+
     def _init_db(self) -> None:
-        """Create FTS5 virtual table if it doesn't exist."""
-        conn = sqlite3.connect(str(self.db_path))
+        """Create FTS5 table with optimized WAL mode and memory settings."""
+        conn = self._get_conn()
         cursor = conn.cursor()
         cursor.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS bm25_index 
             USING fts5(doc_id UNINDEXED, text);
         """)
         conn.commit()
-        conn.close()
 
     def add(self, ids: list[str], documents: list[str]) -> None:
-        """Bulk insert documents into the FTS5 inverted index."""
+        """Bulk insert documents using the persistent connection handle."""
         if not ids or not documents:
             return
             
-        conn = sqlite3.connect(str(self.db_path))
+        conn = self._get_conn()
         cursor = conn.cursor()
         cursor.executemany(
             "INSERT INTO bm25_index(doc_id, text) VALUES (?, ?)",
             zip(ids, documents)
         )
         conn.commit()
-        conn.close()
 
     def search(self, query: str, top_k: int = 5) -> list[tuple[str, float]]:
         """Instant O(terms) BM25 lookup returning a list of (doc_id, score) tuples."""
@@ -53,19 +65,16 @@ class FTSStore:
             return []
 
         import re
-        # Sanitize query for FTS5 syntax (extract alphanumeric terms)
         clean_words = re.findall(r'\w+', query)
         if not clean_words:
             return []
 
         fts_query = " OR ".join([f'"{w}"' for w in clean_words])
 
-        conn = sqlite3.connect(str(self.db_path))
+        conn = self._get_conn()
         cursor = conn.cursor()
         
         try:
-            # SQLite bm25() returns negative values where lower/more negative is better.
-            # We negate it (-bm25) so higher is a better score.
             cursor.execute("""
                 SELECT doc_id, -bm25(bm25_index) AS score 
                 FROM bm25_index 
@@ -76,21 +85,27 @@ class FTSStore:
             results = cursor.fetchall()
         except sqlite3.OperationalError:
             results = []
-        finally:
-            conn.close()
 
         return results
 
     def clear(self) -> None:
-        """Drop all indexed records."""
+        """Drop all indexed records instantly by dropping and recreating the virtual table."""
         if self.db_path.exists():
-            conn = sqlite3.connect(str(self.db_path))
+            conn = self._get_conn()
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM bm25_index;")
+            # OPTIMIZATION: Instant O(1) table reset instead of slow O(N) row deletions
+            cursor.execute("DROP TABLE IF EXISTS bm25_index;")
+            cursor.execute("""
+                CREATE VIRTUAL TABLE IF NOT EXISTS bm25_index 
+                USING fts5(doc_id UNINDEXED, text);
+            """)
             conn.commit()
-            conn.close()
+
 
     def delete(self) -> None:
         """Permanently delete the database file from disk."""
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
         if self.db_path.exists():
             self.db_path.unlink()

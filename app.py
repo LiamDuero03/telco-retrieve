@@ -1,6 +1,19 @@
 """Streamlit web UI for TelcoLens."""
 
+import sys
+
 import streamlit as st
+
+# Force UTF-8 output regardless of the host console's default code page
+# (e.g. Windows consoles commonly default to cp1252). Streamlit's own UI
+# renders in the browser and isn't affected, but ingest()/search() and
+# friends still print() status messages (some with emoji) to this
+# process's actual stdout/stderr, which inherits the terminal `streamlit
+# run app.py` was launched from — same UnicodeEncodeError risk as the CLI.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -1989,8 +2002,8 @@ else:
                             try:
                                 f.unlink()
                                 st.rerun()
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                st.error(f"Failed to delete {f.name}: {e}")
             st.caption(f"**Total questions across {len(files)} sets:** {total_q}")
 
         _render_qna_directory("configs/eval_questions", "Validated QnA Sets")

@@ -1,3 +1,5 @@
+"""Cloud embedder backend: batches text through OpenRouter's embeddings
+API for models not run locally via sentence-transformers."""
 import os
 import json
 import time
@@ -7,6 +9,9 @@ import requests
 from requests.adapters import HTTPAdapter
 
 class OpenRouterEmbedder:
+    """Embedder implementation (see types.Embedder) backed by OpenRouter's
+    embeddings API, resolving model_key against configs/embedding_models.json."""
+
     def __init__(
         self,
         model_key: str = "minilm",

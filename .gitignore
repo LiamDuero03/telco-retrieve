@@ -92,6 +92,7 @@ G-RAG_qna_latest_jsonl.jsonl
 
 # Results and leaderboard
 logs/
+report (1).md
 
 # Eval questions (internal)
 configs/eval_questions/
