@@ -46,7 +46,6 @@ hf_notebooks/
 *.swo
 .DS_Store
 Thumbs.db
-#app.py
 
 # ── Testing & coverage ────────────────────────────────────────────────────────
 .pytest_cache/

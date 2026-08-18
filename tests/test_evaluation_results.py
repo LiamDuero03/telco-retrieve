@@ -1,11 +1,8 @@
-"""Tests for open_telco_rag.evaluation.results — the fix for a real design
-bug: mc/tf exact-match correctness used to be written into faithfulness/
-answer_relevancy/context_recall/answer_correctness (OE-specific metrics,
-with answer_relevancy even hardcoded to 1.0 regardless of anything). That
-made a mixed mc+tf+open evaluation run's aggregate faithfulness/relevancy
-numbers an uninterpretable blend of two different things. accuracy is now
-mc/tf's own dedicated field; the four OE metrics stay at their -1.0 "not
-applicable" default for mc/tf questions.
+"""Tests for the fix to a design bug: mc/tf exact-match correctness used to
+be written into the OE-only metrics (faithfulness/answer_relevancy/
+context_recall/answer_correctness), blending two different things together
+in a mixed mc+tf+open run. accuracy is now mc/tf's own field; the four OE
+metrics stay at their -1.0 "not applicable" default for mc/tf questions.
 """
 from __future__ import annotations
 
@@ -18,7 +15,7 @@ def _mc(accuracy: float, sim: float = 0.8, outcome: str | None = None) -> Questi
     return QuestionResult(
         question="q", corpus="3gpp", answer="A", sources=[], chunks_used=3,
         answer_type="mc", accuracy=accuracy, mc_tf_outcome=outcome, mean_similarity=sim,
-        source_coverage=2, canonical_hit=1, coverage_ratio=0.7,
+        distinct_sources_retrieved=2, canonical_hit=1, coverage_ratio=0.7,
     )
 
 
@@ -26,7 +23,7 @@ def _tf(accuracy: float, sim: float = 0.75, outcome: str | None = None) -> Quest
     return QuestionResult(
         question="q", corpus="3gpp", answer="True", sources=[], chunks_used=3,
         answer_type="tf", accuracy=accuracy, mc_tf_outcome=outcome, mean_similarity=sim,
-        source_coverage=1, canonical_hit=0, coverage_ratio=0.6,
+        distinct_sources_retrieved=1, canonical_hit=0, coverage_ratio=0.6,
     )
 
 
@@ -35,7 +32,7 @@ def _open(faithfulness: float, relevancy: float, sim: float = 0.6) -> QuestionRe
         question="q", corpus="3gpp", answer="some answer", sources=[], chunks_used=5,
         answer_type="open", faithfulness=faithfulness, answer_relevancy=relevancy,
         context_recall=0.9, answer_correctness=0.85, mean_similarity=sim,
-        source_coverage=3, canonical_hit=-1, coverage_ratio=0.5,
+        distinct_sources_retrieved=3, canonical_hit=-1, coverage_ratio=0.5,
     )
 
 
@@ -48,13 +45,10 @@ def test_mixed_mc_tf_open_run_does_not_blend_accuracy_into_oe_metrics():
     ]
     agg = aggregate(results)
 
-    # mc/tf correctness lands in mean_accuracy, computed over ALL 5 mc/tf
-    # items together (not blended with the 2 open items' OE scores).
+    # mc/tf correctness lands in mean_accuracy over all 5 mc/tf items, not blended with open.
     assert agg["mean_accuracy"] == pytest.approx((1.0 + 0.0 + 1.0 + 1.0 + 1.0) / 5)
 
-    # OE metrics are computed ONLY over the 2 open items, not diluted by
-    # the 5 mc/tf items that would previously have contributed 1.0/is_correct
-    # values into these same fields.
+    # OE metrics computed only over the 2 open items, not diluted by mc/tf.
     assert agg["mean_faithfulness"] == pytest.approx((0.8 + 0.6) / 2)
     assert agg["mean_answer_relevancy"] == pytest.approx((0.9 + 0.7) / 2)
 
@@ -95,9 +89,8 @@ def test_mean_faithfulness_is_not_applicable_for_an_all_mc_tf_run():
 
 
 def test_coverage_ratio_aggregates_correctly():
-    """Regression test for a real dead-flag bug: --threshold was
-    advertised as driving a coverage_ratio metric that was never actually
-    computed anywhere. mean_coverage_ratio must now be real."""
+    """Regression: --threshold was advertised as driving coverage_ratio,
+    but it was never actually computed."""
     agg = aggregate([_mc(1.0), _tf(1.0)])  # coverage_ratio=0.7 and 0.6
     assert agg["mean_coverage_ratio"] == pytest.approx((0.7 + 0.6) / 2)
 
@@ -110,14 +103,9 @@ def test_empty_question_list_does_not_crash():
 
 
 # ── mc_tf_outcome three-way breakdown ───────────────────────────────────────
-#
-# Design requirement, not just a bug fix: a generator honestly abstaining
-# ("the context doesn't contain enough information") is a DIFFERENT failure
-# than confidently picking the wrong answer -- one points at retrieval/
-# chunking (nothing relevant was ever surfaced), the other at generation/
-# reasoning (something relevant WAS surfaced, but the model still got it
-# wrong). A single accuracy number can't distinguish these; that's what
-# mean_accuracy_attempted/abstention_rate/wrong_rate are for.
+# Design requirement: honest abstention (retrieval gap) is a different failure
+# than a confident wrong answer (generation error) — a single accuracy number
+# can't distinguish them; hence mean_accuracy_attempted/abstention_rate/wrong_rate.
 
 def test_mc_tf_outcome_rates_computed_across_correct_incorrect_abstained():
     results = [
@@ -138,10 +126,9 @@ def test_mc_tf_outcome_rates_computed_across_correct_incorrect_abstained():
 
 
 def test_mc_tf_outcome_rates_not_applicable_when_no_outcomes_tracked():
-    """Existing QuestionResults built without mc_tf_outcome (accuracy set
-    directly, the pre-this-fix convention) must not silently masquerade
-    as "0% abstention" -- -1.0 ("not applicable"), same as every other
-    not-computed sentinel in this module."""
+    """Old-convention QuestionResults (accuracy set directly, no outcome)
+    must not silently read as "0% abstention"; must be -1.0 like other
+    sentinels."""
     agg = aggregate([_mc(1.0), _mc(0.0)])  # no outcome= passed
     assert agg["mean_accuracy_attempted"] == -1.0
     assert agg["abstention_rate"] == -1.0
@@ -177,11 +164,8 @@ def test_by_format_breakdown_includes_outcome_rates_for_mc_and_tf():
 
 
 # ── Efficiency aggregation (latency/tokens/judge-tokens/cost) ──────────────
-#
-# Requirement: CorpusResult.aggregate() sums/means these the same way the
-# accuracy/faithfulness/etc. metrics already are, against a small fixture
-# with known per-question values -- computed by hand below so the
-# assertions aren't just re-deriving aggregate()'s own formula.
+# Sums/means computed by hand against a known fixture, so assertions don't
+# just re-derive aggregate()'s own formula.
 
 def _eff(
     latency=1.0, search_latency=0.2, rerank_latency=0.1, gen_latency=0.7,
@@ -208,7 +192,6 @@ def test_efficiency_aggregates_sum_and_mean_correctly_against_known_fixture():
     ]
     agg = aggregate(results)
 
-    # Sums.
     assert agg["total_prompt_tokens"] == 300
     assert agg["total_completion_tokens"] == 60
     assert agg["total_tokens"] == 360
@@ -216,7 +199,7 @@ def test_efficiency_aggregates_sum_and_mean_correctly_against_known_fixture():
     assert agg["total_judge_completion_tokens"] == 8
     assert agg["total_cost"] == pytest.approx(0.04)
 
-    # Means -- (1.0 + 3.0) / 2 = 2.0, (100 + 200) / 2 = 150, etc.
+    # Means: (1.0+3.0)/2=2.0, (100+200)/2=150, etc.
     assert agg["mean_latency"] == pytest.approx(2.0)
     assert agg["mean_prompt_tokens"] == pytest.approx(150.0)
     assert agg["mean_total_tokens"] == pytest.approx(180.0)
@@ -228,10 +211,8 @@ def test_efficiency_aggregates_sum_and_mean_correctly_against_known_fixture():
 
 
 def test_cost_none_when_no_question_has_a_known_cost():
-    """A run where every question's cost is unknown (e.g. every question
-    ran through claude.py, which has no pricing table) must report
-    total_cost/mean_cost as None -- NOT 0.0, which would be
-    indistinguishable from a genuinely free local-vLLM run."""
+    """All-unknown-cost run (e.g. claude.py, no pricing table) must report
+    None, not 0.0 (which would look like a genuinely free local-vLLM run)."""
     results = [_eff(cost=None), _eff(cost=None)]
     agg = aggregate(results)
 
@@ -241,10 +222,8 @@ def test_cost_none_when_no_question_has_a_known_cost():
 
 
 def test_cost_aggregation_distinguishes_genuinely_free_from_partially_unknown():
-    """A mix of a genuinely-free ($0.00) local question and an
-    unknown-cost question must sum/average only the KNOWN ones -- the
-    known $0.00 contributes a real zero, the unknown one is excluded
-    entirely (not treated as an implicit zero)."""
+    """Mix of genuinely-free ($0.00) and unknown-cost: only known costs
+    are summed/averaged; unknown is excluded, not treated as an implicit zero."""
     results = [_eff(cost=0.0), _eff(cost=None)]
     agg = aggregate(results)
 
@@ -270,10 +249,105 @@ def test_efficiency_aggregates_default_to_zero_for_empty_question_list():
 
 
 def test_mc_tf_outcome_rates_when_every_mc_tf_question_abstained():
-    """Edge case: every mc/tf question abstained -- accuracy_attempted has
-    an empty denominator (0 correct + 0 incorrect), must report -1.0
-    ("not applicable"), not a ZeroDivisionError or a misleading 0.0."""
+    """All-abstained edge case: empty denominator must give -1.0, not
+    ZeroDivisionError or a misleading 0.0."""
     agg = aggregate([_mc(0.0, outcome="abstained"), _tf(0.0, outcome="abstained")])
     assert agg["abstention_rate"] == pytest.approx(1.0)
     assert agg["wrong_rate"] == pytest.approx(0.0)
     assert agg["mean_accuracy_attempted"] == -1.0
+
+
+# ── weighted_score_pct — the new composite metric ───────────────────────────
+#
+# score_pct = (1*mc_correct + 1*tf_correct + 5*oe_correct)
+#             / (1*mc_total  + 1*tf_total  + 5*oe_total)
+#             * 100
+# mc/tf: outcome == "correct" counts, abstained scores 0 (like accuracy itself).
+# open: answer_correctness >= OE_CORRECTNESS_THRESHOLD (0.7) counts; no
+# reference_answer (-1.0) is excluded from both numerator and denominator.
+
+def _open_scored(answer_correctness: float) -> QuestionResult:
+    """Like _open(), but exposes answer_correctness directly since _open()
+    hardcodes 0.85."""
+    return QuestionResult(
+        question="q", corpus="3gpp", answer="some answer", sources=[], chunks_used=5,
+        answer_type="open", faithfulness=0.7, answer_relevancy=0.7,
+        context_recall=0.9, answer_correctness=answer_correctness, mean_similarity=0.6,
+        distinct_sources_retrieved=3, canonical_hit=-1, coverage_ratio=0.5,
+    )
+
+
+def _open_no_reference_answer() -> QuestionResult:
+    """No reference_answer -> answer_correctness stays at its -1.0 default;
+    must be excluded from oe_total entirely, not counted as wrong."""
+    return QuestionResult(
+        question="q", corpus="3gpp", answer="some answer", sources=[], chunks_used=5,
+        answer_type="open", faithfulness=0.7, answer_relevancy=0.7,
+        mean_similarity=0.6, distinct_sources_retrieved=3, canonical_hit=-1, coverage_ratio=0.5,
+    )
+
+
+def test_weighted_score_pct_matches_hand_calculated_value_from_a_known_fixture():
+    """3 mc (2 correct, 1 incorrect) + 2 tf (1 correct, 1 abstained) +
+    3 open (0.8/0.75 >= 0.7 threshold -> correct, 0.4 -> not) + 1 open
+    with no reference_answer (excluded).
+
+    mc_tf_correct=3, mc_tf_total=5, oe_correct=2, oe_total=3
+    numerator=3+5*2=13, denominator=5+5*3=20 -> 13/20*100=65.0
+    """
+    results = [
+        _mc(1.0, outcome="correct"),
+        _mc(1.0, outcome="correct"),
+        _mc(0.0, outcome="incorrect"),
+        _tf(1.0, outcome="correct"),
+        _tf(0.0, outcome="abstained"),
+        _open_scored(0.8),
+        _open_scored(0.75),
+        _open_scored(0.4),
+        _open_no_reference_answer(),
+    ]
+    agg = aggregate(results)
+    assert agg["weighted_score_pct"] == pytest.approx(65.0)
+
+
+def test_weighted_score_pct_abstained_mc_tf_counts_as_not_correct():
+    """Abstained mc/tf scores 0 points like a wrong answer, unlike the
+    exclusion acc_attempted gives it."""
+    results = [_mc(0.0, outcome="abstained"), _mc(0.0, outcome="abstained")]
+    agg = aggregate(results)
+    assert agg["weighted_score_pct"] == pytest.approx(0.0)
+
+
+def test_weighted_score_pct_open_question_below_threshold_scores_zero_points():
+    results = [_open_scored(0.69)]  # just under the 0.7 default threshold
+    agg = aggregate(results)
+    assert agg["weighted_score_pct"] == pytest.approx(0.0)
+
+
+def test_weighted_score_pct_open_question_at_exactly_threshold_counts_as_correct():
+    results = [_open_scored(0.7)]  # >= threshold, per the spec's own ">="
+    agg = aggregate(results)
+    assert agg["weighted_score_pct"] == pytest.approx(100.0)
+
+
+def test_weighted_score_pct_not_applicable_when_denominator_is_zero():
+    """All-excluded run (e.g. no-reference-answer opens only): must be
+    -1.0, not ZeroDivisionError or a misleading 0.0."""
+    results = [_open_no_reference_answer(), _open_no_reference_answer()]
+    agg = aggregate(results)
+    assert agg["weighted_score_pct"] == -1.0
+
+
+def test_weighted_score_pct_open_weighs_five_x_an_mc_tf_question():
+    """Proof of the 5x weighting: one wrong open question pulls the score
+    down much further than one wrong mc/tf would."""
+    mc_tf_only = aggregate([_mc(1.0, outcome="correct")])
+    assert mc_tf_only["weighted_score_pct"] == pytest.approx(100.0)
+
+    with_wrong_open = aggregate([_mc(1.0, outcome="correct"), _open_scored(0.0)])
+    # numerator = 1 + 5*0 = 1, denominator = 1 + 5*1 = 6 -> 1/6*100
+    assert with_wrong_open["weighted_score_pct"] == pytest.approx(100 / 6)
+
+    with_wrong_mc = aggregate([_mc(1.0, outcome="correct"), _mc(0.0, outcome="incorrect")])
+    # numerator=1, denominator=2 -> 50.0, a much smaller penalty, confirming the 5x weight.
+    assert with_wrong_mc["weighted_score_pct"] == pytest.approx(50.0)

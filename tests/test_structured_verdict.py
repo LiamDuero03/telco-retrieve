@@ -1,15 +1,12 @@
-"""Tests for the structured, schema-constrained mc/tf verdict machinery —
-the root-cause fix replacing free-text prose parsing (three separate regex
-bugs found and patched in one session; see evaluate.py's
-_match_deterministic_answer_prose() docstring for the full history).
+"""Tests for the structured, schema-constrained mc/tf verdict machinery,
+which replaces free-text prose parsing (see evaluate.py's
+_match_deterministic_answer_prose() docstring for the regex-bug history).
 
-_match_deterministic_answer() is the actual entry point: it tries the
-structured path (_parse_structured_verdict() + _classify_structured_verdict())
-first, and ONLY falls back to prose parsing when the answer isn't (or
-doesn't fully match) the expected structured shape. Since prose input is
-never valid JSON, every existing prose-based test in
-test_evaluate_question_mc_tf.py continues to exercise the fallback path
-unchanged — these tests cover the NEW structured path specifically.
+_match_deterministic_answer() tries the structured path first
+(_parse_structured_verdict() + _classify_structured_verdict()), falling back
+to prose parsing only when the answer doesn't match the structured shape.
+These tests cover the new structured path; existing prose tests in
+test_evaluate_question_mc_tf.py still exercise the fallback unchanged.
 """
 from __future__ import annotations
 
@@ -29,8 +26,7 @@ from open_telco_rag.evaluation.questions import EvalQuestion
 # ── Schema builders ──────────────────────────────────────────────────────
 
 def test_mc_response_schema_enum_is_built_from_the_actual_options_not_a_fixed_list():
-    """A 3-option question must not have "D" as a valid choice, and a
-    5-option question must not be artificially capped at 4."""
+    """Enum options come from the actual dict, not a fixed A-D cap."""
     schema = _mc_response_schema({"A": "N1", "B": "E2", "C": "N2"})
     assert schema["properties"]["option"]["enum"] == ["A", "B", "C", None]
 
@@ -65,8 +61,8 @@ def test_response_schema_for_mc_and_tf():
 
 
 def test_response_schema_for_mc_without_options_falls_back_to_none():
-    """A malformed mc question with no options dict must not crash --
-    just no structural constraint, same as open questions."""
+    """Malformed mc question (no options dict) must not crash; falls back
+    like open questions."""
     q = EvalQuestion(question="q", keywords=[], corpus="3gpp", answer_type="mc", options=None)
     assert _response_schema_for(q) is None
 
@@ -86,8 +82,8 @@ def test_parse_structured_verdict_accepts_well_formed_tf_json():
 
 
 def test_parse_structured_verdict_returns_none_for_plain_prose():
-    """The exact property that makes the prose fallback safe: free text
-    is never valid JSON, so it's unambiguously routed to the fallback."""
+    """Free text is never valid JSON, so it's routed unambiguously to the
+    prose fallback."""
     assert _parse_structured_verdict("The answer is B.", "mc") is None
 
 
@@ -97,9 +93,8 @@ def test_parse_structured_verdict_returns_none_for_invalid_verdict_value():
 
 
 def test_parse_structured_verdict_returns_none_when_required_key_missing_for_answer_type():
-    """A tf-shaped object (has "boolean") presented for an mc question
-    (needs "option") must fall through to prose parsing, not silently
-    misread the wrong field."""
+    """A tf-shaped object given for an mc question must fall through to
+    prose parsing, not misread the wrong field."""
     raw = json.dumps({"verdict": "answered", "boolean": True, "justification": "x"})
     assert _parse_structured_verdict(raw, "mc") is None
 
@@ -110,6 +105,45 @@ def test_parse_structured_verdict_returns_none_for_json_array_not_object():
 
 def test_parse_structured_verdict_returns_none_for_malformed_json():
     assert _parse_structured_verdict('{"verdict": "answered", "option": ', "mc") is None
+
+
+# ── _parse_structured_verdict — tf "boolean" type guard ──────────────────
+#
+# Regression: the schema declares boolean as JSON boolean-or-null, but a
+# model/server can still emit the JSON STRING "false" instead of the JSON
+# literal false. bool("false") is True (any non-empty string is truthy),
+# which used to silently flip a correct "False" answer to "incorrect".
+
+def test_parse_structured_verdict_normalizes_string_false_to_real_bool():
+    raw = json.dumps({"verdict": "answered", "boolean": "false", "justification": "x"})
+    parsed = _parse_structured_verdict(raw, "tf")
+    assert parsed["boolean"] is False
+
+
+def test_parse_structured_verdict_normalizes_string_true_to_real_bool():
+    raw = json.dumps({"verdict": "answered", "boolean": "TRUE", "justification": "x"})  # case-insensitive
+    parsed = _parse_structured_verdict(raw, "tf")
+    assert parsed["boolean"] is True
+
+
+def test_parse_structured_verdict_rejects_an_unrecognized_boolean_string():
+    """Not "true"/"false" -- can't be trusted enough to normalize; falls
+    through to prose parsing on the raw text instead of guessing."""
+    raw = json.dumps({"verdict": "answered", "boolean": "maybe", "justification": "x"})
+    assert _parse_structured_verdict(raw, "tf") is None
+
+
+def test_parse_structured_verdict_rejects_a_non_string_non_bool_boolean():
+    raw = json.dumps({"verdict": "answered", "boolean": 1, "justification": "x"})
+    assert _parse_structured_verdict(raw, "tf") is None
+
+
+def test_parse_structured_verdict_still_accepts_real_json_null_boolean():
+    """Null is a legitimate schema value (abstain signal), not something
+    the new type guard should reject."""
+    raw = json.dumps({"verdict": "answered", "boolean": None, "justification": "x"})
+    parsed = _parse_structured_verdict(raw, "tf")
+    assert parsed["boolean"] is None
 
 
 # ── _classify_structured_verdict ─────────────────────────────────────────
@@ -130,9 +164,8 @@ def test_classify_structured_verdict_mc_abstained():
 
 
 def test_classify_structured_verdict_mc_answered_but_option_null_is_defensively_abstained():
-    """Internally inconsistent response (verdict=answered but no option)
-    -- shouldn't happen under a properly enforced schema, but must not
-    silently score "incorrect" against a genuinely absent answer."""
+    """Inconsistent verdict=answered+no option must not silently score
+    as "incorrect"."""
     obj = {"verdict": "answered", "option": None, "justification": "x"}
     assert _classify_structured_verdict(obj, "B", "mc") == "abstained"
 
@@ -165,21 +198,17 @@ def test_classify_structured_verdict_tf_answered_but_boolean_null_is_defensively
 # ── _match_deterministic_answer — structured path takes priority ────────
 
 def test_match_deterministic_answer_uses_structured_path_when_available():
-    """No regex, no phrase-list matching involved -- confirms structured
-    JSON input is read directly rather than falling through to prose
-    parsing (which would also happen to work for this particular input,
-    but for the wrong reason)."""
+    """Confirms structured JSON is read directly, not via the prose
+    fallback (which would coincidentally also work here)."""
     raw = json.dumps({"verdict": "answered", "option": "A", "justification": "the specification states X"})
     assert _match_deterministic_answer(raw, "A", "mc") == "correct"
     assert _match_deterministic_answer(raw, "B", "mc") == "incorrect"
 
 
 def test_match_deterministic_answer_structured_path_immune_to_the_justification_text_bug():
-    """The exact real bug this whole redesign was motivated by: a
-    justification that explains away the OTHER options using a phrase
-    like "not mentioned" must NOT cause a misclassification when the
-    verdict/option fields are read directly instead of pattern-matched
-    out of the prose."""
+    """Regression: a justification phrase like "not mentioned" describing
+    other options must not cause misclassification when option/verdict
+    are read directly instead of pattern-matched."""
     raw = json.dumps({
         "verdict": "answered", "option": "A",
         "justification": ("The other options (allocating additional IP addresses or a "
@@ -191,8 +220,16 @@ def test_match_deterministic_answer_structured_path_immune_to_the_justification_
 
 
 def test_match_deterministic_answer_falls_back_to_prose_when_not_structured():
-    """Confirms the fallback still works end to end through the public
-    entry point, not just via _match_deterministic_answer_prose()
-    directly -- a server/model that doesn't honor response_format:
-    json_schema must not simply break."""
+    """Confirms the fallback works via the public entry point when
+    response_format: json_schema isn't honored."""
     assert _match_deterministic_answer("The answer is B.", "B", "mc") == "correct"
+
+
+def test_match_deterministic_answer_string_false_is_not_treated_as_true():
+    """The regression this whole fix targets, exercised end to end: a
+    genuinely correct "False" answer, delivered as the JSON string "false"
+    instead of the JSON literal false, must score "correct" -- not
+    "incorrect" via bool("false") == True."""
+    raw = json.dumps({"verdict": "answered", "boolean": "false", "justification": "the spec says otherwise"})
+    assert _match_deterministic_answer(raw, "False", "tf") == "correct"
+    assert _match_deterministic_answer(raw, "True", "tf") == "incorrect"

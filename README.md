@@ -119,39 +119,6 @@ open-telco-rag ask "What interfaces does the Near-RT RIC expose?" --source-type 
 
 ---
 
-## GUI
-
-TelcoLens ships with a Streamlit web UI (`app.py`) with two separate pipelines selectable from the sidebar:
-
-```bash
-streamlit run app.py
-```
-
-### 🔍 RAG pipeline
-| Tab | Purpose |
-|-----|---------|
-| Home | Corpus overview and quick-start guide |
-| Ask | Retrieval + LLM generation with confidence indicator |
-| Search | Pure vector search, no LLM |
-| Ingest | Ingest documents into ChromaDB from the UI |
-| Evaluate | Run the full evaluation suite with live progress |
-| Leaderboard | Compare models, embedders, and corpora |
-| DB info | Inspect ChromaDB collections |
-
-### 🧪 QnA Generation pipeline
-| Tab | Purpose |
-|-----|---------|
-| Generate QnA | Build a generation pipeline (sampling strategy, question types, concurrency, summarization, validation) and generate draft evaluation questions |
-| Review QnA | Review and edit draft or already-validated QnA sets (`configs/eval_questions/`), view source chunk text with document links, approve / correct / reject questions, save updates in place, and promote completed drafts to official evaluation sets |
-
-The QnA Generation pipeline requires [telco-qna-generation](https://github.com/Znbne/telco-qna-generation) to be installed:
-
-```bash
-pip install -e ../telco-qna-generation
-```
-
----
-
 ## Cookbook
 
 The Open Telco RAG Cookbook is available as a [PDF](https://github.com/Znbne/telcolens-cookbook/blob/master/cookbook.pdf) and as interactive Jupyter notebooks in the [`notebooks/`](notebooks/) directory — one per corpus:
@@ -252,11 +219,7 @@ open-telco-rag ingest 3gpp \
 
 Connectivity is checked once, up front, before any files are processed — a bad endpoint/model fails fast with one clear message instead of every parsing worker independently discovering (and retrying against) a dead server.
 
-**Minimizing LLM calls across a grid**: neither chunking nor enrichment depends on the embedding model — running `ingest_multi_enrichment()` (or the CLI) once per (model × chunking config) reruns those LLM passes for every model, for no benefit. `ingest_multi_enrichment()` itself enforces the alternative: chunk+enrich each (chunking config, enrichment strategy) pair exactly once, cache it, then only repeat the (cheap, LLM-free) embedding step per model. See its own docstring in `core/pipeline.py` for the full design.
-
-**Adding LLM-based coverage to an already-completed non-LLM `master_grid.py` run**: `master_grid_llm_completion.py` runs *only* the LLM-based work `master_grid.py` itself never covers — `lumber_chunker` chunking (all enrichment variants) plus `llm_metadata` enrichment on top of `master_grid.py`'s existing 4 chunking strategies — for every model in `MODELS`. It imports `MODELS`/`CHUNKING_STRATEGIES`/`ENRICHMENT_STRATEGIES`/`run_name_for()`/`EMBED_BATCH_SIZE_OVERRIDES`/`HF_REPO_ID`/etc. directly from `master_grid.py` rather than duplicating them, so run names and the Hugging Face destination (`final-ingestion-grid/`) match exactly — new runs land alongside the ones `master_grid.py` already pushed, as part of the same grid. Same two-phase, chunk-once/enrich-once, embed-per-model design as `llm_ingestion_grid.py`. Set `LLM_BASE_URL`/`CHUNKING_MODEL`/`ENRICHMENT_MODEL`/`LUMBER_CHUNKER_THETA` at the top of the file before running it.
-
-
+**Minimizing LLM calls across a grid**: neither chunking nor enrichment depends on the embedding model — running `ingest_multi_enrichment()` (or the CLI) once per (model × chunking config) reruns those LLM passes for every model, for no benefit. `ingest_multi_enrichment()` (see `core/pipeline.py`) enforces the alternative instead: chunk+enrich each (chunking config, enrichment strategy) pair exactly once, cache it, then only repeat the (cheap, LLM-free) embedding step per model. See its own docstring for the full design.
 
 ### Marker preprocessing
 
@@ -514,7 +477,6 @@ Documents (PDF / DOCX / YAML / Markdown)
 
 ```
 open-telco-rag/
-├── app.py                       # Streamlit GUI (RAG + QnA Generation pipelines)
 ├── open_telco_rag/
 │   ├── types.py
 │   ├── core/

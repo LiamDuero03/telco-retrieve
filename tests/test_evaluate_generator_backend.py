@@ -1,15 +1,10 @@
-"""Tests for open_telco_rag.evaluation.evaluate._build_generator() — a real,
-confirmed bug: this function used to accept an llm_call callable and
-silently ignore it entirely, ALWAYS constructing an OpenRouterGenerator
-regardless of what --rag-generator actually asked for. --rag-generator
-claude never worked: RAG answers were always generated via OpenRouter's
-API, using whatever model string happened to be passed (which may not even
-be OpenRouter-compatible).
+"""Tests for open_telco_rag.evaluation.evaluate._build_generator().
 
-Fixed by taking an explicit generator_name ("claude"/"openrouter"/"local")
-instead of a discarded callable — these tests confirm each of the three
-names actually constructs the matching Generator class, with the right
-model/base_url/api_key threaded through.
+Regression: this used to silently ignore generator_name and always build an
+OpenRouterGenerator — --rag-generator claude never actually worked. Fixed by
+taking an explicit generator_name ("claude"/"openrouter"/"local"); these tests
+confirm each name builds the matching Generator class with the right
+model/base_url/api_key.
 """
 from __future__ import annotations
 
@@ -38,9 +33,8 @@ def test_openrouter_generator_name_builds_an_openrouter_generator(monkeypatch):
 
 
 def test_local_generator_name_builds_a_local_generator_not_openrouter():
-    """The exact regression this fix targets: previously this would have
-    silently returned an OpenRouterGenerator here too, requiring
-    OPENROUTER_API_KEY even for a fully local, no-cloud-API-key run."""
+    """Regression: previously silently returned OpenRouterGenerator, requiring
+    OPENROUTER_API_KEY even for a fully local run."""
     generator = _build_generator(
         "local", model_name="Qwen/Qwen3-32B",
         base_url="http://localhost:8001/v1", api_key="local-key",
@@ -54,8 +48,7 @@ def test_local_generator_name_builds_a_local_generator_not_openrouter():
 
 
 def test_local_generator_requires_no_cloud_api_key(monkeypatch):
-    """Confirms a local run genuinely needs zero cloud credentials --
-    OPENROUTER_API_KEY/ANTHROPIC_API_KEY deliberately left unset."""
+    """Confirms a local run needs zero cloud credentials — both API keys left unset."""
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
@@ -65,9 +58,8 @@ def test_local_generator_requires_no_cloud_api_key(monkeypatch):
 
 
 def test_different_generator_names_produce_different_classes():
-    """The core of the bug: three different generator_name values used to
-    all collapse onto the same OpenRouterGenerator. Confirm they're
-    genuinely distinct now."""
+    """Core of the bug: all three generator_name values used to collapse onto
+    the same OpenRouterGenerator."""
     import os
     os.environ.setdefault("ANTHROPIC_API_KEY", "fake-key-for-test")
     os.environ.setdefault("OPENROUTER_API_KEY", "fake-key-for-test")

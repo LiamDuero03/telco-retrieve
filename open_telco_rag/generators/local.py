@@ -2,21 +2,20 @@
 server, LM Studio, etc.) for RAG answer generation during evaluation.
 
 Same Generator protocol as ClaudeGenerator/OpenRouterGenerator
-(.generate(question, results, source_type) -> dict) — this is the missing
-third backend for evaluate: generators/local_llm.py's LocalLLMClient/
-OpenRouterLLMClient already exist, but they implement a *different*
-interface (.completion.create(model, messages) -> response, built for
-ingestion's chunk_lumber_chunker/enrich_llm_metadata), not this one.
+(.generate(question, results, source_type) -> dict). This is distinct from
+generators/local_llm.py's LocalLLMClient/OpenRouterLLMClient, which implement
+a different interface (.completion.create) built for ingestion's
+chunk_lumber_chunker/enrich_llm_metadata, not RAG evaluation.
 
-Mirrors the qna-generation side's --generator local convention (base_url/
-api_key, falling back to LOCAL_LLM_BASE_URL/LOCAL_LLM_API_KEY env vars) so
-the same self-hosted server used there can also answer RAG evaluation
-questions, without needing a cloud API key at all — the point of this
-class existing.
+Mirrors qna-generation's --generator local convention (base_url/api_key via
+LOCAL_LLM_BASE_URL/LOCAL_LLM_API_KEY) so the same self-hosted server can
+answer RAG evaluation questions without a cloud API key.
 """
 from __future__ import annotations
 
 import os
+
+from open_telco_rag.generators._zero_retrieval import zero_retrieval_answer
 
 
 class LocalGenerator:
@@ -24,19 +23,12 @@ class LocalGenerator:
     server.
 
     Args:
-        model:       Model name your server is serving (no short-key
-                     resolution the way OpenRouterGenerator/
-                     RECOMMENDED_MODELS does — a local server only ever
-                     serves one model under whatever name it was started
-                     with).
-        base_url:    Server URL, e.g. "http://localhost:8000/v1". Falls
-                     back to LOCAL_LLM_BASE_URL env var, then to
-                     "http://localhost:8000/v1".
-        api_key:     Bearer token for servers that require authentication
-                     (e.g. vLLM started with --api-key). Falls back to the
-                     LOCAL_LLM_API_KEY env var, then to no Authorization
-                     header at all — unauthenticated local servers keep
-                     working unchanged.
+        model:       Model name your server is serving (no short-key resolution
+                     like OpenRouterGenerator — a local server only serves one model).
+        base_url:    Server URL, e.g. "http://localhost:8000/v1". Falls back to
+                     LOCAL_LLM_BASE_URL env var, then to "http://localhost:8000/v1".
+        api_key:     Bearer token for authenticated servers (e.g. vLLM --api-key).
+                     Falls back to LOCAL_LLM_API_KEY, then no Authorization header.
         max_tokens:  Maximum tokens in the response.
         temperature: Sampling temperature (0.0 = deterministic).
         timeout:     Seconds to wait for a response.
@@ -74,30 +66,14 @@ class LocalGenerator:
     ) -> dict:
         """Generate a grounded answer from retrieved chunks.
 
-        response_schema, when given, is a JSON Schema object requesting
-        SCHEMA-CONSTRAINED structured output — root-cause fix for mc/tf
-        scoring instead of parsing free text after the fact (see
-        evaluation/evaluate.py's _mc_response_schema()/_tf_response_
-        schema()/_match_deterministic_answer()). Sent as response_format:
-        {"type": "json_schema", "json_schema": {...}} — the SAME
-        response_format field core/enrichment.py's enrich_llm_metadata()
-        already sends successfully to both OpenRouter and this project's
-        vLLM server (there with the generic {"type": "json_object"} mode,
-        confirmed working against real infra this session), just with an
-        actual schema instead of "any valid JSON" this time. Whether the
-        server actually ENFORCES the schema (vs. silently ignoring an
-        unrecognized field and returning free text, or honoring
-        response_format generically but not the enum/schema constraint)
-        depends on the serving stack having a guided-decoding backend
-        configured (e.g. vLLM with --guided-decoding-backend
-        outlines/xgrammar, or a recent enough vLLM version with xgrammar
-        as the default) — this function doesn't detect or require that;
-        a non-conformant response just isn't valid JSON matching the
-        expected shape, which _parse_structured_verdict() on the
-        evaluate.py side treats as a signal to fall back to prose
-        parsing, not an error here. None (the default, unchanged from
-        before) omits response_format entirely — every non-mc/tf caller
-        is unaffected.
+        response_schema, when given, requests schema-constrained structured output
+        (sent as response_format: json_schema, same field enrich_llm_metadata() uses)
+        for reliable mc/tf scoring instead of parsing free text after the fact. Actual
+        enforcement depends on the server having a guided-decoding backend configured
+        (e.g. vLLM --guided-decoding-backend outlines/xgrammar) — not detected or
+        required here; a non-conformant response just fails to parse as the expected
+        shape and evaluate.py's _parse_structured_verdict() falls back to prose parsing.
+        None (default) omits response_format entirely.
 
         Returns:
             dict with keys: answer, sources, chunks_used, retrieved_chunks
@@ -105,8 +81,11 @@ class LocalGenerator:
         import requests
 
         if not results:
+            # Structured abstain verdict when response_schema requests one
+            # (mc/tf) so this scores "abstained", not "incorrect" -- see
+            # generators/_zero_retrieval.py.
             return {
-                "answer":           "No relevant chunks found.",
+                "answer":           zero_retrieval_answer(response_schema),
                 "sources":          [],
                 "chunks_used":      0,
                 "retrieved_chunks": [],
@@ -123,11 +102,8 @@ class LocalGenerator:
         )
         user_prompt = f"Context:\n{context}\n\nQuestion: {question}\n\nAnswer:"
 
-        # Most local servers (vLLM in particular, started with --api-key)
-        # require this — omitted entirely when no key is configured, so
-        # unauthenticated local servers keep working unchanged. Matches
-        # _LocalCompletionAPI's own conditional-header behavior in
-        # generators/local_llm.py.
+        # omitted when no key configured, so unauthenticated servers keep working
+        # (matches _LocalCompletionAPI's header behavior in generators/local_llm.py)
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -156,13 +132,8 @@ class LocalGenerator:
         response.raise_for_status()
         data = response.json()
         content = data["choices"][0]["message"].get("content")
-        # Same None -> "" coercion as _make_local_call in evaluation/
-        # _claude.py -- a reasoning model can spend its whole max_tokens
-        # budget on hidden reasoning and return "content": null. An empty
-        # string here isn't valid structured-verdict JSON either, so it
-        # correctly falls through to the prose fallback (which then also
-        # finds nothing to match and returns "incorrect"/"abstained" as
-        # appropriate) rather than crashing on .strip() against None.
+        # reasoning models can burn max_tokens on hidden reasoning and return content: null;
+        # coerce to "" so .strip() doesn't crash and prose-fallback parsing handles it
         answer = (content or "").strip()
 
         return {

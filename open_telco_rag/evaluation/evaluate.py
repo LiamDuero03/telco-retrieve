@@ -18,10 +18,11 @@ from open_telco_rag.evaluation.results import (
     QuestionResult, CorpusResult, aggregate, save_results, print_summary,
 )
 from open_telco_rag.evaluation.metrics.generation import (
-    faithfulness, answer_relevancy, _is_not_found_answer,
+    faithfulness, answer_relevancy, _is_not_found_answer_mc_tf,
 )
 from open_telco_rag.evaluation.metrics.retrieval import (
-    cosine_sim_stats, source_coverage, canonical_source_hit, coverage_ratio,
+    cosine_sim_stats, distinct_sources_retrieved, canonical_source_hit,
+    exact_chunk_hit, coverage_ratio, is_discriminating_source,
 )
 from open_telco_rag.evaluation.metrics.ground_truth import (
     context_recall, answer_correctness,
@@ -33,11 +34,9 @@ def _build_generator(
     base_url: str | None = None,
     api_key: str | None = None,
 ):
-    """Construct the RAG-answer Generator matching generator_name
-    ("claude", "openrouter", or "local") for pipeline.generate() — the
-    same three backends make_llm_call() supports for the eval-metrics LLM
-    judge, so --rag-generator and --generator each independently select
-    their own backend.
+    """Construct the RAG-answer Generator ("claude", "openrouter", or "local")
+    for pipeline.generate(). Same three backends make_llm_call() supports for
+    the judge, so --rag-generator and --generator select independently.
     """
     if generator_name == "claude":
         from open_telco_rag.generators.claude import ClaudeGenerator
@@ -63,17 +62,11 @@ def _local_token_count(text: str) -> int:
 
 def _snapshot_llm_usage(llm_call: Callable[[str, int], str]) -> tuple[int, int]:
     """(cumulative prompt_tokens, completion_tokens) recorded so far on
-    llm_call — a plain-attribute read, matching how _claude.py's
-    claude_call/_make_local_call/_make_openrouter_call/_custom_claude_call
-    each accumulate total_prompt_tokens/total_completion_tokens as
-    attributes on the callable itself (see that module's own comments for
-    why: keeping the Callable[[str, int], str] signature every metrics
-    function already calls, rather than threading a richer return type
-    through faithfulness()/answer_relevancy()/context_recall()/
-    answer_correctness()). (0, 0) for any llm_call that doesn't track
-    usage at all (e.g. a plain test-fixture lambda) — evaluate_question()
-    takes the DELTA between two snapshots, so an untracked callable just
-    contributes a delta of (0, 0), never an error.
+    llm_call — reads attributes _claude.py's call wrappers accumulate on
+    the callable itself, keeping the plain Callable[[str, int], str]
+    signature metrics functions expect. (0, 0) for any llm_call that
+    doesn't track usage; evaluate_question() takes the delta between two
+    snapshots, so an untracked callable just contributes (0, 0).
     """
     return (
         getattr(llm_call, "total_prompt_tokens", 0),
@@ -88,14 +81,9 @@ def _build_baseline_generator(llm_call: Callable[[str, int], str]):
             self, question: str, results: list, source_type: str = "telecom",
             response_schema: dict | None = None,
         ) -> dict:
-            # response_schema accepted for interface parity with generate()
-            # but not wired up here -- llm_call is a bare Callable[[str,
-            # int], str], no structured-output mechanism to plug a JSON
-            # schema into. A caller requesting it here still gets free
-            # text; evaluate.py's _parse_structured_verdict() correctly
-            # treats that as "not structured" and falls back to prose
-            # parsing (see ClaudeGenerator.generate()'s own comment for
-            # the same reasoning).
+            # response_schema accepted for interface parity but unused — llm_call
+            # is a bare Callable with no structured-output mechanism. Callers still
+            # get free text; _parse_structured_verdict() falls back to prose parsing.
             prompt = (
                 f"You are a {source_type} technical expert. "
                 "Answer the following question based on your knowledge. "
@@ -112,51 +100,36 @@ def _build_baseline_generator(llm_call: Callable[[str, int], str]):
     return _BaselineGenerator()
 
 
-# reference_answer's canonical value -> the words a free-text tf answer
-# commonly uses to mean the same thing, when the RAG generator is a
-# reasoning-style model that explains before concluding (e.g. "No,
-# because the specification states X" instead of a bare "False").
-# Deliberately just YES/NO, not CORRECT/INCORRECT -- those are unsafe
-# near negation ("this is NOT correct" means FALSE, but naively finding
-# the word "correct" among the leading words would score it as TRUE; see
-# test_tf_does_not_spuriously_match_boolean_word_buried_mid_explanation).
+# Words a free-text tf answer uses for TRUE/FALSE when a reasoning model
+# explains before concluding (e.g. "No, because..."). Deliberately just
+# YES/NO, not CORRECT/INCORRECT — those are unsafe near negation ("this is
+# NOT correct" means FALSE, but matching "correct" alone would say TRUE).
 _TF_WORD_TO_BOOL: dict[str, str] = {
     "TRUE": "TRUE", "YES": "TRUE",
     "FALSE": "FALSE", "NO": "FALSE",
 }
 
-# The option letter as its own token right at the very start of the
-# answer (e.g. "B) The E2 interface." or "B, because..."). Deliberately
-# excludes "I" from the letter class — "I" is virtually always the
-# pronoun ("I believe the correct option is C...") at the start of a
-# sentence, never genuinely an option letter in practice; without this
-# exclusion a generic [A-Z] class would wrongly treat "I" itself as a
-# committed answer and never even reach the "option C" explicit mention
-# later in the same sentence. A genuinely lettered "I" option (vanishingly
-# rare) would still be caught by _MC_EXPLICIT_RE below.
+# Option letter as its own token at the very start of the answer (e.g. "B)
+# The E2 interface."). Excludes "I" — virtually always the pronoun ("I
+# believe..."), never a real option letter; a genuine lettered "I" option
+# is still caught by _MC_EXPLICIT_RE below.
 _MC_NEAR_START_RE = re.compile(r"^[\s*`\"']*([A-HJ-Z])\b")
-# Or an explicit "answer is B" / "option B" / "(B)" phrasing anywhere in
-# the answer, covering a reasoning model that concludes with the letter
-# instead of leading with it. The optional "(?:\s+IS)?" is required for
-# the single most common phrasing, "the answer is B" -- found via this
-# fix's own test suite: a plain [^A-Z0-9]{0,10} gap excludes "IS" itself
-# (I/S are uppercase LETTERS, not in that character class), so "ANSWER IS
-# B" would silently never match at all. Deliberately only special-cases
-# the literal word "IS", not an arbitrary gap -- keeps the same negation-
-# safety a punctuation-only gap already has ("ANSWER IS NOT B" still
-# correctly fails to capture a letter: "NOT" isn't "IS" and isn't
-# punctuation either, so neither branch reaches the letter).
+# Explicit "answer is B" / "option B" / "(B)" phrasing anywhere, for a
+# reasoning model that concludes with the letter. "(?:\s+IS)?" specifically
+# handles "the answer is B" — a plain punctuation-only gap excludes "IS"
+# (uppercase letters, not punctuation), so it would never match otherwise.
+# Only special-cases "IS" so negation safety is preserved ("ANSWER IS NOT
+# B" still fails to capture a letter).
 _MC_EXPLICIT_RE = re.compile(r"(?:ANSWER|OPTION)(?:\s+IS)?[^A-Z0-9]{0,5}\(?([A-Z])\)?\b")
 _TF_EXPLICIT_RE = re.compile(r"ANSWER IS (TRUE|FALSE)\b")
 
 
 def _mc_committed_letter(clean_ans: str) -> str | None:
-    """Returns the option letter clean_ans commits to (ANY letter, not
-    just a check against one specific reference), or None if no
-    commitment is found at all. See _match_deterministic_answer()'s
-    docstring for why detecting ANY commitment (not "does it match the
-    reference letter specifically") is what makes commitment-detection
-    safe to run BEFORE the abstention check."""
+    """Returns the option letter clean_ans commits to (any letter, not just
+    a check against one specific reference), or None. Detecting ANY
+    commitment (not "does it match the reference") is what makes running
+    this before the abstention check safe — see _match_deterministic_answer_
+    prose()'s docstring."""
     near_start = _MC_NEAR_START_RE.match(clean_ans)
     if near_start:
         return near_start.group(1)
@@ -171,11 +144,8 @@ def _tf_committed_bool(clean_ans: str) -> str | None:
     _mc_committed_letter()'s "detect ANY commitment first" reasoning."""
     if clean_ans in ("TRUE", "FALSE"):
         return clean_ans
-    # The claimed boolean as its own WORD among the first couple of
-    # words -- not a bare substring check, so e.g. an answer that happens
-    # to contain "not false" or "falsely" deep in its explanation doesn't
-    # get picked up out of context (see test_tf_does_not_spuriously_
-    # match_boolean_word_buried_mid_explanation).
+    # Checked as its own WORD among the first few, not a substring — avoids
+    # picking up "not false"/"falsely" buried in the explanation.
     first_words = re.findall(r"[A-Z']+", clean_ans)[:3]
     for w in first_words:
         if w in _TF_WORD_TO_BOOL:
@@ -187,61 +157,44 @@ def _tf_committed_bool(clean_ans: str) -> str | None:
 
 
 def _match_deterministic_answer_prose(answer: str, reference_answer: Any, answer_type: str) -> str:
-    """FALLBACK ONLY — see _match_deterministic_answer() below, the actual
-    entry point every caller should use. This prose-parsing path exists
-    for legacy/ungraded data (results computed before structured
-    generation existed) and as a graceful-degradation path for any
-    generator/server combination that doesn't honor response_format:
-    json_schema (silently returns free text instead — see
-    _parse_structured_verdict()'s own docstring). Classifies an mc/tf
-    answer against reference_answer as one of three outcomes: "correct",
-    "incorrect", or "abstained".
+    """FALLBACK ONLY — see _match_deterministic_answer(), the real entry
+    point. Used for legacy results (pre-structured-generation) and when a
+    generator/server doesn't honor response_format: json_schema (returns
+    free text instead — see _parse_structured_verdict()). Classifies an
+    mc/tf answer against reference_answer as "correct"/"incorrect"/
+    "abstained".
 
-    Kept for a real reason, not just backward compatibility: three
-    separate regex-matching bugs were found and patched in this exact
-    function across one session (a naive [^A-Z0-9]{0,10} gap silently
-    excluding the word "IS" so "the answer is B" never matched; a generic
-    near-start letter class colliding with the English pronoun "I"; and
-    abstention-phrase-matching running before commitment-detection,
-    misclassifying a clearly-committed answer as "abstained" whenever its
-    OWN justification happened to explain away a wrong option using a
-    phrase like "not mentioned"). Each was a genuine, confirmed
-    production bug — but all three came from the same root cause: trying
-    to infer a structured verdict from free-form prose after the fact.
-    _match_deterministic_answer() now avoids this class of bug entirely
-    for any generation call that honors response_format: json_schema
-    (see _mc_response_schema()/_tf_response_schema() and
-    _build_generation_question()) by reading verdict/option/boolean
-    directly out of the model's own structured JSON output — no regex,
-    no phrase-list matching, nothing left to patch a fourth time. This
-    function remains exactly as it was (same three fixes, same
-    reasoning) as the fallback for whatever it can't structurally
-    guarantee: an older result, or a server/model that doesn't actually
-    honor the schema constraint.
+    Three confirmed production bugs were fixed here, all from the same
+    root cause (inferring a verdict from free prose after the fact) —
+    kept only as the fallback now that structured generation avoids the
+    whole class of bug:
+    1. Original matching was exact/prefix-match against raw text, so any
+       reasoning model that explains before concluding ("No, because...")
+       never matched — confirmed via a grid where mc/tf accuracy was
+       exactly 0/120 across all 24 combos despite many answers being
+       substantively correct.
+    2. A punctuation-only gap regex excluded the word "IS", so "the
+       answer is B" never matched (fixed by _MC_EXPLICIT_RE's optional
+       "(?:\\s+IS)?").
+    3. Abstention-phrase matching ran BEFORE commitment-detection, so an
+       answer that clearly committed to a letter but explained away a
+       wrong option using "not mentioned" (also on _is_not_found_answer's
+       phrase list) was misclassified "abstained" — silently capping
+       wrong_rate at 0.0. Fixed by checking commitment first; an
+       abstention phrase after a committed answer is just reasoning
+       prose, not real abstention.
 
-    Real, confirmed bug this fixes (the matching logic): the original
-    logic was pure exact-match / prefix-match against the RAG generator's
-    raw text (clean_ref == clean_ans, or clean_ans.startswith(clean_ref),
-    or the literal substring "ANSWER IS {clean_ref}") — which silently
-    scored 0.0 for any answer that doesn't literally BEGIN with the
-    reference token. A reasoning-style RAG generator (e.g. openai/gpt-
-    oss-120b) routinely explains before concluding — "No, this is
-    incorrect because..." for a tf question whose reference_answer is
-    "False", or a full explanatory sentence for an mc question that never
-    leads with the bare option letter — which the original logic could
-    never match, regardless of embedding model or retrieval quality
-    (confirmed via a real aggregated grid: mc/tf accuracy was exactly
-    0/120 across EVERY one of 24 combinations, with several manually-
-    inspected answers verified as substantively correct on reading).
+    Still intentionally conservative: only a handful of yes/no phrasings
+    and near-start/explicit letter patterns are recognized. An unmatched,
+    non-abstained answer means the generator's phrasing doesn't map to
+    the reference's canonical form — worth surfacing as a prompt-template
+    issue, not silently guessed at.
 
-    Still intentionally conservative — this recognizes a handful of
-    common yes/no-style phrasings and an mc option letter appearing near
-    the start (as its own WORD, not a substring) or in an explicit
-    "answer is X"/"option X" pattern, not literally any way to imply an
-    answer; a still-unmatched (and non-abstained) answer means the RAG
-    generator's phrasing genuinely doesn't correspond to the reference
-    answer's canonical form, which is worth knowing (a prompt-template
-    fix, not a scorer fix) rather than papering over.
+    "abstained" is tracked separately from "incorrect" because an honest
+    "not enough context" points at retrieval/chunking, while a confident
+    wrong answer points at generation/reasoning — collapsing them would
+    also reward forced-guessing (tf's ~50% random floor beats honest
+    abstention in raw accuracy despite being less informative).
 
     "abstained" (a real design distinction, not just a bug fix): a
     generator honestly saying the provided context doesn't contain
@@ -264,7 +217,7 @@ def _match_deterministic_answer_prose(answer: str, reference_answer: Any, answer
     not mentioned as conditions that cause an Update Bearer Request." —
     a clean, unambiguous commitment to A, whose justification explains
     why the OTHER options are wrong (completely normal mc reasoning) using
-    the phrase "not mentioned" — which is also on _is_not_found_answer()'s
+    the phrase "not mentioned" — which is also on _is_not_found_answer_mc_tf()'s
     phrase list. With abstention checked FIRST (the original ordering),
     this answer was misclassified as "abstained" despite committing to a
     letter, which silently capped wrong_rate at 0.0 across several real
@@ -294,7 +247,7 @@ def _match_deterministic_answer_prose(answer: str, reference_answer: Any, answer
     if committed is not None:
         return "correct" if committed == clean_ref else "incorrect"
 
-    if _is_not_found_answer(answer):
+    if _is_not_found_answer_mc_tf(answer):
         return "abstained"
 
     return "incorrect"
@@ -302,25 +255,18 @@ def _match_deterministic_answer_prose(answer: str, reference_answer: Any, answer
 
 # ── Structured, schema-constrained generation (mc/tf) ───────────────────────
 #
-# Root-cause fix, not another prose-parsing patch: instead of inferring a
-# verdict from free text after the fact, ask the model to emit exactly
-# {"verdict": "answered"|"abstained", "option"/"boolean": ..., "justification":
-# str} via response_format: json_schema (see generators/local.py's own
-# comment for the exact request shape — same "response_format" field
-# core/enrichment.py's enrich_llm_metadata() already uses successfully
-# against both OpenRouter and this project's vLLM server, just with a real
-# schema instead of the generic {"type": "json_object"} mode). When the
-# server/model actually honors this, _match_deterministic_answer() reads
-# verdict/option/boolean directly — no regex, no phrase-list matching, no
-# fourth prose-parsing bug to find. _match_deterministic_answer_prose()
-# above remains the fallback for anything that doesn't.
+# Root-cause fix instead of another prose-parsing patch: ask the model to
+# emit {"verdict": "answered"|"abstained", "option"/"boolean": ...,
+# "justification": str} via response_format: json_schema (see
+# generators/local.py — same mechanism enrich_llm_metadata() already uses,
+# with a real schema instead of generic json_object mode). When honored,
+# _match_deterministic_answer() reads the fields directly — no regex, no
+# phrase-list matching. _match_deterministic_answer_prose() is the fallback
+# for anything that doesn't honor it.
 
 def _mc_response_schema(options: dict[str, str]) -> dict:
-    """JSON schema for one mc answer. The "option" enum is built from the
-    ACTUAL option letters for THIS question (options.keys()), not a fixed
-    A-E guess — a 3-option question can't have the model "choose" a D
-    that was never offered, and a question with 5 options isn't
-    artificially capped at 4."""
+    """JSON schema for one mc answer. "option" enum is built from this
+    question's actual option letters, not a fixed A-E guess."""
     letters = sorted(options.keys())
     return {
         "type": "object",
@@ -360,22 +306,14 @@ def _response_schema_for(q: EvalQuestion) -> dict | None:
 
 
 def _parse_structured_verdict(answer: str, answer_type: str) -> dict | None:
-    """Parses answer as the mc/tf structured-verdict JSON object, or
-    returns None if it isn't one — the signal _match_deterministic_answer()
-    uses to fall back to prose parsing. None (not an exception) covers
-    every way a generation call can fail to produce schema-conformant
-    JSON: the server/model doesn't honor response_format: json_schema at
-    all (older vLLM build, no guided-decoding backend configured — see
-    generators/local.py's own comment); it honors response_format:
-    json_object generically but not the schema/enum constraint, producing
-    valid-but-wrong-shaped JSON; or this is legacy data from before
-    structured generation existed, when `answer` was always free prose.
-    Deliberately checks for the exact required key for THIS answer_type
-    ("option" for mc, "boolean" for tf) rather than just "is this valid
-    JSON with a verdict key" — a same-shaped-but-wrong-field object (e.g.
-    an mc question whose generator somehow returned the tf schema) must
-    also fall through to the prose fallback, not silently misread the
-    wrong field.
+    """Parses answer as the mc/tf structured-verdict JSON object, or None if
+    it isn't one — the signal _match_deterministic_answer() uses to fall
+    back to prose parsing. None (not an exception) covers: server/model
+    doesn't honor json_schema at all; honors json_object generically but not
+    the schema/enum constraint; or legacy free-prose data. Checks for the
+    exact required key for this answer_type ("option"/"boolean") so a
+    wrong-shaped object (e.g. tf schema for an mc question) also falls
+    through to prose rather than being misread.
     """
     try:
         obj = json.loads(answer.strip())
@@ -388,7 +326,37 @@ def _parse_structured_verdict(answer: str, answer_type: str) -> dict | None:
     required_key = "option" if answer_type == "mc" else "boolean"
     if required_key not in obj:
         return None
+    if answer_type == "tf" and not _normalize_tf_boolean_in_place(obj):
+        # obj["boolean"] is neither a real bool/null nor an unambiguous
+        # "true"/"false" string -- can't trust it enough to classify, and
+        # coercing it with bool() would silently mis-score (bool("false")
+        # is True). Falls through to prose parsing on the raw text instead.
+        return None
     return obj
+
+
+def _normalize_tf_boolean_in_place(obj: dict) -> bool:
+    """Normalizes obj["boolean"] to an actual Python bool/None, mutating
+    obj, and returns whether that succeeded.
+
+    The schema declares boolean as JSON boolean-or-null
+    (_tf_response_schema()), but guided decoding doesn't always enforce
+    that strictly -- a model/server can still emit the JSON STRING "false"
+    instead of the JSON literal false. Recognizes unambiguous string
+    spellings (case/whitespace-insensitive) so a real verdict isn't thrown
+    away; any other type (number, list, an unrecognized string, ...) is
+    rejected rather than guessed at -- see _classify_structured_verdict()'s
+    tf branch, which trusts this field's type unconditionally afterwards.
+    """
+    boolean = obj["boolean"]
+    if boolean is None or isinstance(boolean, bool):
+        return True
+    if isinstance(boolean, str):
+        lowered = boolean.strip().lower()
+        if lowered in ("true", "false"):
+            obj["boolean"] = lowered == "true"
+            return True
+    return False
 
 
 def _classify_structured_verdict(obj: dict, reference_answer: Any, answer_type: str) -> str:
@@ -403,13 +371,9 @@ def _classify_structured_verdict(obj: dict, reference_answer: Any, answer_type: 
     if answer_type == "mc":
         option = obj.get("option")
         if option is None:
-            # verdict said "answered" but option is null -- an internally
-            # inconsistent response (shouldn't happen under a properly
-            # enforced schema, but a model can still emit this if the
-            # server only validates SHAPE, not this kind of cross-field
-            # consistency). Treat defensively as abstained rather than
-            # silently scoring "incorrect" against a genuinely absent
-            # answer.
+            # "answered" but option is null — inconsistent response a server
+            # that only validates shape can still emit. Treat as abstained
+            # rather than scoring "incorrect" against a missing answer.
             return "abstained"
         return "correct" if str(option).strip().upper() == clean_ref else "incorrect"
 
@@ -417,21 +381,19 @@ def _classify_structured_verdict(obj: dict, reference_answer: Any, answer_type: 
     boolean = obj.get("boolean")
     if boolean is None:
         return "abstained"
+    # boolean is guaranteed a real Python bool here, never a stray type
+    # like the string "false" -- see _parse_structured_verdict()'s
+    # _normalize_tf_boolean_in_place() call, which already rejected/
+    # normalized anything else before this object could reach us.
     ref_is_true = clean_ref in ("TRUE", "YES")
-    return "correct" if bool(boolean) == ref_is_true else "incorrect"
+    return "correct" if boolean == ref_is_true else "incorrect"
 
 
 def _match_deterministic_answer(answer: str, reference_answer: Any, answer_type: str) -> str:
-    """THE entry point for mc/tf scoring — every caller should use this,
-    not _match_deterministic_answer_prose()/_parse_structured_verdict()/
-    _classify_structured_verdict() directly. Tries the structured verdict
-    path first (answer is the model's own {"verdict":..., "option"/
-    "boolean":..., "justification":...} JSON, produced under
-    response_format: json_schema — see _response_schema_for()); falls
-    back to prose parsing only when answer isn't (or doesn't fully match)
-    that shape. See _match_deterministic_answer_prose()'s own docstring
-    for why the fallback still exists and is deliberately kept exactly as
-    it was, not removed.
+    """Entry point for mc/tf scoring — use this, not the helper functions
+    directly. Tries the structured verdict path first (JSON produced under
+    response_format: json_schema — see _response_schema_for()); falls back
+    to prose parsing only when the answer doesn't match that shape.
     """
     structured = _parse_structured_verdict(answer, answer_type)
     if structured is not None:
@@ -440,24 +402,17 @@ def _match_deterministic_answer(answer: str, reference_answer: Any, answer_type:
 
 
 def _build_generation_question(q: EvalQuestion, active_question: str) -> str:
-    """Builds the question text sent to the RAG generator for answer
-    generation — kept separate from active_question/search_query (used
-    for retrieval), so option text/format instructions here never distort
-    which chunks get retrieved.
+    """Builds the question text sent to the RAG generator — kept separate
+    from active_question/search_query (used for retrieval) so option
+    text/format instructions never distort which chunks get retrieved.
 
-    Which fields exist and their types/enum come from response_format:
-    json_schema (_response_schema_for()), threaded through generate()
-    alongside this text. A schema can only constrain shape, not meaning,
-    so this text's job is explaining what each field means and when to
-    use "abstained" vs "answered" — naming the field names explicitly so
-    the model isn't guessing what to fill in.
+    The schema (_response_schema_for()) only constrains shape, not meaning,
+    so this text explains what each field means and when to use "abstained"
+    vs "answered", naming fields explicitly.
 
-    Abstention is deliberately still permitted rather than forcing a
-    guess every time: a bad retrieval/chunking config that surfaces
-    nothing relevant should show up as low accuracy, not be masked by
-    landing near tf's ~50% random-guess floor by chance. See
-    _mc_response_schema()/_tf_response_schema() for why "option"/
-    "boolean" are nullable.
+    Abstention is permitted rather than forcing a guess: bad retrieval
+    should show up as low accuracy, not be masked by landing near tf's ~50%
+    guess floor by chance.
     """
     if q.answer_type == "mc" and q.options:
         options_text = "\n".join(f"{letter}. {text}" for letter, text in sorted(q.options.items()))
@@ -508,30 +463,22 @@ def evaluate_question(
     """Run all applicable metrics for one question."""
     from open_telco_rag.core.pipeline import search, generate
     
-    # Rewrite the question if metadata injection is enabled and a source exists
     active_question = q.question
     if inject_metadata and q.canonical_source:
         active_question = f"According to {q.corpus.upper()} document {q.canonical_source}, {q.question}"
 
-    # Prepare search query (appends keywords if flag is enabled) -- built
-    # from active_question, NOT generation_question below: options text/
-    # format instructions belong in the GENERATION prompt only, appending
-    # them here would dilute/distort which chunks retrieval finds.
+    # Built from active_question, not generation_question below — options/
+    # format instructions belong in the generation prompt only, and would
+    # distort retrieval if included in the search query.
     search_query = active_question
     if include_keywords and getattr(q, "keywords", None):
         kw_str = " ".join(q.keywords) if isinstance(q.keywords, list) else str(q.keywords)
         if kw_str.strip():
             search_query = f"{active_question} Keywords: {kw_str}"
 
-    # See _build_generation_question()'s own docstring -- this is what
-    # actually gets sent to the RAG/baseline generator, distinct from
-    # active_question (kept plain for search_query and result.question's
-    # own display purposes).
     generation_question = _build_generation_question(q, active_question)
-    # None for open questions -- see _response_schema_for()'s own
-    # docstring. Passed to BOTH the baseline and RAG generate() calls
-    # below so mc/tf get schema-constrained structured verdicts
-    # regardless of which path produced the answer.
+    # None for open questions. Passed to both baseline and RAG generate()
+    # calls so mc/tf get schema-constrained verdicts either way.
     response_schema = _response_schema_for(q)
 
     result = QuestionResult(
@@ -552,7 +499,7 @@ def evaluate_question(
             result.gen_latency = time.perf_counter() - gen_start
             result.search_latency = 0.0
         else:
-            # 1. Time the base search retrieval pass (WITHOUT reranker)
+            # Search pass, without reranker.
             search_start = time.perf_counter()
             retrieved_candidates = search(
                 search_query, 
@@ -565,30 +512,26 @@ def evaluate_question(
                 resolve_parents=resolve_parents
             )
             result.search_latency = time.perf_counter() - search_start
-            
-            # 2. Time the Reranking pass & calculate its tokens
+
             result.rerank_latency = 0.0
             result.rerank_tokens = 0
-            
+
             if reranker:
                 rerank_start = time.perf_counter()
-                
-                # Reranker processes the query + all retrieved candidate chunks
+
                 rerank_payload = search_query + " ".join([c.text for c in retrieved_candidates])
                 result.rerank_tokens = _local_token_count(rerank_payload)
-                
-                # Execute reranking explicitly
+
                 try:
                     retrieved = reranker.rerank(active_question, retrieved_candidates, top_k=rerank_top_k)
                 except AttributeError:
-                    # Fallback if your reranker wrapper uses a different method name
+                    # Reranker wrapper may use a different method name.
                     retrieved = retrieved_candidates[:rerank_top_k]
-                    
+
                 result.rerank_latency = time.perf_counter() - rerank_start
             else:
                 retrieved = retrieved_candidates[:rerank_top_k]
-            
-            # 3. Time the text generation pass
+
             gen_start = time.perf_counter()
             generator = _build_generator(
                 rag_generator_name, model_name=rag_model_name,
@@ -600,16 +543,9 @@ def evaluate_question(
 
         result.latency = time.perf_counter() - start_time
 
-        # 4. Token accounting — prefer the REAL usage block the generator
-        # itself returned (local.py/openrouter.py/claude.py all now
-        # include one, normalized to prompt_tokens/completion_tokens/
-        # total_tokens regardless of backend — see each module's own
-        # comment) over a local tiktoken approximation. Only estimate when
-        # the generator genuinely didn't return usage data at all (e.g. a
-        # baseline/custom generator, or a server whose response omits
-        # "usage") — token_source records which happened, so downstream
-        # analysis (grid reports, leaderboard) can tell a measured number
-        # from an approximation instead of the two looking identical.
+        # Prefer the generator's real usage block over a tiktoken estimate;
+        # only estimate when usage data is genuinely absent. token_source
+        # records which happened so downstream analysis can tell them apart.
         answer = gen.get("answer", "")
         usage = gen.get("usage") or {}
         real_prompt_tokens = usage.get("prompt_tokens")
@@ -627,9 +563,7 @@ def evaluate_question(
             result.cached_tokens = prompt_details.get("cached_tokens")
             result.reasoning_tokens = completion_details.get("reasoning_tokens")
         else:
-            # Generator processes generation_question (options/format
-            # instructions included for mc/tf) + the final filtered chunks
-            # -- matches what generate() was actually called with above.
+            # Matches what generate() was actually called with above.
             prompt_payload = generation_question + " ".join([c.text for c in retrieved])
             result.prompt_tokens = _local_token_count(prompt_payload)
             result.completion_tokens = _local_token_count(answer)
@@ -638,15 +572,10 @@ def evaluate_question(
             result.cached_tokens = None
             result.reasoning_tokens = None
 
-        # The generator's own real computed cost when it returned one
-        # (openrouter.py's per-token pricing math, or local.py's genuine
-        # $0.00 self-hosted value) — None ("not computed") only when the
-        # generator didn't return a cost at all (currently claude.py, no
-        # pricing table wired up there). Deliberately NOT unconditionally
-        # zeroed the way this used to be: a bare 0.0 looked identical
-        # whether the answer was genuinely free or the cost was simply
-        # never computed, which made local vLLM runs indistinguishable
-        # from "we forgot to compute this."
+        # None ("not computed") only when the generator returned no cost at
+        # all (e.g. claude.py, no pricing table) — not unconditionally
+        # zeroed, so genuinely-free (local vLLM) isn't indistinguishable
+        # from never-computed.
         result.cost = gen.get("cost")
 
         result.answer  = answer
@@ -664,36 +593,24 @@ def evaluate_question(
         if q.answer_type in ("mc", "tf"):
             outcome = _match_deterministic_answer(answer, q.reference_answer, q.answer_type)
 
-            # mc/tf gets its own dedicated accuracy field rather than being
-            # blended into the OE metrics (faithfulness/answer_relevancy/
-            # context_recall/answer_correctness), which stay at their
-            # -1.0 "not applicable" default here. accuracy is a plain
-            # 1.0/0.0 over ALL mc/tf questions (abstained counts as 0.0,
-            # same as genuinely wrong); mc_tf_outcome carries the
-            # three-way correct/incorrect/abstained classification
-            # aggregate()/CorpusResult use to additionally compute
-            # mean_accuracy_attempted, abstention_rate, and wrong_rate —
-            # see results.py.
+            # accuracy is a plain 1.0/0.0 over all mc/tf (abstained = 0.0);
+            # mc_tf_outcome carries the three-way classification aggregate()
+            # uses for mean_accuracy_attempted/abstention_rate/wrong_rate.
             result.mc_tf_outcome = outcome
             result.accuracy = 1.0 if outcome == "correct" else 0.0
             if debug:
-                # Shows whether this model/server honored response_format:
-                # json_schema (structured verdict parsed) or silently
-                # fell back to prose parsing.
+                # Whether the model/server honored json_schema, or fell
+                # back to prose parsing.
                 structured = _parse_structured_verdict(answer, q.answer_type) is not None
                 print(f"  [DEBUG] [{q.answer_type}] reference={q.reference_answer!r} "
                       f"outcome={outcome} accuracy={result.accuracy} "
                       f"structured={'yes' if structured else 'NO (prose fallback)'} "
                       f"(answer: {answer[:120]!r})")
         else:
-            # Free-text evaluation. judge_before/after snapshot llm_call's
-            # cumulative usage (see _snapshot_llm_usage()'s own docstring)
-            # immediately around JUST these four judge calls -- taking the
-            # "before" snapshot here rather than at the top of the function
-            # is what excludes an earlier RAG/baseline generation call that
-            # happens to share the same llm_call (baseline mode passes
-            # rag_llm_call or llm_call into the answer generator) from this
-            # question's judge-token delta.
+            # judge_before/after bracket just these four judge calls — taken
+            # here (not at function top) so an earlier RAG/baseline
+            # generation call sharing the same llm_call isn't counted in the
+            # judge-token delta.
             judge_before = _snapshot_llm_usage(llm_call)
             result.faithfulness     = faithfulness(answer, retrieved, llm_call=llm_call, debug=debug)
             result.answer_relevancy = answer_relevancy(active_question, answer, embedder, llm_call=llm_call, debug=debug)
@@ -709,9 +626,22 @@ def evaluate_question(
             result.mean_similarity = mean_s
             result.min_similarity  = min_s
             result.max_similarity  = max_s
-            result.source_coverage = source_coverage(retrieved)
-            result.canonical_hit   = canonical_source_hit(retrieved, q.canonical_source)
+            result.distinct_sources_retrieved = distinct_sources_retrieved(retrieved)
+            result.canonical_hit   = canonical_source_hit(
+                retrieved, q.canonical_source, store=store, expected_release=q.release,
+            )
+            result.exact_chunk_hit = exact_chunk_hit(retrieved, q.chunk_id, q.source_text)
             result.coverage_ratio  = coverage_ratio(retrieved, sim_threshold)
+
+            # Separate from canonical_hit so a reader can tell "no ground
+            # truth available" (None) from "rejected as too generic" (False)
+            # — see is_discriminating_source() for the bug this guards against.
+            if q.canonical_source is None:
+                result.canonical_source_discriminating = None
+            else:
+                result.canonical_source_discriminating = is_discriminating_source(
+                    q.canonical_source, store
+                )
 
     except Exception as e:
         result.error = str(e)
@@ -761,7 +691,7 @@ def evaluate_corpus(
         questions_source_name = "custom_list"
     else:
         questions_source_name = f"{corpus}.json"
-        
+
     qs = questions or load_questions(corpus)
 
     print(f"\nEvaluating {corpus.upper()} — {len(qs)} questions | "
@@ -769,7 +699,6 @@ def evaluate_corpus(
           + (" | +BASELINE" if include_baseline else "")
           + (" | DEBUG ON" if debug else ""))
     
-    # Default fallback string if none is provided down the pipe
     resolved_rag_model = rag_generator_model or "meta-llama/llama-3.1-8b-instruct"
 
     # ── RAG pass ──────────────────────────────────────────────────────────────

@@ -23,10 +23,24 @@ class EvalQuestion:
     question:         str
     keywords:         list[str]
     corpus:           str
-    answer_type:      str = "open"          
+    answer_type:      str = "open"
     options:          dict | None = None
     canonical_source: str | None = None
     reference_answer: str | None = None   # None until validated by domain expert
+    # chunk_id/source_text: the exact chunk this question was generated from
+    # (see qna_generation's generator._build_record()). None for questions
+    # predating this tracking, or hand-authored ones with no chunk provenance
+    # -- metrics.retrieval.exact_chunk_hit() treats that as "not applicable",
+    # same -1 convention as canonical_source's own not-applicable case.
+    chunk_id:         str | None = None
+    source_text:      str | None = None
+    # Release the source chunk was ingested from (e.g. "Rel-18"), where the
+    # corpus has a release concept -- 3GPP's canonical_source (a spec
+    # number) doesn't distinguish releases on its own, so
+    # metrics.retrieval.canonical_source_hit() needs this separately to
+    # avoid crediting a hit against a DIFFERENT release of the same spec.
+    # None for corpora without releases, or questions predating this field.
+    release:          str | None = None
 
     @classmethod
     def from_dict(cls, d: dict) -> "EvalQuestion":
@@ -38,6 +52,9 @@ class EvalQuestion:
             options          = d.get("options", None),
             canonical_source = d.get("canonical_source"),
             reference_answer = d.get("reference_answer"),
+            chunk_id         = d.get("chunk_id"),
+            source_text      = d.get("source_text"),
+            release          = d.get("release"),
         )
 
 

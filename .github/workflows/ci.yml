@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install package (dev + pdf/docx/local-embed extras)
+        run: pip install -e ".[dev,local-embed,pdf,docx]"
+
+      - name: Lint (ruff) — report only, not yet a merge gate
+        # 207 pre-existing findings as of 2026-08-18 (I001 import-sort 70,
+        # F541 f-string-no-placeholder 33, BLE001 blind-except 28, F401
+        # unused-import 27, remainder scattered) tracked as follow-up
+        # cleanup. Flip to blocking once that's paid down.
+        run: ruff check . || true
+
+      - name: Test (pytest)
+        run: pytest -q

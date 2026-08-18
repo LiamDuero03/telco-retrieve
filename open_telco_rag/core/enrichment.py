@@ -11,7 +11,6 @@ from typing import Any
 
 from open_telco_rag.types import Chunk
 
-# Define the directory of the current Python script
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 
@@ -32,23 +31,19 @@ async def _enrich_chunks_async(
     system_prompt: str,
     max_concurrency: int,
     max_tokens: int,
+    timeout: float,
+    frequency_penalty: float,
 ) -> list[Chunk]:
-    """Async worker for enrich_llm_metadata — one httpx.AsyncClient shared
-    across every request (connection pooling/keep-alive), concurrency capped
-    by a semaphore rather than a fixed thread count. A single failed chunk
-    is caught and logged without cancelling the rest, matching the original
-    ThreadPoolExecutor version's per-chunk fault isolation — asyncio.gather's
-    default (return_exceptions=False) would otherwise cancel every other
-    in-flight request the moment one chunk raised.
+    """Async worker for enrich_llm_metadata. Shares one httpx.AsyncClient
+    across requests; concurrency capped by a semaphore, not a thread count.
+    Each chunk's exceptions are caught individually — asyncio.gather's
+    default would otherwise cancel every in-flight request when one chunk raised.
 
-    base_url/api_key come from whichever LLM client enrich_llm_metadata was
-    given (LocalLLMClient or OpenRouterLLMClient — see local_llm.py) rather
-    than being hardcoded to OpenRouter, so this works against a local vLLM
-    server exactly the same way chunk_lumber_chunker already does. api_key
-    is optional and only sent as a Bearer token when present — unauthenticated
-    local servers (the common case for a self-hosted vLLM instance) keep
-    working with no Authorization header at all, matching
-    _LocalCompletionAPI's own conditional-header behavior in local_llm.py.
+    base_url/api_key come from the caller's LLM client (LocalLLMClient or
+    OpenRouterLLMClient, see local_llm.py), so this works against local
+    vLLM the same way chunk_lumber_chunker does. api_key is optional; sent
+    as a Bearer token only when present, so unauthenticated local servers
+    keep working with no Authorization header.
     """
     semaphore = asyncio.Semaphore(max_concurrency)
     url = f"{base_url.rstrip('/')}/chat/completions"
@@ -73,28 +68,20 @@ async def _enrich_chunks_async(
                                 "content": f"Extract and explain terms for this chunk:\n\n{chunk.text}",
                             },
                         ],
-                        # Supported by OpenRouter and by vLLM's OpenAI-compatible
-                        # server (subject to that model/server having a guided-
-                        # decoding backend configured — if not, some models may
-                        # ignore this or return non-JSON text, which the
-                        # json.loads() below already handles via the except
-                        # clause: a malformed response just skips enrichment
-                        # for that one chunk rather than failing the run).
+                        # Not all servers honor this (needs a guided-decoding backend);
+                        # a malformed response is caught below and just skips that chunk.
                         "response_format": {"type": "json_object"},
-                        # Previously uncapped -- the model had no incentive to
-                        # stop early, and unlike chunking's calls (capped at
-                        # 20 tokens, ~95-100 req/s observed), an unbounded
-                        # multi-definition JSON completion can run for
-                        # hundreds of tokens. Capping this is still the
-                        # single largest lever on enrichment throughput, but
-                        # cap it too low and completions get cut off
-                        # mid-string -- syntactically broken JSON, not just
-                        # slow. See the finish_reason=="length" check below,
-                        # which turns that failure mode into a clear,
-                        # diagnosable warning instead of a generic parse
-                        # error, so a too-low cap is obvious from the logs
-                        # rather than looking like a model/prompt problem.
+                        # Biggest lever on enrichment throughput, but too low truncates
+                        # completions mid-string (broken JSON). The finish_reason=="length"
+                        # check below turns that into a clear warning, not a silent parse failure.
                         "max_tokens": max_tokens,
+                        # Without this, some chunks send the model into a degenerate
+                        # repetition loop (BPE compresses repeated tokens efficiently, so a
+                        # loop can emit 100k+ characters well inside a 3000-token budget --
+                        # raising max_tokens then just lets the loop run longer, it doesn't
+                        # fix the truncation). Standard OpenAI field, so it round-trips through
+                        # both vLLM and OpenRouter unlike vLLM-only params (e.g. repetition_penalty).
+                        "frequency_penalty": frequency_penalty,
                     },
                 )
                 response.raise_for_status()
@@ -113,8 +100,13 @@ async def _enrich_chunks_async(
 
                 explanations = json.loads(raw_content)
                 if isinstance(explanations, dict):
-                    key = list(explanations.keys())[0]
-                    explanations = explanations[key]
+                    # A model asked for "nothing notable here" sometimes returns {}
+                    # instead of the requested [] -- keys()[0] on that raised an
+                    # unhandled IndexError ("list index out of range"), masking a
+                    # legitimate empty result as a parse failure. Treat it the same
+                    # as an empty list: nothing to prepend, chunk left unenriched.
+                    keys = list(explanations.keys())
+                    explanations = explanations[keys[0]] if keys else []
 
                 if explanations and isinstance(explanations, list):
                     enrichment_prefix = (
@@ -132,7 +124,7 @@ async def _enrich_chunks_async(
 
     import httpx
 
-    async with httpx.AsyncClient(timeout=60) as client:
+    async with httpx.AsyncClient(timeout=timeout) as client:
         await asyncio.gather(*(process_single_chunk(client, c) for c in chunks))
 
     return chunks
@@ -141,43 +133,47 @@ async def _enrich_chunks_async(
 def enrich_llm_metadata(
     chunks: list[Chunk], llm_client: Any = None, **kwargs: Any
 ) -> list[Chunk]:
-    """Strategy 1: Async, semaphore-limited concurrent metadata enrichment.
+    """Strategy 1: async, semaphore-limited concurrent metadata enrichment.
 
-    llm_client is the SAME kind of object chunk_lumber_chunker takes —
-    LocalLLMClient (any OpenAI-compatible server, e.g. vLLM) or
-    OpenRouterLLMClient (see open_telco_rag/generators/local_llm.py) — not
-    a RAG-answer Generator. This function reads .base_url/.api_key directly
-    off it rather than calling .completion.create() (which is synchronous),
-    since it needs async concurrency across potentially hundreds of
-    thousands of chunks; both client classes expose those two attributes at
-    the top level for exactly this purpose.
+    llm_client is the same object type chunk_lumber_chunker takes
+    (LocalLLMClient or OpenRouterLLMClient, see generators/local_llm.py),
+    not a RAG-answer Generator — reads .base_url/.api_key directly rather
+    than calling the synchronous .completion.create(), since this needs
+    async concurrency across potentially hundreds of thousands of chunks.
 
-    Bridges this module's synchronous enrich_chunks()/enrich_* contract to
-    an async implementation (asyncio.run) — callers (_process_file_worker,
-    ingest_multi_enrichment's main-process loop) are all plain synchronous
-    code with no event loop of their own, so this is safe. httpx.AsyncClient
-    + asyncio.gather replace the previous requests + ThreadPoolExecutor
-    approach: coroutines waiting on network I/O don't hold an OS thread
-    each, so concurrency can scale well past a thread pool's practical
-    ceiling — capped by max_concurrency (kwarg "llm_concurrency", default
-    50) rather than a fixed worker count, to avoid hammering the API/server
-    past its actual rate limit or vLLM's configured max_num_seqs.
+    Bridges this module's synchronous enrich_* contract to an async impl
+    via asyncio.run() — safe since callers are plain synchronous code with
+    no event loop of their own. httpx.AsyncClient + gather replace the
+    previous requests + ThreadPoolExecutor approach: coroutines waiting on
+    I/O don't hold an OS thread each, so concurrency scales well past a
+    thread pool's ceiling — capped by max_concurrency (kwarg
+    "llm_concurrency", default 50) to avoid exceeding the API/server's rate limit.
 
-    max_tokens (kwarg, default 1024): caps each completion's generation
-    length. Previously unset entirely, which measured at ~14x slower
-    throughput than chunking's capped calls on real hardware (MI350X,
-    Qwen3-30B-A3B) — an uncapped multi-definition JSON completion has no
-    incentive to stop early. First attempt at a cap (400) was too
-    aggressive: empirically it truncated a large fraction of real
-    completions mid-string on that same hardware/model (observed
-    truncation points up to ~550 tokens in), which isn't just slower, it's
-    a parse failure — a chunk whose response got cut off can't be parsed
-    as JSON at all, so it's silently left unenriched. 1024 leaves
-    comfortable headroom above what was actually observed. A
-    finish_reason=="length" response (see below) prints a specific warning
-    naming the cap itself as the cause, rather than a generic parse error,
-    so a still-too-low cap is diagnosable from the logs directly rather
-    than by guessing.
+    max_tokens (kwarg, default 1500): caps each completion's length. Left
+    uncapped, throughput measured ~14x slower on real hardware (uncapped
+    JSON completions have no incentive to stop early). A first cap of 400
+    was too aggressive — completions truncated mid-string, which is a
+    parse failure, not just slower (unparsable chunks are silently left
+    unenriched). Observed truncation points vary by model/corpus though —
+    1500 has since recurred often enough on some chunks to be worth raising
+    further (the runtime warning below suggests doubling it); there's no
+    single safe constant here, only "raise it if the warning keeps firing."
+    A finish_reason=="length" response prints a warning naming the cap as
+    the cause, instead of a generic parse error.
+
+    timeout (kwarg, default 180s): per-request httpx timeout (connect+read+
+    write+pool, since a single float applies to all four). At high
+    max_concurrency against one vLLM instance, requests can queue behind
+    each other for longer than a short timeout allows -- those show up as
+    a bare "[Warning] LLM Enrichment failed for chunk N: ..." with no
+    truncation warning, i.e. work the server already spent GPU time on,
+    thrown away. Raise this before raising max_concurrency further.
+
+    frequency_penalty (kwarg, default 0.4): passed straight to the API to
+    discourage repeated tokens. A truncation whose JSONDecodeError reports
+    a char offset far beyond what max_tokens should produce (e.g. 150k+
+    chars from a 3000-token cap) is a repetition loop, not genuinely long
+    output -- raising max_tokens for those just delays the same failure.
     """
     if not llm_client:
         print(
@@ -188,6 +184,8 @@ def enrich_llm_metadata(
     model_name = kwargs.get("model_name", "google/qwen-2.5-coder-32b")
     max_concurrency = kwargs.get("llm_concurrency", 50)
     max_tokens = kwargs.get("max_tokens", 1500)
+    timeout = kwargs.get("timeout", 180)
+    frequency_penalty = kwargs.get("frequency_penalty", 0.4)
 
     system_prompt = (
         "You are a telecom expert assistant. Analyze the provided technical text chunk. "
@@ -196,11 +194,7 @@ def enrich_llm_metadata(
         "Return your analysis strictly as a flat JSON array of definition strings."
     )
 
-    # Resolve model name once. Only meaningful for OpenRouter's model-name
-    # aliasing — a local vLLM server is serving exactly one model under
-    # whatever name it was started with, so this is a harmless no-op (a
-    # miss on RECOMMENDED_MODELS just returns model_name unchanged) rather
-    # than something that needs to be skipped for the local backend.
+    # OpenRouter model-name aliasing; no-op for local vLLM (returns model_name unchanged)
     from open_telco_rag.generators import RECOMMENDED_MODELS
 
     resolved_model = RECOMMENDED_MODELS.get(model_name, model_name)
@@ -217,7 +211,8 @@ def enrich_llm_metadata(
     api_key = getattr(llm_client, "api_key", None)
 
     return asyncio.run(_enrich_chunks_async(
-        chunks, resolved_model, base_url, api_key, system_prompt, max_concurrency, max_tokens,
+        chunks, resolved_model, base_url, api_key, system_prompt,
+        max_concurrency, max_tokens, timeout, frequency_penalty,
     ))
 
 
@@ -236,13 +231,9 @@ def load_glossary(file_path: str | Path) -> dict[str, str]:
         return {}
 
 
-# Process-local cache: glossary path -> (dictionary, compiled regex).
-# enrich_acronym_expansion used to reload the JSON file AND rebuild/recompile
-# the master alternation regex (the more expensive part, for a glossary this
-# size) on every single file. That's the same file every time within a run,
-# so we build it once per process and reuse it. Doesn't change behavior or
-# the function's inputs/outputs — same glossary_path/glossary_dict kwargs,
-# same matching logic — purely an internal cache.
+# Process-local cache: glossary path -> (dict, compiled regex). Avoids
+# rebuilding the alternation regex (expensive) on every file; same
+# glossary_path/glossary_dict inputs and matching logic, purely internal.
 _GLOSSARY_CACHE: dict[str, tuple[dict[str, str], "re.Pattern | None"]] = {}
 
 
@@ -259,8 +250,7 @@ def _compile_glossary_pattern(acronym_dictionary: dict[str, str]) -> "re.Pattern
 def _get_compiled_glossary(
     glossary_path: str | Path, glossary_dict: dict[str, str] | None
 ) -> tuple[dict[str, str], "re.Pattern | None"]:
-    # An explicitly-passed dict is treated as ad hoc (caller-owned, may differ
-    # call to call) and isn't cached by path — build it fresh, same as before.
+    # Explicit glossary_dict is caller-owned/ad hoc — not cached by path
     if glossary_dict:
         return glossary_dict, _compile_glossary_pattern(glossary_dict)
 
@@ -279,7 +269,7 @@ def enrich_acronym_expansion(
     Optimized for large glossaries by compiling a single regex pattern once
     per glossary path and reusing it across calls (see _get_compiled_glossary).
     """
-    # Accept a massive parsed dictionary via kwargs, fallback to file relative to script
+    # glossary_dict overrides; otherwise fall back to the bundled glossary file
     default_glossary_path = SCRIPT_DIR / "3gpp_glossary.json"
     glossary_path = kwargs.get("glossary_path", default_glossary_path)
     glossary_dict = kwargs.get("glossary_dict")
@@ -290,11 +280,9 @@ def enrich_acronym_expansion(
         return chunks
 
     for chunk in chunks:
-        # Find all unique matches in the chunk text in one sweep
         matches = set(master_pattern.findall(chunk.text))
 
         if matches:
-            # Map the found acronyms back to their definitions
             found_expansions = [
                 f"{acronym}: {acronym_dictionary[acronym]}"
                 for acronym in matches
@@ -302,7 +290,6 @@ def enrich_acronym_expansion(
             ]
 
             if found_expansions:
-                # Append the structured suffix to the chunk payload
                 suffix_string = "\n\n[Acronym Expansions]:\n* " + "\n* ".join(
                     sorted(found_expansions)
                 )
@@ -326,21 +313,18 @@ def enrich_metadata_tagging(chunks: list[Chunk], **kwargs: Any) -> list[Chunk]:
 
         header_parts = []
 
-        # Pull any useful context keys dynamically passed down from the source parser
+        # Any extra kwargs are treated as document context to tag
         for key, value in kwargs.items():
             if key in ["llm_client", "model_name"]:
                 continue
 
-            # 1. Write directly to metadata
             chunk.metadata[key] = value
 
-            # 2. Format the data into a text string fragment
             clean_key = key.replace("_", " ").title()
             header_parts.append(f"{clean_key}: {value}")
 
         chunk.metadata["enriched"] = True
 
-        # 3. Prepend the structured text block to raw document content string
         if header_parts:
             metadata_header = " | ".join(header_parts)
             chunk.text = (

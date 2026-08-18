@@ -11,6 +11,25 @@ from datetime import datetime
 from pathlib import Path
 
 
+# Methodology note surfaced in print_summary()/report.md, not a computed metric.
+# Default threshold (0.5) is empirically uninformative on this corpus — clears
+# ~100% of retrieval across 24 grid combos, though the metric mechanism itself
+# works correctly. Recalibrate threshold deliberately; don't silently change it.
+COVERAGE_RATIO_CALIBRATION_NOTE = (
+    "coverage_ratio's default threshold (0.5) is empirically uninformative "
+    "on this corpus -- it clears ~100% of real retrieval across every "
+    "combination, even though the metric itself correctly discriminates "
+    "genuinely bad retrieval under direct testing. Treat mean_coverage_ratio "
+    "as an uncalibrated signal, not a trustworthy comparison, until the "
+    "threshold is deliberately recalibrated."
+)
+
+# Threshold above which an open/fill_blank answer_correctness counts as
+# "correct" for weighted_score_pct binarization (see _weighted_score_pct).
+# Judgment call, not derived — kept as a named constant, not a magic literal.
+OE_CORRECTNESS_THRESHOLD = 0.7
+
+
 @dataclass
 class QuestionResult:
     """All metric scores for one question."""
@@ -20,76 +39,54 @@ class QuestionResult:
     sources:     list[str]
     chunks_used: int
 
-    # answer_type ("mc" / "tf" / "open" / "fill_blank") drives which of the
-    # metrics below are actually applicable to THIS question — see
-    # evaluate_question()'s branch. Recorded here (not just on the source
-    # EvalQuestion) so aggregate() can group by it after the fact.
+    # Drives which metrics below apply to this question (evaluate_question()'s
+    # branch). Stored here too so aggregate() can group by it.
     answer_type: str = "open"
 
     # ── EFFICIENCY METRICS  ───────────────────────────────────────
     latency:           float = 0.0
-    search_latency:    float = 0.0   # Time spent query embedding + vector search
-    rerank_latency:    float = 0.0   # Time spent reranking retrieved chunks
-    gen_latency:       float = 0.0   # Time spent generating answer
+    search_latency:    float = 0.0   # embedding + vector search
+    rerank_latency:    float = 0.0   # reranking retrieved chunks
+    gen_latency:       float = 0.0   # answer generation
     prompt_tokens:     int   = 0
     rerank_tokens:     int   = 0
     completion_tokens: int   = 0
     total_tokens:      int   = 0
 
-    # "api" when prompt_tokens/completion_tokens/total_tokens above came
-    # from the generator's own real usage block (local.py/openrouter.py/
-    # claude.py all return one now — see each module's own comment),
-    # "estimated" when no usage was returned at all and evaluate_question()
-    # fell back to a local tiktoken approximation instead. "" only for a
-    # QuestionResult that was never run through evaluate_question() (e.g.
-    # a hand-built test fixture) — downstream analysis (grid reports,
-    # leaderboard) can filter/group on this to avoid silently treating an
-    # approximation as a measured number.
+    # "api": from the generator's real usage block. "estimated": no usage
+    # returned, evaluate_question() fell back to tiktoken approximation.
+    # "": never run through evaluate_question() (e.g. hand-built fixture).
+    # Downstream analysis filters/groups on this to avoid treating an
+    # approximation as measured.
     token_source:      str   = ""
 
-    # None = not computed at all; a real value (including a genuine 0)
-    # means it IS known — e.g. local.py's self-hosted 0.0 (no per-token
-    # billing) vs. claude.py's None (no pricing table wired up here yet).
-    # Previously these were unconditionally zeroed regardless of which
-    # generator ran, which made "genuinely free" and "we never computed
-    # this" look identical.
+    # None = not computed; a real value (incl. 0) means it IS known — e.g.
+    # local.py's self-hosted 0.0 vs. claude.py's None (no pricing table yet).
+    # Distinguishes "genuinely free" from "never computed".
     cached_tokens:     int | None = None
     reasoning_tokens:  int | None = None
     cost:              float | None = None
 
     # ── Judge/metric-call token usage ─────────────────────────────
-    # faithfulness/answer_relevancy/context_recall/answer_correctness each
-    # make their own llm_call(s) against the EVAL judge model — tracked
-    # SEPARATELY from prompt_tokens/completion_tokens above (which cover
-    # RAG *generation* only), because judge cost is roughly constant
-    # across chunking strategies for a fixed judge model: folding it into
-    # generation tokens would conflate "how efficient is this RAG config"
-    # with a cost that doesn't vary with the thing being compared. 0 for
-    # mc/tf questions (no judge calls are made at all — see
-    # evaluate_question()) and for any llm_call that doesn't track usage
-    # (see _claude.py's claude_call/_make_local_call/_make_openrouter_call
-    # — a plain callable without those attributes just contributes 0).
+    # Tracked separately from prompt_tokens/completion_tokens (RAG generation
+    # only) because judge cost is ~constant across chunking strategies for a
+    # fixed judge model — folding it in would conflate RAG efficiency with a
+    # cost that doesn't vary with what's being compared. 0 for mc/tf (no judge
+    # calls) and for any llm_call that doesn't track usage.
     judge_prompt_tokens:     int = 0
     judge_completion_tokens: int = 0
 
     # ── Deterministic scoring (mc/tf only; -1.0 = not applicable) ────────────
-    # Real fix: mc/tf correctness used to be written into faithfulness/
-    # answer_relevancy/context_recall/answer_correctness below (with
-    # answer_relevancy hardcoded to 1.0 regardless of anything) — those are
-    # OE-specific metrics (grounding-in-context, on-topic-via-reverse-
-    # question-embedding, etc.) with no meaningful mc/tf analogue. Blending
-    # exact-match correctness into them made a mixed mc+tf+open run's
-    # aggregate faithfulness/relevancy numbers an uninterpretable average of
-    # two different things. accuracy is mc/tf's own dedicated field instead;
-    # the four OE metrics below are left at their -1.0 "not applicable"
-    # default for mc/tf questions, matching the existing Tier 2 convention.
+    # mc/tf correctness used to be written into faithfulness/answer_relevancy/
+    # context_recall/answer_correctness below — those are OE-specific metrics
+    # with no mc/tf analogue, so blending exact-match into them made mixed
+    # mc+tf+open aggregates uninterpretable. accuracy is mc/tf's own field;
+    # the four OE metrics stay at -1.0 for mc/tf questions.
     accuracy: float = -1.0
 
-    # Three-way classification behind `accuracy` above, mc/tf only:
-    # "correct" / "incorrect" / "abstained" (generator honestly said the
-    # context was insufficient — see evaluate.py's _match_deterministic_
-    # answer() docstring for why this is tracked separately rather than
-    # folded into "incorrect"). None for non-mc/tf questions.
+    # Three-way outcome behind `accuracy`: "correct" / "incorrect" /
+    # "abstained" (generator honestly said context was insufficient — see
+    # evaluate.py's _match_deterministic_answer()). None for non-mc/tf.
     mc_tf_outcome: str | None = None
 
     # ── Tier 1: no ground truth (open/fill_blank only; -1.0 = not applicable) ─
@@ -100,12 +97,29 @@ class QuestionResult:
     mean_similarity:  float = 0.0
     min_similarity:   float = 0.0
     max_similarity:   float = 0.0
-    source_coverage:  int   = 0
+    # Raw count of distinct source docs among retrieved chunks, in [0, top_k]
+    # — NOT a 0-1 ratio (renamed from source_coverage, which implied one).
+    distinct_sources_retrieved: int = 0
     canonical_hit:    int   = -1   # -1 = not applicable, 0 = miss, 1 = hit
-    # Fraction of retrieved chunks meeting the --threshold similarity floor
-    # (see metrics.retrieval.coverage_ratio) — previously advertised in the
-    # CLI help text ("Similarity threshold for coverage_ratio metric") but
-    # never actually computed anywhere; --threshold was silently a no-op.
+    # Why canonical_hit is -1: None = no canonical_source for this question;
+    # False = canonical_source given but is_discriminating_source() rejected
+    # it as too generic to trust (e.g. "raw.md", a converter default filename
+    # common across this corpus's doc_ids); True = a real identifier was
+    # checked. Separate from canonical_hit's -1 because these are different
+    # problems (question-authoring gap vs. corpus/metadata quality gap).
+    canonical_source_discriminating: bool | None = None
+    # Stronger than canonical_hit: did the EXACT chunk this question was
+    # generated from come back, not just any chunk from the right document —
+    # see metrics.retrieval.exact_chunk_hit(). Same -1/0/1 convention;
+    # -1 when the question has no recorded chunk_id/source_text at all.
+    exact_chunk_hit:  int   = -1
+    # Fraction of retrieved chunks meeting the --threshold similarity floor.
+    # Previously advertised in CLI help but never computed — --threshold was
+    # a silent no-op. Metric mechanism itself works (0.0 for off-topic, 1.0
+    # for relevant, verified against real embeddings), but the default
+    # threshold (0.5) is empirically uninformative on this corpus — flat
+    # 1.000 across all 24 grid combinations. See CorpusResult's comment;
+    # left unchanged pending a deliberate threshold-calibration decision.
     coverage_ratio:   float = -1.0
 
     # ── Tier 2: ground truth required (open/fill_blank only; -1.0 = not computed) ─
@@ -130,12 +144,11 @@ class CorpusResult:
     # ── Deterministic (mc/tf) aggregate, -1.0 = no mc/tf questions in this run ──
     mean_accuracy: float = -1.0
 
-    # Three-way mc/tf breakdown behind mean_accuracy above — see
-    # QuestionResult.mc_tf_outcome / evaluate.py's _match_deterministic_
-    # answer() docstring for the full "why" (distinguishing a retrieval
-    # problem — high abstention — from a generation/reasoning problem —
-    # low abstention, high wrong_rate — that a single accuracy number
-    # can't tell apart). All -1.0 when there are no mc/tf questions.
+    # Three-way mc/tf breakdown behind mean_accuracy — see
+    # QuestionResult.mc_tf_outcome. Distinguishes a retrieval problem (high
+    # abstention) from a generation/reasoning problem (low abstention, high
+    # wrong_rate) that a single accuracy number can't tell apart. All -1.0
+    # when there are no mc/tf questions.
     #   mean_accuracy            = correct / n_mc_tf              (unchanged, all mc/tf)
     #   mean_accuracy_attempted  = correct / (correct + incorrect)  (abstentions excluded)
     #   abstention_rate          = abstained / n_mc_tf
@@ -151,18 +164,28 @@ class CorpusResult:
     # ── Retrieval aggregates — computed across every non-baseline question,
     # ── regardless of answer_type ────────────────────────────────────────────
     mean_similarity:       float = 0.0
-    mean_source_coverage:  float = 0.0
+    # Mean of the raw distinct-source-document count — legitimately > 1.0,
+    # since it averages an integer count in [0, top_k], not a ratio.
+    mean_distinct_sources_retrieved: float = 0.0
     canonical_hit_rate:    float = -1.0
+    # Count of questions whose canonical_source was rejected as too generic
+    # by is_discriminating_source() (see QuestionResult.
+    # canonical_source_discriminating). >0 means canonical_hit_rate is
+    # computed over fewer real checks than n_questions suggests; if all
+    # questions are rejected, canonical_hit_rate falls back to -1.0 instead
+    # of silently reporting a meaningless 1.000.
+    n_canonical_source_non_discriminating: int = 0
+    # Stronger companion to canonical_hit_rate — see QuestionResult.
+    # exact_chunk_hit. -1.0 when no question in this run has chunk provenance.
+    exact_chunk_hit_rate:  float = -1.0
     mean_coverage_ratio:   float = -1.0
 
     # ── Tier 2 aggregates (-1.0 = not computed) ───────────────────────────────
     mean_context_recall:     float = -1.0
     mean_answer_correctness: float = -1.0
 
-    # ── Efficiency aggregates — same per-combination sum/mean treatment as
-    # ── the accuracy/faithfulness/etc. aggregates above, so a grid
-    # ── comparison across configs doesn't require digging into
-    # ── question_results by hand (see _aggregate_efficiency() below). ────────
+    # ── Efficiency aggregates — sum/mean per combination, so grid comparisons
+    # ── don't require digging into question_results by hand ─────────────────
     mean_latency:            float = 0.0
     mean_search_latency:     float = 0.0
     mean_rerank_latency:     float = 0.0
@@ -175,57 +198,49 @@ class CorpusResult:
     mean_completion_tokens:  float = 0.0
     mean_total_tokens:       float = 0.0
 
-    # Judge-call tokens — see QuestionResult.judge_prompt_tokens' own
-    # comment for why these are kept separate from the generation totals
-    # above rather than folded in.
+    # Judge-call tokens, kept separate from generation totals above (see
+    # QuestionResult.judge_prompt_tokens).
     total_judge_prompt_tokens:     int = 0
     total_judge_completion_tokens: int = 0
     mean_judge_prompt_tokens:      float = 0.0
     mean_judge_completion_tokens:  float = 0.0
 
-    # None only when NOT ONE question in this run had a known cost (e.g.
-    # every question ran through claude.py, which has no pricing table
-    # wired up) — distinguishes "cost entirely unknown" from "$0.00,
-    # genuinely free" (a local vLLM run) the same way QuestionResult.cost
-    # does per-question. n_cost_known / n_questions tells a reader what
-    # fraction of questions actually contributed a real cost figure.
+    # None only when no question in this run had a known cost (e.g. all ran
+    # through claude.py, no pricing table wired up) — distinguishes "unknown"
+    # from "$0.00, genuinely free" (local vLLM), same as QuestionResult.cost.
     total_cost:   float | None = None
     mean_cost:    float | None = None
     n_cost_known: int = 0
 
-    # {"api": n, "estimated": n} — how many questions' token counts came
-    # from a real usage block vs. the tiktoken fallback (see
-    # QuestionResult.token_source). Missing/empty for a run with no
-    # question_results at all.
+    # {"api": n, "estimated": n} — see QuestionResult.token_source.
     token_source_counts: dict[str, int] = field(default_factory=dict)
 
-    # Per-answer_type breakdown ("mc"/"tf"/"open"/"fill_blank" -> metrics dict)
-    # — the actual fix for running one mixed mc+tf+open set: the flat means
-    # above already correctly separate deterministic accuracy from OE
-    # metrics (see QuestionResult), but a user comparing e.g. mc vs. tf
-    # specifically, or just wanting per-format counts, needs this finer
-    # breakdown rather than a single "mc+tf combined" accuracy number.
+    # Weighted score %: mc/tf correct = 1pt, open/fill_blank correct
+    # (answer_correctness >= OE_CORRECTNESS_THRESHOLD) = 5pts, since OE
+    # questions test generation quality more strongly. -1.0 when there are
+    # no scorable questions. See _weighted_score_pct() for the full formula.
+    weighted_score_pct: float = -1.0
+
+    # Per-answer_type breakdown ("mc"/"tf"/"open"/"fill_blank" -> metrics
+    # dict), so mc vs. tf (or per-format counts) can be compared directly
+    # instead of only via the combined flat means above.
     by_format: dict[str, dict] = field(default_factory=dict)
 
     question_results: list[QuestionResult] = field(default_factory=list)
 
 
 def _mean(values: list[float]) -> float:
-    """Mean of non-negative values only — -1.0 (the shared "not
-    applicable/not computed" sentinel throughout this module) is excluded,
-    not treated as a real zero score. Module-level so both aggregate() and
-    _aggregate_one_format() below share exactly one implementation."""
+    """Mean of non-negative values; excludes the -1.0 "not applicable"
+    sentinel rather than treating it as a real zero score."""
     valid = [v for v in values if v >= 0]
     return statistics.mean(valid) if valid else -1.0
 
 
 def _mc_tf_outcome_rates(results: list[QuestionResult]) -> dict:
-    """mean_accuracy_attempted/abstention_rate/wrong_rate from a list of
-    QuestionResults' mc_tf_outcome field — see CorpusResult's own comment
-    for exactly what each measures and why. `results` may be mixed-format
-    (only entries with a non-None mc_tf_outcome are counted) or already
-    mc/tf-only (_aggregate_one_format's per-format call). All three are
-    -1.0 ("not applicable") when there are no mc/tf questions at all.
+    """mean_accuracy_attempted/abstention_rate/wrong_rate from mc_tf_outcome
+    (see CorpusResult for what each means). `results` may be mixed-format —
+    only non-None mc_tf_outcome entries count. -1.0 for all three if no
+    mc/tf questions.
     """
     outcomes = [r.mc_tf_outcome for r in results if r.mc_tf_outcome is not None]
     n = len(outcomes)
@@ -248,18 +263,22 @@ def _mc_tf_outcome_rates(results: list[QuestionResult]) -> dict:
 
 def _aggregate_one_format(results: list[QuestionResult]) -> dict:
     """Per-answer_type metrics dict for CorpusResult.by_format — mc/tf get
-    their own accuracy figure (plus the three-way outcome breakdown);
-    open/fill_blank get the four OE metrics. Retrieval metrics are
-    reported for every format, since those are computed regardless of
-    answer_type.
+    accuracy + outcome breakdown; open/fill_blank get the four OE metrics.
+    Retrieval metrics are reported for every format.
     """
     canonical = [r for r in results if r.canonical_hit >= 0]
+    exact_chunk = [r for r in results if r.exact_chunk_hit >= 0]
     entry = {
         "n":                    len(results),
         "mean_similarity":      _mean([r.mean_similarity for r in results]),
-        "mean_source_coverage": _mean([float(r.source_coverage) for r in results]),
+        "mean_distinct_sources_retrieved": _mean([float(r.distinct_sources_retrieved) for r in results]),
         "canonical_hit_rate":   (sum(r.canonical_hit for r in canonical) / len(canonical)
                                   if canonical else -1.0),
+        "n_canonical_source_non_discriminating": sum(
+            1 for r in results if r.canonical_source_discriminating is False
+        ),
+        "exact_chunk_hit_rate": (sum(r.exact_chunk_hit for r in exact_chunk) / len(exact_chunk)
+                                  if exact_chunk else -1.0),
         "mean_coverage_ratio":  _mean([r.coverage_ratio for r in results]),
     }
     fmt = results[0].answer_type if results else "open"
@@ -275,21 +294,15 @@ def _aggregate_one_format(results: list[QuestionResult]) -> dict:
 
 
 def _mean_or_zero(values: list[float]) -> float:
-    """Plain mean, 0.0 for an empty list — unlike _mean() above, none of
-    the efficiency fields use -1.0 as an "not applicable" sentinel (every
-    question that didn't error has a real, if possibly estimated, value
-    for latency/tokens), so there's nothing to filter out here."""
+    """Plain mean, 0.0 for empty — unlike _mean(), efficiency fields don't
+    use -1.0 as a sentinel, so nothing needs filtering."""
     return statistics.mean(values) if values else 0.0
 
 
 def _aggregate_efficiency(results: list[QuestionResult]) -> dict:
-    """Latency/token/judge-token/cost aggregates for CorpusResult — see its
-    own comment for what each field means. A straight sum/mean over every
-    result (no sentinel filtering, unlike _mean()): an errored question
-    contributes its exception-handler defaults (0.0/0/None), which dilutes
-    the mean toward zero rather than being excluded — the same "still
-    counts as a data point" treatment errored questions already get
-    everywhere else aggregate() doesn't special-case them.
+    """Latency/token/judge-token/cost aggregates for CorpusResult. Straight
+    sum/mean over every result, no sentinel filtering — an errored question's
+    0.0/0/None defaults still count as a data point, same as elsewhere.
     """
     prompt_tokens     = [r.prompt_tokens for r in results]
     completion_tokens = [r.completion_tokens for r in results]
@@ -330,10 +343,52 @@ def _aggregate_efficiency(results: list[QuestionResult]) -> dict:
     )
 
 
+def _weighted_score_pct(question_results: list[QuestionResult]) -> float:
+    """Weighted overall performance score, as a percentage:
+
+        score_pct = (1*mc_correct + 1*tf_correct + 5*oe_correct)
+                    / (1*mc_total  + 1*tf_total  + 5*oe_total)
+                    * 100
+
+    Open-ended questions weight 5x an mc/tf question, since they test
+    generation quality more strongly than exact-match. mc+tf combined into
+    one bucket (mathematically equivalent, since both carry weight 1).
+
+    mc_correct/tf_correct: mc_tf_outcome == "correct" — abstention counts as
+    0 points (same treatment `accuracy` gives it): an honest "I don't know"
+    is useful info, but shouldn't outscore a genuine wrong attempt here.
+
+    oe_correct: answer_correctness >= OE_CORRECTNESS_THRESHOLD. A question
+    with no reference_answer (answer_correctness left at -1.0) is excluded
+    from both numerator and oe_total — no reference means correctness can't
+    be judged at all, a data gap rather than a performance signal like
+    abstention.
+
+    -1.0 when the weighted denominator is 0 (no scorable questions at all).
+    """
+    mc_tf = [r for r in question_results if r.mc_tf_outcome is not None]
+    mc_tf_correct = sum(1 for r in mc_tf if r.mc_tf_outcome == "correct")
+    mc_tf_total = len(mc_tf)
+
+    oe = [
+        r for r in question_results
+        if r.answer_type in ("open", "fill_blank") and r.answer_correctness >= 0
+    ]
+    oe_correct = sum(1 for r in oe if r.answer_correctness >= OE_CORRECTNESS_THRESHOLD)
+    oe_total = len(oe)
+
+    numerator   = mc_tf_correct + 5 * oe_correct
+    denominator = mc_tf_total   + 5 * oe_total
+    if denominator == 0:
+        return -1.0
+    return (numerator / denominator) * 100
+
+
 def aggregate(question_results: list[QuestionResult]) -> dict:
     """Compute aggregate metrics from a list of QuestionResults."""
 
     canonical_qs = [r for r in question_results if r.canonical_hit >= 0]
+    exact_chunk_qs = [r for r in question_results if r.exact_chunk_hit >= 0]
 
     by_format: dict[str, dict] = {}
     for fmt in sorted({r.answer_type for r in question_results}):
@@ -352,12 +407,18 @@ def aggregate(question_results: list[QuestionResult]) -> dict:
         mean_faithfulness=       _mean([r.faithfulness       for r in question_results]),
         mean_answer_relevancy=   _mean([r.answer_relevancy   for r in question_results]),
         mean_similarity=         _mean([r.mean_similarity    for r in question_results]),
-        mean_source_coverage=    _mean([float(r.source_coverage) for r in question_results]),
+        mean_distinct_sources_retrieved=
+                                  _mean([float(r.distinct_sources_retrieved) for r in question_results]),
         canonical_hit_rate=     (sum(r.canonical_hit for r in canonical_qs) /
                                   len(canonical_qs) if canonical_qs else -1.0),
+        n_canonical_source_non_discriminating=
+                                  sum(1 for r in question_results if r.canonical_source_discriminating is False),
+        exact_chunk_hit_rate=   (sum(r.exact_chunk_hit for r in exact_chunk_qs) /
+                                  len(exact_chunk_qs) if exact_chunk_qs else -1.0),
         mean_coverage_ratio=     _mean([r.coverage_ratio     for r in question_results]),
         mean_context_recall=     _mean([r.context_recall     for r in question_results]),
         mean_answer_correctness= _mean([r.answer_correctness for r in question_results]),
+        weighted_score_pct=      _weighted_score_pct(question_results),
         by_format=by_format,
         **_aggregate_efficiency(question_results),
     )
@@ -392,10 +453,12 @@ def print_summary(result: CorpusResult) -> None:
         ("Wrong rate (mc/tf)",    result.wrong_rate,              "Exact-match"),
         ("Faithfulness (open)",   result.mean_faithfulness,       "Generation"),
         ("Answer relevancy (open)", result.mean_answer_relevancy, "Generation"),
+        ("Weighted score % (1/1/5)", result.weighted_score_pct,   "Composite"),
         ("Mean similarity",       result.mean_similarity,         "Retrieval"),
-        ("Source coverage (mean)",result.mean_source_coverage,    "Retrieval"),
+        ("Distinct sources (mean count)", result.mean_distinct_sources_retrieved, "Retrieval"),
         ("Coverage ratio (mean)", result.mean_coverage_ratio,     "Retrieval"),
         ("Canonical hit rate",    result.canonical_hit_rate,      "Retrieval"),
+        ("Exact chunk hit rate",  result.exact_chunk_hit_rate,    "Retrieval"),
         ("Context recall (open)", result.mean_context_recall,     "Retrieval+GT"),
         ("Answer correctness (open)", result.mean_answer_correctness, "Generation+GT"),
     ]
@@ -403,8 +466,16 @@ def print_summary(result: CorpusResult) -> None:
         if value < 0:
             print(f"  {label:<32} {'N/A':>8}  {kind}")
         else:
-            fmt = ".1f" if label == "Source coverage (mean)" else ".3f"
+            fmt = ".1f" if label == "Distinct sources (mean count)" else ".3f"
             print(f"  {label:<32} {value:>8{fmt}}  {kind}")
+
+    if result.n_canonical_source_non_discriminating > 0:
+        print(f"  {'':32} ⚠ {result.n_canonical_source_non_discriminating} question(s) had a "
+              f"canonical_source too generic to trust (see canonical_source_discriminating) --")
+        print(f"  {'':32}   canonical_hit_rate above is computed over fewer real checks than n={result.n_questions} suggests.")
+
+    if result.mean_coverage_ratio >= 0:
+        print(f"  {'':32} ⚠ {COVERAGE_RATIO_CALIBRATION_NOTE}")
 
     if result.by_format:
         print(f"\n  Per-format breakdown:")
@@ -427,8 +498,10 @@ def print_summary(result: CorpusResult) -> None:
                 ]
             metric_keys += [
                 ("mean_similarity",     "mean_similarity"),
+                ("mean_distinct_sources_retrieved", "distinct_sources (mean)"),
                 ("mean_coverage_ratio", "coverage_ratio"),
                 ("canonical_hit_rate",  "canonical_hit_rate"),
+                ("exact_chunk_hit_rate", "exact_chunk_hit_rate"),
             ]
             for key, label2 in metric_keys:
                 v = m.get(key, -1.0)

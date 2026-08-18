@@ -91,7 +91,6 @@ class ITUSource(MarkerMixin):
         # Remove standalone page numbers
         text = re.sub(r'^\s*\d+\s*$', '', text, flags=re.MULTILINE)
 
-        # Collapse whitespace
         text = re.sub(r'\n{3,}', '\n\n', text)
         return text.strip()
 

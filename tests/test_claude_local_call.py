@@ -1,13 +1,7 @@
-"""Tests for _make_local_call()/_make_openrouter_call()'s response parsing
-— a real, confirmed-in-production bug: reasoning models (e.g. openai/
-gpt-oss-120b) can spend their entire max_tokens budget on hidden reasoning
-tokens and return a well-formed HTTP 200 response with "content": null when
-nothing is left over for visible text. The old code did
-`response.json()["choices"][0]["message"]["content"].strip()` directly,
-which crashed with a bare, undiagnosable `'NoneType' object has no
-attribute 'strip'` — hit by master_grid_eval.py's own pre-flight endpoint
-check (using a too-small max_tokens=5) even though the endpoint itself was
-completely healthy.
+"""Tests for _make_local_call()/_make_openrouter_call()'s response parsing.
+
+Regression: reasoning models (e.g. gpt-oss-120b) can return content=null when
+max_tokens is exhausted by hidden reasoning; old code crashed on .strip().
 """
 from __future__ import annotations
 

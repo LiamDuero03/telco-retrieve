@@ -19,14 +19,7 @@ logger = logging.getLogger(__name__)
 
 # Phrases that indicate the RAG failed to retrieve relevant content.
 # These answers should not score highly on relevancy or faithfulness --
-# and, for mc/tf questions, are the SAME signal used by evaluate.py's
-# _match_deterministic_answer() to classify an answer as "abstained"
-# rather than "incorrect" (see that function's own docstring). Shared
-# here, not duplicated, so both call sites recognize exactly the same set
-# of phrasings — extended with a few more "I can't determine this"-style
-# phrasings _build_generation_question()'s own mc/tf instruction
-# ("...say so explicitly instead of guessing") is likely to elicit,
-# beyond the original retrieval-failure-specific wording.
+# used by faithfulness()/answer_relevancy() below via _is_not_found_answer().
 _NOT_FOUND_PHRASES = [
     "does not contain",
     "not provided in",
@@ -37,6 +30,24 @@ _NOT_FOUND_PHRASES = [
     "not in the context",
     "context does not",
     "provided context does not",
+]
+
+# mc/tf-ONLY additions, used by evaluate.py's _match_deterministic_answer()
+# (via _is_not_found_answer_mc_tf() below) to classify an answer as
+# "abstained" rather than "incorrect" -- "I can't determine this"-style
+# phrasings _build_generation_question()'s own mc/tf instruction ("...say
+# so explicitly instead of guessing") is likely to elicit, beyond the
+# original retrieval-failure-specific wording above.
+#
+# Deliberately NOT folded into _NOT_FOUND_PHRASES/_is_not_found_answer():
+# an open-ended answer can legitimately use a phrase like "insufficient
+# information" or "cannot determine" mid-explanation while still being
+# substantively correct and on-topic (e.g. "...there is insufficient
+# information to characterize every edge case, but the core procedure is
+# X...") -- forcing faithfulness/answer_relevancy to 0.0 for that would be
+# a false positive open questions' much looser framing can't safely
+# tolerate the way mc/tf's narrow verdict-or-abstain framing can.
+_MC_TF_ONLY_NOT_FOUND_PHRASES = [
     "cannot determine",
     "unable to determine",
     "insufficient information",
@@ -45,8 +56,19 @@ _NOT_FOUND_PHRASES = [
 ]
 
 def _is_not_found_answer(answer: str) -> bool:
+    """Open-question use (faithfulness()/answer_relevancy() below) --
+    the narrower, retrieval-failure-specific phrasing only."""
     a = answer.lower()
     return any(phrase in a for phrase in _NOT_FOUND_PHRASES)
+
+
+def _is_not_found_answer_mc_tf(answer: str) -> bool:
+    """mc/tf prose-fallback use (evaluate.py's _match_deterministic_answer_
+    prose()) -- the broader set including _MC_TF_ONLY_NOT_FOUND_PHRASES;
+    see that list's own comment for why it's not also used for open
+    questions."""
+    a = answer.lower()
+    return any(phrase in a for phrase in _NOT_FOUND_PHRASES + _MC_TF_ONLY_NOT_FOUND_PHRASES)
 
 
 def _debug_log(metric: str, step: str, raw: str) -> None:
@@ -179,11 +201,8 @@ Answer:
         if debug:
             _debug_log("answer_relevancy", "reverse_questions → raw response", raw)
         reverse_qs = parse_json(raw)
-        # An EMPTY (but validly-parsed) list would otherwise reach
-        # np.mean([]) below, which returns NaN rather than raising —
-        # silently poisoning answer_relevancy instead of the clean 0.0
-        # faithfulness() already returns for the analogous empty-claims
-        # case above.
+        # An empty list would otherwise reach np.mean([]), which returns
+        # NaN rather than raising — silently poisoning the score.
         if not isinstance(reverse_qs, list) or not reverse_qs:
             return 0.0
         reverse_qs = [str(q) for q in reverse_qs[:n_reverse]]

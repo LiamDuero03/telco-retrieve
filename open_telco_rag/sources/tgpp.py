@@ -7,6 +7,11 @@ from pathlib import Path
 
 from open_telco_rag.core.cleaning import base_clean
 
+# TSpec-LLM's converter reuses this filename for every spec's markdown, one
+# per spec-named folder (e.g. 28312-i11/raw.md) -- not a usable per-document
+# identifier on its own.
+_GENERIC_FILENAME_STEMS = {"raw", "output", "converted"}
+
 
 class TPPSource:
     """Loads, cleans and extracts metadata from 3GPP TSpec-LLM Markdown files."""
@@ -21,10 +26,9 @@ class TPPSource:
     def load(self, path: Path) -> str:
         """Load a source file as plain text.
 
-        .md files are read as-is (they carry markdown heading structure).
-        .docx files are loaded as a flat, unstructured baseline via
-        `_load_docx` — paragraph text only, no heading markup preserved —
-        intentionally, to serve as the "no markdown structure" comparison arm.
+        .md files keep markdown heading structure as-is. .docx loads flat/
+        unstructured via `_load_docx` (no headings) — intentional "no
+        markdown structure" comparison arm.
         """
         path = Path(path)
         suffix = path.suffix.lower()
@@ -53,20 +57,42 @@ class TPPSource:
             "The present document",
             text, flags=re.DOTALL
         )
-        # Collapse whitespace
         text = re.sub(r"\n{3,}", "\n\n", text)
         return text.strip()
 
     def metadata(self, path: Path) -> dict:
-        """Extract metadata from TSpec-LLM filename.
+        """Extract metadata from a TSpec-LLM file.
 
-        Example: 28312-i11.md
-        → series: 28, spec_number: 28.312, version: i11
+        Handles both TSpec-LLM layouts: a spec's markdown named directly
+        (28312-i11.md), or generically inside a spec-named folder
+        (28312-i11/raw.md, bare 25401/raw.md, or a multi-part spec's
+        38508-2/raw.md -- the converter's own output convention) -- the
+        latter has no identity in the filename itself, so the identifier is
+        read from the parent folder instead.
+
+        release comes from a "Rel-NN" ancestor directory and is checked
+        against the FULL path, not the data_dir-relative one -- so it's
+        captured correctly regardless of which layout matched, or of
+        whether ingestion's data_dir happened to be rooted at or above the
+        release folder.
+
+        canonical_id combines spec_number (+ doc_part, for multi-part specs)
+        with release, e.g. "28.312 (Rel-18)" -- without it, two releases of
+        the same spec are indistinguishable wherever the filename/folder
+        itself carries no release (the generic-filename case always, and
+        even a directly-named file's spec_number, which never includes the
+        version). See _canonical_source() in qna_generation for why this
+        matters downstream.
         """
         path = Path(path)
+
+        generic_filename = path.stem.lower() in _GENERIC_FILENAME_STEMS
+        id_stem = path.parent.name if generic_filename else path.stem
+        display_name = f"{id_stem}{path.suffix}" if generic_filename else path.name
+
         meta = {
-            "source":      path.name,
-            "filename":    path.name,
+            "source":      display_name,
+            "filename":    display_name,
             "source_type": "3gpp",
         }
 
@@ -85,19 +111,25 @@ class TPPSource:
                 meta["series"] = series_match.group(1)
                 break
 
-        # Extract spec number and version from filename
-        # e.g. 28312-i11.md → spec_number: 28.312, version: i11
-        name = path.stem  # e.g. 28312-i11
-        file_match = re.match(r"(\d{5})-(\w+)", name)
-        if file_match:
-            raw_num          = file_match.group(1)   # e.g. 28312
-            meta["version"]  = file_match.group(2)   # e.g. i11
+        # e.g. 28312-i11 → spec_number: 28.312, version: i11
+        #      38508-2   → spec_number: 38.508, doc_part: 2 (multi-part spec)
+        #      25401     → spec_number: 25.401 (no version/part in the name)
+        spec_match = re.match(r"(\d{5})(?:-(\w+))?$", id_stem)
+        if spec_match:
+            raw_num = spec_match.group(1)   # e.g. 28312
+            suffix  = spec_match.group(2)   # e.g. i11, 2, or None
             # Convert 28312 → 28.312
             meta["spec_number"] = f"{raw_num[:2]}.{raw_num[2:]}"
             meta["series"]      = raw_num[:2]
+            if suffix:
+                if re.match(r"[a-j]\d{2}$", suffix, re.IGNORECASE):
+                    meta["version"] = suffix
+                else:
+                    meta["doc_part"] = suffix   # e.g. "2" for TS 38.508-2
 
-        # 3GPP version letter maps to release
-        # a=Rel-10, b=Rel-11, c=Rel-12 ... i=Rel-18, j=Rel-19
+        # Version letter → release: a=Rel-10, b=Rel-11 ... i=Rel-18, j=Rel-19.
+        # Only a fallback -- the directory scan above is ground truth from
+        # the actual file layout and wins if it already found one.
         version_to_release = {
             "a": "Rel-10", "b": "Rel-11", "c": "Rel-12",
             "d": "Rel-13", "e": "Rel-14", "f": "Rel-15",
@@ -106,7 +138,12 @@ class TPPSource:
         if "version" in meta:
             version_letter = meta["version"][0].lower()
             if version_letter in version_to_release:
-                meta["release"] = version_to_release[version_letter]
+                meta.setdefault("release", version_to_release[version_letter])
+
+        spec_id = meta.get("spec_number") or id_stem
+        if "doc_part" in meta:
+            spec_id = f"{spec_id}-{meta['doc_part']}"
+        meta["canonical_id"] = f"{spec_id} ({meta['release']})" if "release" in meta else spec_id
 
         return meta
     

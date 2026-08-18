@@ -21,9 +21,10 @@ from __future__ import annotations
 
 import os
 
+from open_telco_rag.generators._zero_retrieval import zero_retrieval_answer
+
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
-# Recommended models for telecom RAG generation
 RECOMMENDED_MODELS = {
     "llama-3.1-8b":   "meta-llama/llama-3.1-8b-instruct",
     "llama-3.1-70b":  "meta-llama/llama-3.1-70b-instruct",
@@ -37,8 +38,7 @@ RECOMMENDED_MODELS = {
     "command-r-plus": "cohere/command-r-plus",
 }
 
-# Pricing per 1M tokens: (Input/Prompt Cost USD, Output/Completion Cost USD)
-# Updated 2026 baseline rates
+# per-1M-tokens (input, output) USD; 2026 baseline rates
 MODEL_PRICING = {
     "meta-llama/llama-3.1-8b-instruct":   (0.055, 0.055),
     "meta-llama/llama-3.1-70b-instruct":  (0.35,  0.40),
@@ -82,7 +82,6 @@ class OpenRouterGenerator:
         site_url:    str   = "",
         site_name:   str   = "Open Telco RAG",
     ):
-        # Resolve short key to full model ID
         self.model       = RECOMMENDED_MODELS.get(model, model)
         self.max_tokens  = max_tokens
         self.temperature = temperature
@@ -109,20 +108,11 @@ class OpenRouterGenerator:
     ) -> dict:
         """Generate a grounded answer from retrieved chunks.
 
-        response_schema, when given, requests SCHEMA-CONSTRAINED
-        structured output — see LocalGenerator.generate()'s own docstring
-        for the full rationale (root-cause fix for mc/tf scoring, see
-        evaluation/evaluate.py's _mc_response_schema()/_match_
-        deterministic_answer()). Sent the same way: response_format:
-        {"type": "json_schema", ...} — the same field core/enrichment.py's
-        enrich_llm_metadata() already sends OpenRouter successfully (there
-        with the generic {"type": "json_object"} mode). Whether a
-        SPECIFIC model routed through OpenRouter actually enforces the
-        schema (vs. the provider silently ignoring it) varies per
-        upstream model/provider — a non-conformant response just isn't
-        valid structured JSON, which evaluate.py's _parse_structured_
-        verdict() treats as a signal to fall back to prose parsing, not
-        an error here.
+        response_schema, when given, requests schema-constrained structured output
+        (see LocalGenerator.generate()'s docstring for full rationale). Whether a
+        specific model routed through OpenRouter actually enforces the schema varies
+        per upstream provider — a non-conformant response just isn't valid JSON,
+        which evaluate.py's _parse_structured_verdict() falls back to prose parsing for.
 
         Returns:
             dict with keys: answer, sources, chunks_used, retrieved_chunks
@@ -130,8 +120,11 @@ class OpenRouterGenerator:
         import requests
 
         if not results:
+            # Structured abstain verdict when response_schema requests one
+            # (mc/tf) so this scores "abstained", not "incorrect" -- see
+            # generators/_zero_retrieval.py.
             return {
-                "answer":           "No relevant chunks found.",
+                "answer":           zero_retrieval_answer(response_schema),
                 "sources":          [],
                 "chunks_used":      0,
                 "retrieved_chunks": [],
@@ -183,17 +176,15 @@ class OpenRouterGenerator:
         data = response.json()
 
         content = data["choices"][0]["message"].get("content")
-        # Same None -> "" coercion as LocalGenerator.generate() -- a
-        # reasoning model routed through OpenRouter can also return
-        # "content": null on a thin token budget.
+        # same None -> "" coercion as LocalGenerator.generate() -- reasoning models
+        # can also return content: null on a thin token budget
         answer = (content or "").strip()
 
-        # Extract and compute cost based on specific pricing structures
         self.last_usage = data.get("usage", {})
         prompt_tokens = self.last_usage.get("prompt_tokens", 0)
         completion_tokens = self.last_usage.get("completion_tokens", 0)
 
-        # Resolve pricing (default to llama-3.1-70b rates if model is untracked)
+        # default to llama-3.1-70b rates if model is untracked
         price_in, price_out = MODEL_PRICING.get(self.model, (0.35, 0.40))
         self.last_cost = ((prompt_tokens / 1_000_000) * price_in) + ((completion_tokens / 1_000_000) * price_out)
 

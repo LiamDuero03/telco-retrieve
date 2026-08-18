@@ -41,6 +41,8 @@ class VectorStore(Protocol):
 
     def exists(self, id: str) -> bool: ...
 
+    def all_doc_ids(self) -> list[str]: ...
+
 
 class Chunker(Protocol):
     """Anything that splits text into chunks."""

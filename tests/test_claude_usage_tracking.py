@@ -1,17 +1,10 @@
-"""Tests for _claude.py's judge-call usage tracking — the fix for a real
-gap: claude_call/_make_local_call/_make_openrouter_call/make_llm_call's
-custom-Claude closure all discarded the API response's "usage" block
-entirely, returning only the extracted text. That meant every judge/
-metric call (faithfulness, answer_relevancy, context_recall,
-answer_correctness) was completely invisible to token/cost accounting.
+"""Tests for _claude.py's judge-call usage tracking.
 
-Each callable now accumulates total_prompt_tokens/total_completion_tokens
-as plain attributes on itself (see each function's own comment for why:
-preserving the exact Callable[[str, int], str] signature every metrics
-function already calls, rather than threading a richer return type
-through faithfulness()/answer_relevancy()/etc). These tests confirm the
-accumulation itself, independent of evaluate_question()'s snapshot/delta
-usage of it (see test_evaluate_efficiency_tracking.py for that).
+Fix: LLM call closures discarded the response's usage block, so judge/metric
+calls were invisible to token/cost accounting. Usage now accumulates as
+attributes (total_prompt_tokens/total_completion_tokens) to preserve the
+Callable[[str, int], str] signature metrics functions expect. See
+test_evaluate_efficiency_tracking.py for evaluate_question()'s use of this.
 """
 from __future__ import annotations
 
@@ -53,8 +46,7 @@ def test_local_call_accumulates_usage_across_multiple_calls(monkeypatch):
 
 
 def test_local_call_missing_usage_block_does_not_crash_and_stays_zero(monkeypatch):
-    """A server that doesn't return "usage" at all (e.g. an older vLLM
-    build) must not crash the caller -- just contribute nothing."""
+    """Server omitting "usage" (e.g. older vLLM) must not crash — just contribute nothing."""
     monkeypatch.setattr(requests, "post", lambda *a, **kw: _FakeResponse("ok", usage=None))
 
     call = _make_local_call("openai/gpt-oss-120b", base_url="http://localhost:8000/v1")
@@ -65,10 +57,8 @@ def test_local_call_missing_usage_block_does_not_crash_and_stays_zero(monkeypatc
 
 
 def test_two_local_call_instances_track_usage_independently(monkeypatch):
-    """Each make_llm_call()-style factory call returns its OWN tracked
-    callable -- usage on one must never leak into another (e.g. two
-    different judge configs in the same process, or two questions'
-    baseline-vs-judge generators)."""
+    """Each factory call returns its own tracked callable; usage must not leak
+    between instances (e.g. two judge configs in the same process)."""
     monkeypatch.setattr(
         requests, "post",
         lambda *a, **kw: _FakeResponse("ok", usage={"prompt_tokens": 5, "completion_tokens": 1}),

@@ -46,7 +46,6 @@ class MarkerMixin:
 
         headers = {"X-API-Key": api_key}
 
-        # Submit conversion request
         with open(path, "rb") as f:
             resp = requests.post(
                 "https://www.datalab.to/api/v1/convert",

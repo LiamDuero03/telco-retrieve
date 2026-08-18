@@ -61,18 +61,17 @@ def chunk_hierarchical_markdown(
     source_type: str = "",
     **kwargs: Any,
 ) -> list[Chunk]:
-    """Strategy 1: Identifies document layouts based on structural Markdown heading elements (# to #####)
-    while maintaining a stateful parent breadcrumb trail stack across deep sub-sections.
+    """Strategy 1: splits on Markdown headings (# to #####), tracking a
+    breadcrumb trail across nested sub-sections.
     """
     if not text or not text.strip():
         return []
 
-    # Regex split that captures heading lines while keeping them in the split stream
+    # Capturing group keeps heading lines in the split stream
     heading_pattern = re.compile(r"(^#{1,5}\s+.*$)", re.MULTILINE)
     parts = heading_pattern.split(text)
-    
+
     chunks: list[Chunk] = []
-    # State stack to track active headers from # down to #####
     current_headers = {1: None, 2: None, 3: None, 4: None, 5: None}
     
     current_text_block = ""
@@ -82,14 +81,11 @@ def chunk_hierarchical_markdown(
     for part in parts:
         if not part.strip():
             continue
-            
-        # Check if the part is a heading line
+
         header_match = re.match(r"^(#{1,5})\s+(.*)$", part.strip())
         if header_match:
-            # Flush the block accumulated under the PREVIOUS heading context
-            # BEFORE updating active_heading_attr to the incoming heading —
-            # otherwise this flush mislabels content with the heading that's
-            # about to start, not the one it was actually written under.
+            # Must flush under the PREVIOUS heading before updating active_heading_attr,
+            # or this flush mislabels content with the heading about to start.
             if current_text_block.strip():
                 chunks.append(Chunk(
                     text=current_text_block.strip(),
@@ -103,19 +99,17 @@ def chunk_hierarchical_markdown(
             level = len(header_match.group(1))
             heading_text = header_match.group(2).strip()
 
-            # Update current level and clear deeper sub-levels to maintain stack hierarchy
+            # Clear deeper sub-levels so the breadcrumb reflects current hierarchy
             current_headers[level] = heading_text
             for l in range(level + 1, 6):
                 current_headers[l] = None
 
-            # Build stateful breadcrumb string
             active_breadcrumbs = [current_headers[i] for i in range(1, 6) if current_headers[i]]
             active_heading_attr = " > ".join(active_breadcrumbs) if active_breadcrumbs else "None"
 
-            # Keep the header title inline inside the chunk text payload
+            # Keep header line inline in the chunk text, not stripped out
             current_text_block += part + "\n"
         else:
-            # If appending this paragraph breaks structural size limits, flush it
             if len(current_text_block) + len(part) > chunk_size and current_text_block.strip():
                 chunks.append(Chunk(
                     text=current_text_block.strip(),
@@ -146,8 +140,8 @@ def chunk_text_baseline(
     source_type: str = "",
     **kwargs: Any,
 ) -> list[Chunk]:
-    """Generic baseline paragraph-based chunker with window character overlap 
-    and dynamic sentence-boundary backward snapping.
+    """Baseline paragraph-based chunker with character overlap, snapped
+    backward to the nearest sentence boundary.
     """
     if not text or not text.strip():
         return []
@@ -166,14 +160,13 @@ def chunk_text_baseline(
                 source_type=source_type
             ))
             idx += 1
-            
-            # Sentence terminal backward snapping index check
+
             if len(current) > overlap:
                 lookback_window = current[-overlap:]
-                # Look for a natural punctuation split point inside the overlap tail
+                # Find sentence-ending punctuation within the overlap window
                 split_match = list(re.finditer(r"[\.\!\?\n]\s*", lookback_window))
                 if split_match:
-                    # Snap overlap window index forward to start neatly right after punctuation terminal
+                    # Start overlap right after the last punctuation match
                     snap_point = split_match[-1].end()
                     current = lookback_window[snap_point:]
                 else:
@@ -200,7 +193,7 @@ def chunk_sliding_window_tokens(
     encoding_name: str = "cl100k_base",
     source_type: str = "",
 ) -> list[Chunk]:
-    """Strategy 2: Fixed size segments tokenized precisely with explicit model sliding windows."""
+    """Strategy 2: fixed-size token windows with sliding overlap."""
     if not text or not text.strip():
         return []
 
@@ -239,8 +232,8 @@ def chunk_parent_child(
     source_type: str = "",
     **kwargs: Any,
 ) -> list[Chunk]:
-    """Strategy 3: Two-Tier Retrieval. Identifies large parent segments 
-    and breaks them down into small, highly targeted child vectors.
+    """Strategy 3: two-tier retrieval — large parent segments broken down
+    into small, targeted child vectors.
     """
     parent_chunks = chunk_hierarchical_markdown(text, chunk_size=parent_size, source_type=source_type)
     hierarchical_chunks: list[Chunk] = []
@@ -293,20 +286,18 @@ def chunk_lumber_chunker(
     model_name: str = "openai/gpt-4o-mini",
     source_type: str = "",
     theta: int = 550,  # Optimal token context window from the paper
-    **kwargs: Any,  # absorbs chunk_size/overlap etc. forwarded generically by the CLI —
-                    # this strategy uses theta instead, not character/token sizing
+    **kwargs: Any,  # Absorbs chunk_size/overlap from the CLI; unused — sized via theta instead
 ) -> list[Chunk]:
-    """Strategy 4: Lumber Chunker adapted for 3GPP Technical Specs.
+    """Strategy 4: LumberChunker adapted for 3GPP Technical Specs.
     Splits by major Markdown headers to process sections concurrently,
-    then executes the paper's rolling window shift-detection inside each section.
+    then runs the paper's rolling-window shift-detection inside each section.
     """
     if not text or not text.strip():
         return []
 
     tokenizer = tiktoken.get_encoding("cl100k_base")
 
-    # Step 1: Divide by top-level markdown headers to allow parallelization
-    # This prevents the LLM from ever crossing a major Clause boundary by accident
+    # Split on top-level headers first, so the LLM never crosses a major clause boundary
     section_pattern = re.compile(r"(^##?\s+.*$)", re.MULTILINE)
     parts = section_pattern.split(text)
     
@@ -322,9 +313,8 @@ def chunk_lumber_chunker(
     if current_section.strip():
         sections.append(current_section)
 
-    # Step 2: Define the paper's rolling-window algorithm for a single section
+    # Rolling-window algorithm from the paper, applied per section
     def process_section(section_text: str, section_idx: int) -> list[str]:
-        # Split section into raw paragraphs
         paragraphs = [p.strip() for p in section_text.split("\n\n") if p.strip()]
         if not paragraphs:
             return []
@@ -345,7 +335,7 @@ def chunk_lumber_chunker(
                 group_tokens += len(tokenizer.encode(para_text))
                 curr_slice_idx += 1
 
-            # If there's only 1 paragraph left or we reached the end, consume it completely
+            # Last paragraph or end reached: consume the remaining group whole
             if len(group_paras) <= 1 or p_idx == N - 1:
                 section_chunks.append("\n\n".join([p.split(": ", 1)[1] for p in group_paras]))
                 break
@@ -366,26 +356,24 @@ def chunk_lumber_chunker(
                         {"role": "user", "content": f"Document:\n{document_context}\n\nAnswer:"}
                     ]
                 )
-                
-                # Extract the ID from "Answer: ID XXXX"
+
                 llm_output = response.choices[0].message.content
                 match = re.search(r"ID\s*(\d+)", llm_output, re.IGNORECASE)
-                
+
                 if match:
                     shift_id = int(match.group(1))
-                    # Sanity check: Ensure the returned ID is actually inside our current window
+                    # Guard against the LLM returning an out-of-window ID
                     if p_idx < shift_id < curr_slice_idx:
-                        # Chunk spans from p_idx up to (but excluding) shift_id
+                        # Chunk spans p_idx up to (but excluding) shift_id
                         chunk_text = "\n\n".join(paragraphs[p_idx:shift_id])
                         section_chunks.append(chunk_text)
-                        p_idx = shift_id  # Next group starts exactly where the shift occurred
+                        p_idx = shift_id  # Next group starts where the shift occurred
                         continue
 
-                # Fallback if LLM hallucinations an out-of-bounds ID or fails regex
                 raise ValueError("Invalid or out-of-bounds ID returned.")
 
             except Exception:
-                # If the LLM call fails or returns garbage, advance by a baseline paragraph block
+                # LLM call failed or returned garbage: fall back to a fixed-size block
                 fallback_limit = min(p_idx + 3, N)
                 chunk_text = "\n\n".join(paragraphs[p_idx:fallback_limit])
                 section_chunks.append(chunk_text)
@@ -393,20 +381,19 @@ def chunk_lumber_chunker(
 
         return section_chunks
 
-    # Step 3: Run the rolling windows concurrently across your structural sections
+    # Run rolling-window processing concurrently per section
     final_chunks = []
     global_idx = 0
-    
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
         futures = {executor.submit(process_section, sec, i): i for i, sec in enumerate(sections)}
-        
-        # Gather results keeping track of structural order
+
+        # Preserve original section order despite concurrent completion
         ordered_results = [None] * len(sections)
         for future in concurrent.futures.as_completed(futures):
             idx = futures[future]
             ordered_results[idx] = future.result()
 
-    # Flatten out to official Chunk objects
     for chunk_strings in ordered_results:
         if chunk_strings:
             for text_block in chunk_strings:
@@ -431,7 +418,7 @@ def calculate_token_budget_safe_kwargs(strategy_str: str, chunk_size: int, overl
     allocated_overlap = overlap
     
     if strategy_str == "sliding_window_tokens" and enrichment == "metadata_tagging":
-        # Reserve a safe token space margin (e.g., 64 tokens) strictly for the enrichment prefix string
+        # Reserve buffer for the enrichment prefix so tokens don't overflow
         TOKEN_RESERVATION_BUFFER = 64
         allocated_chunk_size = max(128, chunk_size - TOKEN_RESERVATION_BUFFER)
         allocated_overlap = max(0, overlap - int(TOKEN_RESERVATION_BUFFER * 0.2))
@@ -444,7 +431,7 @@ def chunk_document(
     strategy: ChunkingStrategy | str,
     **kwargs: Any,
 ) -> list[Chunk]:
-    """Master orchestration function to route text data to selected chunking strategy."""
+    """Routes text to the selected chunking strategy."""
 
     is_structured = kwargs.pop("is_structured", False)
     
@@ -465,32 +452,25 @@ def chunk_document(
                 f"Supported choices: {[s.value for s in ChunkingStrategy]}"
             )
 
-    # --- TOKEN BUDGET ADJUSTMENT PASS ---
     strategy_str = strategy.value
-    # pop (not get): "enrichment" is chunk_document's own bookkeeping key,
-    # used only for the budget calculation below — it's never a parameter
-    # any individual chunker function accepts, and chunk_sliding_window_tokens
-    # (unlike its sibling strategies) has no **kwargs to silently absorb it.
-    # Left as kwargs.get() before, this crashed with TypeError the moment
-    # anyone passed enrichment=... directly to chunk_document() with
-    # strategy="sliding_window_tokens".
-    enrichment = kwargs.pop("enrichment", "none")  # Extract enrichment string if passed from master sweep
+    # pop, not get: enrichment isn't a real chunker param, and
+    # chunk_sliding_window_tokens has no **kwargs to absorb it — get() left
+    # it in kwargs and crashed with TypeError when passed directly.
+    enrichment = kwargs.pop("enrichment", "none")
 
     if strategy == ChunkingStrategy.SLIDING_WINDOW_TOKENS:
-        # Map generic size parameters to specific token keyword arguments
+        # Accept either generic (chunk_size) or specific (chunk_tokens) names
         raw_size = kwargs.get("chunk_tokens", kwargs.get("chunk_size", 512))
         raw_overlap = kwargs.get("overlap_tokens", kwargs.get("overlap", 50))
-        
-        # Calculate safe parameters
+
         safe_size, safe_overlap = calculate_token_budget_safe_kwargs(
             strategy_str, raw_size, raw_overlap, enrichment
         )
-        
-        # Re-assign variables back to match signature specifications expected by chunk_sliding_window_tokens
+
         kwargs["chunk_tokens"] = safe_size
         kwargs["overlap_tokens"] = safe_overlap
-        
-        # Clean up baseline parameters to avoid unexpected argument conflicts
+
+        # Remove now-duplicate generic keys to avoid conflicting kwargs
         if "chunk_size" in kwargs: del kwargs["chunk_size"]
         if "overlap" in kwargs: del kwargs["overlap"]
 

@@ -14,10 +14,7 @@ import pytest
 
 
 # ── Fake LLM client ───────────────────────────────────────────────────────────
-# Matches the `.completion.create(model=, messages=) -> resp.choices[0]
-# .message.content` shape that LocalLLMClient/OpenRouterLLMClient expose
-# (open_telco_rag.generators.local_llm) — the interface chunk_lumber_chunker
-# and cli/main.py's LLM connectivity check both talk to.
+# Mimics LocalLLMClient/OpenRouterLLMClient's .completion.create(...) response shape.
 
 class _FakeMessage:
     __slots__ = ("content",)
@@ -119,20 +116,14 @@ FIXTURE_CHUNKS = [
 
 
 def _fake_embedding(text: str, dims: int = 8) -> list[float]:
-    """Deterministic pseudo-embedding — same text always maps to the same
-    vector, different text to a different one. Not semantically meaningful;
-    good enough for exercising store add()/search() plumbing without
-    loading a real embedding model."""
+    """Deterministic pseudo-embedding for exercising store plumbing without a real model."""
     h = hashlib.sha256(text.encode("utf-8")).digest()
     return [(h[i] / 255.0) * 2 - 1 for i in range(dims)]
 
 
 @pytest.fixture
 def fixture_store(tmp_path):
-    """Builds a ChromaStore + FTSStore pair over the same 8 hand-written
-    chunks, mirroring what ingest() produces for real (dense index + BM25
-    index side by side, same collection name, same directory). Returns
-    (chroma_store, fts_store)."""
+    """ChromaStore + FTSStore pair over 8 fixture chunks, mirroring real ingest() output."""
     from open_telco_rag.stores.chroma import ChromaStore
     from open_telco_rag.stores.fts import FTSStore
 

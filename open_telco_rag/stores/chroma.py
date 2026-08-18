@@ -31,14 +31,9 @@ class ChromaStore:
             metadata=metadata
         )
 
-        # Queried once at construction rather than hardcoded: Chroma raises
-        # ValueError("Batch size of N is greater than max batch size of M")
-        # if a single add()/upsert() call exceeds this, and M isn't a fixed
-        # constant across chromadb/sqlite versions (it's derived from
-        # sqlite3's SQLITE_MAX_VARIABLE_NUMBER, which changed in newer
-        # sqlite builds) -- callers that need to split large writes into
-        # sub-batches (see ingest()/ingest_multi_enrichment() in
-        # core/pipeline.py) must size against the real value, not a guess.
+        # queried, not hardcoded: max batch size derives from sqlite's
+        # SQLITE_MAX_VARIABLE_NUMBER, which varies by build -- callers splitting
+        # large writes (ingest() in core/pipeline.py) must use the real value
         self.max_batch_size  = self._client.get_max_batch_size()
 
     def add(
@@ -87,3 +82,10 @@ class ChromaStore:
     def exists(self, id: str) -> bool:
         results = self._collection.get(ids=[id])
         return len(results["ids"]) > 0
+
+    def all_doc_ids(self) -> list[str]:
+        """Every chunk id in this collection (include=[] keeps it a cheap ids-only
+        query even over a full corpus). Used by is_discriminating_source() in
+        evaluation/metrics/retrieval.py to check what fraction of the WHOLE corpus
+        a candidate canonical_source matches, not just one question's retrieved chunks."""
+        return self._collection.get(include=[])["ids"]

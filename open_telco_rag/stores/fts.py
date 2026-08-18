@@ -19,7 +19,7 @@ class FTSStore:
         self.db_path = self.path / f"{self.collection_name}_fts.db"
         
         self.path.mkdir(parents=True, exist_ok=True)
-        self._conn = None  # Persistent connection handle
+        self._conn = None
         self._init_db()
 
     def _get_conn(self) -> sqlite3.Connection:
@@ -30,7 +30,7 @@ class FTSStore:
             cursor.execute("PRAGMA journal_mode = WAL;")
             cursor.execute("PRAGMA synchronous = OFF;")
             
-            # OPTIMIZATION: Allocate 128MB CPU RAM cache for B-tree index construction
+            # 128MB cache speeds up B-tree index construction
             cursor.execute("PRAGMA cache_size = -128000;")
             cursor.execute("PRAGMA temp_store = MEMORY;")
             self._conn.commit()
@@ -93,7 +93,7 @@ class FTSStore:
         if self.db_path.exists():
             conn = self._get_conn()
             cursor = conn.cursor()
-            # OPTIMIZATION: Instant O(1) table reset instead of slow O(N) row deletions
+            # drop+recreate is O(1) vs. O(N) row-by-row deletion
             cursor.execute("DROP TABLE IF EXISTS bm25_index;")
             cursor.execute("""
                 CREATE VIRTUAL TABLE IF NOT EXISTS bm25_index 

@@ -1,20 +1,12 @@
-"""Unit tests for the two primitives that fix a real, confirmed-in-production
-bug: ingest()/ingest_multi_enrichment()'s background DB-writer thread pool
-previously (a) allowed concurrent writes to the SAME store/fts_store when
-repeated flushes overlapped, and (b) never checked whether any background
-write actually raised — wait(db_futures) only waits for a done state, not
-success, so a failed write was silently discarded and the run proceeded to
-declare success (and, in ingest_multi_enrichment's case, write a completion
-marker) as if every chunk had been persisted.
-
-Confirmed in production via audit_ingestion_grid.py: entire ingestion runs
-where _ingest_complete.json claimed hundreds of thousands of chunks stored
-while the real ChromaDB collection held a few hundred.
-
-_locked_add / _raise_first_write_failure (open_telco_rag.core.pipeline)
-are the fix — tested in isolation here since exercising the full
-ingest()/ingest_multi_enrichment() failure path needs heavier scaffolding
-(real embedder + source); see test_ingest_multi_enrichment.py for that.
+"""Tests for _locked_add / _raise_first_write_failure, the fix for a
+confirmed-in-production bug: ingest()'s background DB-writer thread pool
+allowed concurrent writes to the same store when flushes overlapped, and
+wait(db_futures) only waits for done state (not success), so a failed write
+was silently discarded and the run still declared success. Confirmed via
+audit_ingestion_grid.py: runs where _ingest_complete.json claimed hundreds
+of thousands of chunks while the real ChromaDB collection held a few
+hundred. Tested in isolation here; see test_ingest_multi_enrichment.py for
+the full ingest() failure path (needs a real embedder + source).
 """
 from __future__ import annotations
 
@@ -38,9 +30,7 @@ def test_locked_add_calls_fn_with_given_args():
 
 
 def test_locked_add_serializes_concurrent_calls_to_the_same_lock():
-    """The whole point of the fix: two calls sharing a lock must never
-    overlap, even when dispatched from different threads at the same time.
-    """
+    """Two calls sharing a lock must never overlap, even across threads."""
     lock = threading.Lock()
     in_flight = 0
     max_observed = 0
@@ -65,10 +55,8 @@ def test_locked_add_serializes_concurrent_calls_to_the_same_lock():
 
 
 def test_locked_add_does_not_serialize_different_locks():
-    """Writes to genuinely different stores (different locks) must still
-    run concurrently — the fix must not collapse Phase 2 back to fully
-    sequential.
-    """
+    """Different locks must still run concurrently; fix must not force
+    full serialization."""
     lock_a = threading.Lock()
     lock_b = threading.Lock()
     in_flight = 0

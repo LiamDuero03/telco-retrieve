@@ -22,21 +22,15 @@ def push_collection_to_hf(
     folder_name = path_in_repo or db_path.name
     print(f"\n📦 Uploading database directory '{db_path}' to HF Hub -> '{repo_id}/{folder_name}'...")
 
-    # HF_HUB_ENABLE_HF_TRANSFER is deprecated in current huggingface_hub
-    # (hf_transfer isn't used anymore) -- setting it now just prints a
-    # FutureWarning on every call instead of doing anything. The
-    # high-performance-transfer successor is HF_XET_HIGH_PERFORMANCE (same
-    # fix already applied at master_grid.py's module top level; setting it
-    # again here too since this function is also called directly by
-    # scripts that don't import master_grid.py).
+    # HF_HUB_ENABLE_HF_TRANSFER is deprecated (just warns now); HF_XET_HIGH_PERFORMANCE
+    # is the successor. Set here too since this fn is also called without master_grid.py.
     os.environ["HF_XET_HIGH_PERFORMANCE"] = "1"
 
     api = HfApi()
 
-    # Create dataset repo if it doesn't already exist
     api.create_repo(repo_id=repo_id, repo_type="dataset", private=private, exist_ok=True)
 
-    # Upload the entire folder (Chroma SQLite, HNSW index files, and SQLite FTS5 .db)
+    # uploads Chroma SQLite, HNSW index files, and the SQLite FTS5 .db together
     api.upload_folder(
         folder_path=str(db_path),
         path_in_repo=folder_name,
@@ -53,16 +47,10 @@ def pull_collection_from_hf(
     local_dir: str | Path = "./runs",
 ) -> Path:
     """Downloads a pre-indexed RAG database folder from HF Hub directly for local evaluation."""
-    # snapshot_download() always replicates a matched file's FULL
-    # repo-relative path under whatever local_dir it's given — it does NOT
-    # strip path_in_repo's own prefix off first. Passing an already-nested
-    # local_dir would make it re-append the full path_in_repo on top,
-    # landing the real files one directory level deeper than expected;
-    # ChromaStore would then silently open an empty directory and create a
-    # fresh empty collection — no exception, just store.count() == 0
-    # downstream even though the download succeeded. base_dir is kept as
-    # the ORIGINAL, un-nested local_dir and passed to snapshot_download
-    # directly — correct regardless of how many segments path_in_repo has.
+    # snapshot_download() replicates each file's full repo-relative path under local_dir
+    # (does not strip path_in_repo's prefix) -- passing an already-nested local_dir would
+    # double it up, landing files one level too deep; ChromaStore then silently opens an
+    # empty dir (count() == 0, no exception). Keep base_dir as the original, un-nested dir.
     base_dir = Path(local_dir)
     target_dir = base_dir / path_in_repo
     print(f"\n📥 Pulling database artifacts from HF Hub '{repo_id}/{path_in_repo}' -> '{target_dir}'...")

@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from dotenv import load_dotenv
 
-# OPTIMIZATION: Import tqdm for high-performance CLI telemetry
 from tqdm import tqdm
 
 from open_telco_rag.types import Chunk, IngestStats, SearchResult
@@ -28,21 +27,8 @@ if TYPE_CHECKING:
 
 load_dotenv()
 
-# GUARD: Ensure the project root is on sys.path for Windows "spawn"-mode
-# multiprocessing workers, which start a fresh interpreter and don't
-# necessarily inherit the parent's sys.path. Must run BEFORE importing
-# `cli` below — `cli` isn't part of the open_telco_rag package (no
-# editable-install redirect guarantees it), so resolving it can depend on
-# the CWD being on sys.path. This now runs once per process (module import
-# time — main process included, where it's a harmless no-op) instead of
-# once per _process_file_worker(...)/_process_file_worker_rawchunk(...)
-# call, which is the whole point of moving these imports up here: Python
-# already caches successful imports in sys.modules regardless of where the
-# `import` statement lives, so this was never about "warming a cache" —
-# it's about not paying the (tiny but real) per-call lookup/rebind cost on
-# every single file processed, and about failing fast with one clear
-# traceback if the environment is broken, instead of the same failure
-# repeated — confusingly, once per file — as a per-file "error" status.
+# Windows spawn workers don't inherit sys.path; must run before importing `cli`.
+# Runs once at import so a broken env fails fast, not per-file.
 _cwd = os.getcwd()
 if _cwd not in sys.path:
     sys.path.insert(0, _cwd)
@@ -54,13 +40,9 @@ from cli.main import _get_source
 
 # ── Top-Level Worker for Multi-Core Processing ────────────────────────────────
 def _process_file_worker(args: tuple) -> dict:
-    """Worker function executed across multiple CPU process workers.
-
-    All modules this needs (chunk_document, ChunkingStrategy, enrich_chunks,
-    _get_source, time, Path, sys/os) are imported at module scope above —
-    including, critically, the sys.path guard that runs before `cli` is
-    imported, so a freshly spawned Windows worker process can resolve it.
-    """
+    """Runs in a CPU process pool; needed modules are imported at module
+    scope (incl. the sys.path guard) so spawned Windows workers can
+    resolve `cli`."""
     (
         file_path, data_dir, source_type_str, use_marker,
         chunk_kwargs, min_length, model_key
@@ -86,9 +68,8 @@ def _process_file_worker(args: tuple) -> dict:
     }
 
     try:
-        # Use local core factory function instead of reaching into the CLI
+        # Reuses CLI's source factory instead of duplicating it
         source = _get_source(source_type_str, use_marker=use_marker)
-        # Load & Clean
         text = source.load(file_path)
         if not text or not text.strip():
             result["status"] = "skipped"
@@ -97,7 +78,6 @@ def _process_file_worker(args: tuple) -> dict:
 
         text = source.clean(text)
 
-        # Chunking
         start_chunk_time = time.perf_counter()
         raw_char_count = len(text)
 
@@ -127,13 +107,8 @@ def _process_file_worker(args: tuple) -> dict:
         active_kwargs["is_structured"] = is_structured
         enrichment_strategy = active_kwargs.pop("enrichment", "none")
         enrichment_model = active_kwargs.pop("enrichment_model", "google/qwen-2.5-coder-32b")
-        # Popped out here, before chunk_document() ever sees active_kwargs —
-        # this is enrichment's LLM client (e.g. for llm_metadata), a
-        # deliberately different kwarg key from active_kwargs["llm_client"]
-        # (chunking's own, e.g. for lumber_chunker). Some chunking strategies
-        # (chunk_sliding_window_tokens in particular) have no **kwargs
-        # catch-all, so an unrelated key like this reaching chunk_document()
-        # would TypeError instead of being silently ignored.
+        # Distinct from chunking's llm_client key; must pop before chunk_document()
+        # (chunk_sliding_window_tokens has no **kwargs to absorb a stray key).
         enrichment_llm_client = active_kwargs.pop("enrichment_llm_client", None)
 
         chunks = chunk_document(text=text, **active_kwargs)
@@ -196,43 +171,19 @@ def _process_file_worker(args: tuple) -> dict:
 
 
 def _locked_add(lock: threading.Lock, fn, *args: Any) -> None:
-    """Runs a store.add()/fts_store.add() call under a lock scoped to that
-    specific store object.
+    """Runs a store.add()/fts_store.add() call under a lock scoped to that store.
 
-    Both ingest() and ingest_multi_enrichment() dispatch writes to a
-    background ThreadPoolExecutor(max_workers=8) so multiple stores (or,
-    within ingest_multi_enrichment, multiple enrichment variants' separate
-    stores) can be written to concurrently. But repeated flushes for the
-    SAME store aren't guaranteed to be serialized by the pool itself —
-    submit() doesn't block, so if chunks accumulate faster than one flush
-    completes, two writes to the SAME ChromaDB collection (or the SAME
-    FTS SQLite file) can end up in flight at once. Neither ChromaStore's
-    local SQLite-backed collection nor FTSStore's own SQLite connection is
-    guaranteed safe against that — concurrent writers on the same
-    SQLite-backed store are a well-known way to get an internal error
-    ("database is locked" or similar). This lock only serializes writes
-    to the SAME store; writes to genuinely different stores (different
-    enrichment variants, or a store vs. its own fts_store) still overlap
-    freely, so this doesn't collapse Phase 2 back down to fully sequential.
-    """
+    Concurrent writer threads to the same SQLite-backed store can hit
+    "database is locked"; this serializes only same-store writes."""
     with lock:
         fn(*args)
 
 
 def _raise_first_write_failure(db_futures: list) -> None:
-    """wait(db_futures) only waits for every future to reach a done state —
-    it does NOT check whether any of them raised. A store.add() exception
-    inside a background writer thread was previously discarded completely
-    silently: the run would proceed straight to declaring success and
-    writing _ingest_complete.json's completion marker as if every chunk
-    had actually been persisted, even if most of the writes had silently
-    failed. Confirmed in production: entire ingestion runs where
-    _ingest_complete.json claimed hundreds of thousands of chunks stored,
-    while the real ChromaDB collection held a few hundred. Call this right
-    after wait() so a real write failure aborts the run loudly (caught by
-    the existing try/except around Phase 2, which reports the error and
-    skips the completion-marker write) instead of vanishing.
-    """
+    """wait() doesn't check for exceptions — a writer-thread failure was
+    previously silently discarded (confirmed in production: the completion
+    marker claimed far more chunks stored than the DB actually held). Call
+    right after wait() so a write failure aborts the run loudly."""
     for future in db_futures:
         exc = future.exception()
         if exc is not None:
@@ -254,20 +205,11 @@ def ingest(
 ) -> IngestStats:
     """Scan files, clean, chunk in parallel across CPU cores, embed, and store.
 
-    batch_size controls how many texts get embedded together in one
-    embedder.embed() call (the GPU-utilization-relevant batch). write_batch_size
-    is separate and controls how many already-embedded rows accumulate before
-    a store.add()/fts_store.add() call actually fires — defaults to
-    8 * batch_size, so DB writes happen in fewer, larger transactions than
-    embedding batches, without buffering the *entire* run's vectors in RAM
-    (which doesn't scale to a multi-million-chunk corpus — the earlier
-    all-at-once design this pipeline moved away from). Pass write_batch_size
-    explicitly to tune the memory/transaction-count tradeoff — note the
-    actual store.add()/fts_store.add() calls dispatched from a flush are
-    still capped at `store`'s real max batch size regardless of what's
-    passed here (see max_write_batch below), so an oversized write_batch_size
-    only affects buffering, never risks a Chroma batch-size crash.
-    """
+    batch_size sizes embedder.embed() calls; write_batch_size (default 8x)
+    controls how many embedded rows buffer before a store/FTS write — actual
+    store.add() calls stay capped at the store's real max batch size (see
+    max_write_batch), so an oversized value only affects buffering, never
+    risks a crash."""
     write_batch_size = write_batch_size or (batch_size * 8)
 
     data_dir = Path(data_dir)
@@ -282,7 +224,6 @@ def ingest(
 
     use_marker = getattr(source, '_use_marker', False)
 
-    # Resume tracking
     progress_file = log_dir / f".progress_{embedder.model_key}.json"
     completed: set[str] = set()
     if resume and progress_file.exists():
@@ -321,17 +262,10 @@ def ingest(
     if not tasks:
         return stats
 
-    # ── PHASE 1: PARSING ──────────────────────────────────────────────────────
-    # Every file is chunked before anything is embedded — one clean progress
-    # bar for the whole parsing pass. This trades away overlapping CPU
-    # chunking with GPU embedding (a prior version of this pipeline did that)
-    # in favor of a simpler, easier-to-read two-phase run: parsing is CPU-only
-    # and comparatively fast, and the actual bottlenecks are Phase 2 —
-    # embedding, and writing to ChromaDB/the BM25 index — so that's where the
-    # optimization effort below is spent. Trade-off worth knowing: every
-    # chunk's text+metadata for the whole corpus is held in RAM for the
-    # duration of Phase 1 (bounded by corpus size, not batch size) — fine for
-    # a single source/model run, but worth watching on a very large corpus.
+    # ── PHASE 1: PARSING ──
+    # Two-phase (not pipelined) for simplicity: Phase 1 is CPU parsing, Phase
+    # 2 is the real bottleneck (embed+write). Trade-off: all chunks stay in
+    # RAM through Phase 1 — worth watching on a very large corpus.
     print(f"\nPhase 1: Parsing {len(tasks)} files across {max_workers} CPU workers...")
 
     all_texts: list[str] = []
@@ -377,18 +311,11 @@ def ingest(
     if total_chunks == 0:
         return stats
 
-    # ── PHASE 2: EMBEDDING + STORAGE ──────────────────────────────────────────
-    # This is the actual bottleneck, so: (1) embedding runs in GPU-sized
-    # batches (batch_size); (2) DB writes are consolidated into far fewer,
-    # larger transactions (write_batch_size) instead of one write per embed
-    # batch — less per-transaction overhead in both ChromaDB and SQLite;
-    # (3) the DB-writer thread pool is bigger here than the old combined-phase
-    # version could safely use, since Phase 1's CPU workers have already
-    # released every core by the time this runs — no contention to worry
-    # about; (4) `store` is expected to carry chromadb's own bulk-load HNSW
-    # tuning (hnsw:batch_size / hnsw:sync_threshold) in its collection
-    # metadata — see _get_store() in cli/main.py — which reduces how often
-    # Chroma syncs its HNSW graph to disk during the upsert calls below.
+    # ── PHASE 2: EMBEDDING + STORAGE ──
+    # The real bottleneck: embeds in GPU-sized batches, batches DB writes into
+    # fewer larger transactions, and uses a bigger writer pool now that Phase
+    # 1's CPU workers have released their cores. `store` should carry Chroma's
+    # HNSW bulk-load tuning (see _get_store() in cli/main.py).
     print(f"\nPhase 2: Embedding & storing {total_chunks:,} chunks "
           f"(embed batch={batch_size}, write batch={write_batch_size})...")
 
@@ -397,18 +324,14 @@ def ingest(
     write_texts: list[str] = []
     write_metas: list[dict] = []
     db_futures = []
-    # See _locked_add()'s docstring — repeated flushes can otherwise submit
-    # two concurrent writes to the SAME store, which isn't safe.
+    # See _locked_add(): repeated flushes could otherwise race two writes to the same store.
     store_lock = threading.Lock()
     fts_lock = threading.Lock()
 
-    # write_batch_size defaults to 8x batch_size and can exceed Chroma's
-    # actual hard limit on a single add()/upsert() call (queried live via
-    # ChromaStore.max_batch_size, since it derives from sqlite3's
-    # SQLITE_MAX_VARIABLE_NUMBER and isn't fixed across environments).
-    # Capping sub-batches dispatched to store.add() below at this value
-    # avoids the crash without changing write_batch_size's role of
-    # controlling how much gets buffered before a flush fires.
+    # write_batch_size (default 8x batch_size) can exceed Chroma's real
+    # per-call limit (queried live via max_batch_size, since it derives from
+    # SQLite's variable-count cap and isn't fixed). Sub-batches below are
+    # capped at that value, keeping buffering size and write-call size separate.
     max_write_batch = min(write_batch_size, getattr(store, "max_batch_size", write_batch_size) or write_batch_size)
 
     try:
@@ -416,11 +339,9 @@ def ingest(
              tqdm(total=total_chunks, desc="Embedding & Storing", unit="chunk", colour="GREEN") as chunk_bar:
 
             def _flush_writes(n: int) -> None:
-                """Dispatches exactly the first n already-embedded rows to
-                background threads for the actual store.add()/
-                fts_store.add() calls, split into sub-batches no larger
-                than max_write_batch so a single call never exceeds
-                Chroma's real hard limit — see max_write_batch above."""
+                """Dispatches the first n embedded rows to background
+                store.add()/fts_store.add() calls, sub-batched at
+                max_write_batch to stay under Chroma's real limit."""
                 ids    = write_ids[:n]
                 embeds = write_embeds[:n]
                 texts  = write_texts[:n]
@@ -459,11 +380,9 @@ def ingest(
                 while len(write_ids) >= write_batch_size:
                     _flush_writes(write_batch_size)
 
-            # Final partial write batch
             if write_ids:
                 _flush_writes(len(write_ids))
 
-            # Wait for all background database tasks to complete before exiting
             tqdm.write("  Flushing database writes to disk...")
             wait(db_futures)
             _raise_first_write_failure(db_futures)
@@ -473,13 +392,9 @@ def ingest(
         stats.error_files += len(files_processed_this_run)
         return stats
 
-    # Only reached if every chunk above is confirmed actually stored.
-    # Deliberately a SEPARATE try/except from the write-critical section
-    # above: a failure in purely cosmetic bookkeeping (a CSV log row, the
-    # resume progress-file write) after every chunk already landed safely
-    # in the store must never be conflated with a data-loss failure, or
-    # misreport a fully and correctly ingested file as "[ERROR] Bulk
-    # Indexing failed".
+    # Separate try/except from the write-critical section above: a bookkeeping
+    # failure here (CSV log, resume file) must never be conflated with an
+    # actual data-loss failure, or misreport a fully-ingested run as failed.
     try:
         for log_item in files_to_log:
             f_path, f_size, f_chunks, f_avg, f_time, f_ratio = log_item
@@ -500,18 +415,10 @@ def ingest(
 
 # ── Top-Level Worker: chunk-only, no enrichment ───────────────────────────────
 def _process_file_worker_rawchunk(args: tuple) -> dict:
-    """Chunk a single file WITHOUT applying enrichment.
-
-    Used by ingest_multi_enrichment() so that a file's chunk boundaries —
-    driven only by (strategy, chunk_size, overlap) — are computed exactly
-    once and then reused for however many enrichment variants share that
-    chunking config, instead of re-chunking identical text once per
-    enrichment value.
-
-    Modules this needs (chunk_document, ChunkingStrategy, _get_source, time,
-    Path, sys/os) are imported at module scope — see _process_file_worker's
-    docstring for why, including the sys.path guard ordering.
-    """
+    """Chunks a file without enrichment, for ingest_multi_enrichment(): chunk
+    boundaries are computed once and reused across enrichment variants
+    instead of re-chunking per variant. Needed modules are imported at
+    module scope — see _process_file_worker's docstring."""
     (file_path, data_dir, source_type_str, use_marker, chunk_kwargs, min_length) = args
 
     file_path = Path(file_path)
@@ -597,27 +504,18 @@ def _process_file_worker_rawchunk(args: tuple) -> dict:
         return result
 
 
-# ── Completion marker — lets callers tell a finished run apart from one ───────
-# ── that was interrupted mid-ingest (a directory existing with files in it
-# ── proves nothing, since VectorStore construction alone creates bootstrap
-# ── files before any chunk is stored). ────────────────────────────────────────
+# ── Completion marker: distinguishes a finished run from one interrupted
+# mid-ingest (a non-empty store dir alone proves nothing — VectorStore
+# construction creates bootstrap files before any chunk is stored). ──
 _COMPLETION_MARKER_NAME = "_ingest_complete.json"
 
 
 def _write_completion_marker(store: VectorStore, files_total: int, stats: IngestStats) -> None:
-    """Writes a small marker file into a store's own directory, recording
-    that ingest_multi_enrichment() reached the end of its run for this
-    variant without a fatal exception. Only ever called from a code path
-    that's guaranteed to have completed successfully — never on the
-    exception path, and never partially.
-
-    Callers (e.g. master_grid.py) should check for this marker before
-    treating an existing, non-empty run directory as "already done" — a
-    process-level crash (OOM, node preemption, power loss) leaves a
-    non-empty but incomplete directory behind too, which "does the
-    directory have any files in it" can't tell apart from a genuinely
-    finished run.
-    """
+    """Writes a marker into a store's directory recording that this variant's
+    run completed without a fatal exception; only ever called on the success
+    path. Callers (e.g. master_grid.py) should check for this marker before
+    treating a non-empty run directory as "already done" — a crash (OOM,
+    preemption) can leave a non-empty but incomplete directory too."""
     store_path = getattr(store, "path", None)
     if not store_path:
         return
@@ -649,80 +547,41 @@ def ingest_multi_enrichment(
     on_progress: Callable[[], None] | None = None,
     **chunk_kwargs: Any,
 ) -> dict[str, IngestStats]:
-    """Chunk every file in data_dir exactly ONCE, then fan the resulting
-    chunks out into one independently-enriched / embedded / stored variant
-    per entry in `enrichment_strategies`.
+    """Chunks every file in data_dir once, then fans chunks out to one
+    independently-enriched/embedded/stored variant per entry in
+    `enrichment_strategies`. `stores` must map each strategy to its own
+    VectorStore.
 
-    `stores` must contain exactly one VectorStore per enrichment strategy
-    being processed (keyed by enrichment strategy name).
+    Avoids re-chunking identical text once per enrichment value (as a naive
+    per-variant ingest() call would): chunking is enrichment-agnostic, so it
+    only needs to run once per (strategy, chunk_size, overlap) combo, while
+    embeddings are still computed per variant (enrichment can change chunk
+    text). Each variant's chunks are deep-copied before enrichment so it's
+    safe whether enrich_chunks() mutates in place or not.
 
-    Rationale: chunk_document() has no awareness of enrichment — enrichment
-    is a post-chunking transform applied to the already-produced Chunk list.
-    So calling plain ingest() once per enrichment value (as a naive grid
-    sweep would) re-chunks byte-identical text N times for no reason. This
-    collapses that into a single CPU-bound chunking pass per (strategy,
-    chunk_size, overlap) combo, while still computing separate embeddings
-    per enrichment variant (since enrichment can change chunk text, those
-    genuinely can't be shared).
-
-    Each variant's chunk list is deep-copied before enrichment is applied,
-    so this is safe regardless of whether enrich_chunks() mutates its input
-    Chunk objects in place or returns new ones.
-
-    enrichment_kwargs: extra keyword arguments forwarded to enrich_chunks()
-        for every variant — e.g. {"glossary_dict": {...}} or
-        {"glossary_path": "..."} to override acronym_expansion's default
-        bundled glossary. Without this, such overrides had no way to reach
-        enrich_chunks() at all: anything passed via **chunk_kwargs only
-        ever reaches chunk_document() (which silently ignores kwargs it
-        doesn't recognize via its own **kwargs catch-all), never enrichment.
-
-    on_progress: optional zero-argument callback invoked once per embed
-        batch (i.e. after every chunk_bar.update() during Phase 2 — see
-        _embed_and_write_batch below), purely as a liveness signal. Not used
-        by this function itself; exists so an external caller (e.g.
-        master_grid.py's per-model watchdog process) can detect "no
-        progress for N minutes" and distinguish a genuinely hung run from
-        one that's just slow — without this, a caller waiting on this
-        function's return value has no visibility into whether it's still
-        working until it either finishes or crashes. Exceptions raised by
-        the callback itself are not caught — keep it cheap and
-        non-blocking (e.g. a non-blocking queue.put()).
-
-    On successful completion (no fatal exception), each variant's store
-    directory gets a `_ingest_complete.json` marker — see
-    _write_completion_marker() for why this matters for safe resuming.
-
-    batch_size controls both embedding AND write granularity: each
-    embed_batch of `batch_size` chunks is written to its variant's store +
-    FTS index immediately afterward, inside the same loop — matching
-    master_grid_llm_completion.py's proven pattern (store.add() called
-    once per embed batch, no separate larger accumulation buffer). Each
-    write is additionally split into sub-batches no larger than that
-    variant's store's real max batch size (queried live from the Chroma
-    client — see ChromaStore.max_batch_size — not hardcoded), so a large
-    batch_size can never exceed Chroma's actual hard limit on a single
-    add()/upsert() call. chunks_stored is only incremented after a
-    sub-batch's store.add() call actually returns without raising, so a
-    partial failure produces an accurate partial count instead of the
-    full pre-failure total, and propagates as a failure immediately
-    rather than being silently swallowed.
-
-    write_batch_size is accepted for backward-compatible call sites but no
-    longer has any effect — see the loud warning printed if it's passed.
+    enrichment_kwargs: forwarded to enrich_chunks() for every variant (e.g.
+        glossary overrides) — **chunk_kwargs never reaches enrichment.
+    on_progress: optional no-arg callback fired once per embed batch, purely
+        as a liveness signal for callers (e.g. master_grid.py's watchdog) to
+        detect a hung vs. slow run. Exceptions from it are not caught — keep
+        it cheap and non-blocking.
+    On success, each variant's store gets a `_ingest_complete.json` marker
+        — see _write_completion_marker().
+    batch_size sizes both the embed batch and the store/FTS write, written
+        immediately per batch (no separate accumulation buffer), sub-batched
+        at each store's real max batch size (see ChromaStore.max_batch_size)
+        so it can't exceed Chroma's hard limit. chunks_stored only increments
+        after a sub-batch write actually succeeds.
+    write_batch_size: accepted for backward compatibility but unused — a
+        warning prints if it's passed.
     """
     from open_telco_rag.core.enrichment import enrich_chunks
 
     enrichment_kwargs = enrichment_kwargs or {}
     if write_batch_size is not None:
-        # write_batch_size used to control a separate, larger buffer
-        # (defaulting to 8x batch_size) flushed to store.add()/
-        # fts_store.add() in one big call, which could exceed Chroma's
-        # real hard limit and crash after the chunk_bar had already
-        # reported the run 100% done. Writes are now sized to batch_size
-        # (capped at the store's real max batch size) inside the same
-        # loop as embedding instead, so write_batch_size no longer has a
-        # role here — a caller that still passes it gets a loud warning.
+        # This used to flush a separate larger buffer, which could exceed
+        # Chroma's hard limit after the progress bar reported 100% done.
+        # Writes are now sized to batch_size instead; this arg is a no-op.
         print(f"  ⚠️ ingest_multi_enrichment(): write_batch_size={write_batch_size} was "
               f"passed but is no longer used — writes are now sized to batch_size "
               f"(capped at each store's real max batch size). Remove this argument.")
@@ -774,17 +633,13 @@ def ingest_multi_enrichment(
                 f"ingest_{source_name}_{embedder.model_key}_"
                 f"{strategy_label}_{ev}_{timestamp}.csv"
             ),
-            # Queried live from the store rather than hardcoded — see
-            # ChromaStore.max_batch_size. Falls back to a conservative
-            # 5000 for any VectorStore implementation that doesn't expose
-            # it, safely under Chroma's own observed default (5461).
+            # Queried live from the store (see ChromaStore.max_batch_size);
+            # falls back to a conservative 5000, safely under Chroma's observed 5461 default.
             "max_batch_size": getattr(st, "max_batch_size", None) or 5000,
         }
         _init_log(variants[ev]["log_file"])
 
-    # ── PHASE 1: PARSING (once) ────────────────────────────────────────────────
-    # One clean progress bar for the whole parsing pass, same as ingest() —
-    # see that function's docstring for the two-phase-vs-pipelined trade-off.
+    # ── PHASE 1: PARSING (once) — same two-phase design as ingest(), see its docstring.
     print(f"\nPhase 1: Parsing {len(tasks)} files once across {max_workers} CPU "
           f"workers (fanning out to {len(enrichment_strategies)} enrichment "
           f"variant(s) in Phase 2: {', '.join(enrichment_strategies)})...")
@@ -826,25 +681,14 @@ def ingest_multi_enrichment(
             _write_completion_marker(variants[ev]["store"], len(files), variants[ev]["stats"])
         return {ev: variants[ev]["stats"] for ev in enrichment_strategies}
 
-    # ── PHASE 2: ENRICH + EMBED + STORE, per variant ──────────────────────────
-    # Enrichment strategies only ever transform a chunk's text/metadata, never
-    # add or remove chunks — so every variant ends up with exactly
-    # total_raw_chunks rows, and the combined total across all variants is
-    # known upfront (unlike the old growing-total bar).
-    #
-    # Writes happen synchronously, directly inside this loop, one
-    # store.add()/fts_store.add() call per embed batch — matching
-    # master_grid_llm_completion.py's proven working pattern — instead of
-    # the old design's separate, larger write_batch_size accumulation
-    # buffer flushed via a background ThreadPoolExecutor. That older
-    # design let a single flush exceed Chroma's real hard limit on one
-    # add()/upsert() call (confirmed in production: write_batch_size=32768
-    # at embed batch=4096, crashing with "Batch size of 32768 is greater
-    # than max batch size of 5461" only AFTER the progress bar had already
-    # reported the run 100% done), and incremented chunks_stored at embed
-    # time rather than confirmed-write time, so a failed flush left
-    # chunks_stored reporting the full pre-failure total instead of an
-    # accurate partial count. See _embed_and_write_batch below.
+    # ── PHASE 2: ENRICH + EMBED + STORE, per variant ──
+    # Enrichment only transforms chunk text/metadata, never adds/removes
+    # chunks, so the combined total across variants is known upfront.
+    # Writes happen synchronously per embed batch (matching
+    # master_grid_llm_completion.py's pattern), replacing an old buffered
+    # design that could exceed Chroma's hard limit after the bar hit 100%
+    # (confirmed in production) and over-counted chunks_stored on failure.
+    # See _embed_and_write_batch below.
     total_variant_chunks = total_raw_chunks * len(enrichment_strategies)
     print(f"\nPhase 2: Enriching, embedding & storing {total_raw_chunks:,} chunks "
           f"x {len(enrichment_strategies)} variant(s) = {total_variant_chunks:,} "
@@ -852,18 +696,10 @@ def ingest_multi_enrichment(
           f"max batch size)...")
 
     def _embed_and_write_batch(ev: str, n: int) -> None:
-        """Embeds exactly the first n buffered chunks for this variant and
-        writes them to its store + FTS index immediately, split into
-        sub-batches no larger than this variant's store's real max batch
-        size (variants[ev]["max_batch_size"], queried live from the store
-        — see ChromaStore.max_batch_size). chunks_stored is only
-        incremented once a sub-batch's store.add() call actually returns
-        without raising — a write failure partway through this variant's
-        buffer propagates immediately (caught by the try/except around
-        Phase 2) with an accurate partial count already recorded, instead
-        of the whole run continuing to embed and count chunks that were
-        never actually stored.
-        """
+        """Embeds the first n buffered chunks for this variant and writes them
+        immediately, sub-batched at the store's real max batch size.
+        chunks_stored increments only after each sub-batch write succeeds, so
+        a failure partway through leaves an accurate partial count."""
         v = variants[ev]
         texts = v["buf_texts"][:n]
         ids = v["buf_ids"][:n]
@@ -896,10 +732,8 @@ def ingest_multi_enrichment(
                     v = variants[ev]
 
                     if ev != "none":
-                        # enrichment_kwargs merged in last so it can
-                        # override a res["meta"] key of the same name if
-                        # a caller ever deliberately does that, rather
-                        # than the two dicts colliding into a TypeError.
+                        # enrichment_kwargs merged last so it can override a
+                        # colliding res["meta"] key instead of raising a TypeError.
                         enrich_call_kwargs = {**res["meta"], **enrichment_kwargs}
                         variant_chunks = enrich_chunks(
                             chunks=copy.deepcopy(res["chunks"]),
@@ -909,9 +743,7 @@ def ingest_multi_enrichment(
                             **enrich_call_kwargs,
                         )
                     else:
-                        # Deep-copied even for "none" so nothing shared
-                        # with other variants can ever be mutated across
-                        # them, regardless of enrich_chunks' internals.
+                        # Deep-copied even for "none" so nothing is ever shared/mutated across variants.
                         variant_chunks = copy.deepcopy(res["chunks"])
 
                     texts, ids, metas = [], [], []
@@ -956,13 +788,9 @@ def ingest_multi_enrichment(
             variants[ev]["stats"].error_files += len(files)
         return {ev: variants[ev]["stats"] for ev in enrichment_strategies}
 
-    # Only reached if every chunk, for every variant, is confirmed
-    # actually stored. Deliberately a SEPARATE try/except from the
-    # embed-and-write loop above: a bookkeeping failure for just one
-    # variant (a CSV log row, or _write_completion_marker()) after every
-    # chunk for every variant already landed safely must never set
-    # error_files for every variant, or misreport a fully successful
-    # multi-variant ingest as a total failure.
+    # Separate try/except from the embed-and-write loop: a bookkeeping
+    # failure for one variant (CSV log, completion marker) must never mark
+    # every variant as failed when the actual data landed safely.
     for ev in enrichment_strategies:
         v = variants[ev]
         try:
@@ -972,9 +800,7 @@ def ingest_multi_enrichment(
                           chunking_time_ms=f_time, expansion_ratio=f_ratio)
                 v["stats"].files_processed += 1
 
-            # See _write_completion_marker()'s docstring for why this
-            # matters for callers deciding whether it's safe to skip a
-            # re-run.
+            # See _write_completion_marker() — lets callers safely skip a finished re-run.
             _write_completion_marker(v["store"], len(files), v["stats"])
         except Exception as e:
             print(f"\n[WARN] Post-write bookkeeping (CSV log / completion marker) failed "
@@ -1028,16 +854,10 @@ def generate(
 ) -> dict:
     """Generate a grounded answer from retrieved chunks.
 
-    response_schema, when given, is a JSON Schema object passed straight
-    through to generator.generate() — see evaluation/evaluate.py's
-    _mc_response_schema()/_tf_response_schema() for what builds these
-    (structured, schema-constrained mc/tf verdicts instead of free-text
-    parsing) and generators/local.py's generate() for how it's actually
-    sent to the server (response_format: json_schema). None (the default)
-    means "no structural constraint" — every existing caller (open-ended
-    generation, and any generator that doesn't support/need this) is
-    unaffected.
-    """
+    response_schema, if given, is a JSON Schema forwarded to
+    generator.generate() (see evaluate.py's _mc/_tf_response_schema() and
+    generators/local.py's json_schema handling); None means unconstrained,
+    so existing callers are unaffected."""
     if generator is None:
         from open_telco_rag.generators.claude import ClaudeGenerator
         generator = ClaudeGenerator(

@@ -60,14 +60,8 @@ def test_hierarchical_markdown_empty_text_returns_no_chunks():
 
 
 def test_hierarchical_markdown_heading_matches_its_own_content_not_the_next_sections():
-    """Regression test for a fixed bug: chunk_hierarchical_markdown used to
-    flush each accumulated block using `active_heading_attr` AFTER it had
-    already been reassigned to the INCOMING heading, so every chunk's
-    `.heading` was actually the breadcrumb of the *next* section, not its
-    own (verified by hand-tracing the source, then empirically, before the
-    fix). Fixed by flushing the pending block with the OLD heading label
-    before updating current_headers/active_heading_attr to the new one.
-    """
+    """Regression: heading label used to leak from the next section; now flushed
+    with the old heading before it's reassigned."""
     text = (
         "# Top\n\nIntro paragraph under Top.\n\n"
         "## Sub A\n\nContent under Sub A.\n\n"
@@ -114,9 +108,7 @@ def test_sliding_window_tokens_splits_into_expected_number_of_chunks_with_no_ove
 
 
 def test_sliding_window_tokens_single_chunk_when_overlap_at_least_chunk_size():
-    """chunk_tokens <= overlap_tokens breaks after the first window (see the
-    explicit guard in chunk_sliding_window_tokens) rather than looping
-    forever or advancing by zero/negative steps."""
+    """Guards against infinite loop when overlap_tokens >= chunk_tokens (explicit guard in source)."""
     text = "word " * 500
     chunks = chunk_sliding_window_tokens(text, chunk_tokens=10, overlap_tokens=10)
     assert len(chunks) == 1
@@ -168,10 +160,7 @@ def test_chunk_document_routes_text_baseline_by_string_name():
 
 
 def test_chunk_document_sliding_window_tokens_works_when_no_enrichment_kwarg_is_passed():
-    """This is how every real caller actually invokes chunk_document() today
-    (core/pipeline.py pops "enrichment" before calling it; sweep_ingestions.py
-    never includes it at all) — so this is the only path currently exercised
-    in production."""
+    """Mirrors real callers: pipeline.py pops enrichment kwarg, sweep_ingestions.py omits it."""
     text = "word " * 200
     via_document = chunk_document(text, strategy="sliding_window_tokens", chunk_size=100, overlap=10)
     direct = chunk_sliding_window_tokens(text, chunk_tokens=100, overlap_tokens=10)
@@ -180,16 +169,8 @@ def test_chunk_document_sliding_window_tokens_works_when_no_enrichment_kwarg_is_
 
 
 def test_chunk_document_applies_token_budget_adjustment_when_enrichment_kwarg_is_passed():
-    """Regression test for a fixed bug: chunk_document used to crash with
-    TypeError the moment an explicit enrichment= kwarg reached
-    chunk_sliding_window_tokens (which, unlike every other strategy function
-    here, has no **kwargs catch-all) — because chunk_document read
-    "enrichment" via kwargs.get() instead of kwargs.pop(), leaving it in
-    kwargs to be forwarded on to the chunker function. Fixed by popping it:
-    "enrichment" is chunk_document's own bookkeeping key (used only for the
-    budget calculation below), never a parameter any individual chunker
-    function should receive.
-    """
+    """Regression: chunk_document used kwargs.get() not pop(), leaking enrichment=
+    into chunk_sliding_window_tokens (no **kwargs catch-all) and crashing."""
     text = "word " * 500
     via_document = chunk_document(
         text, strategy="sliding_window_tokens",
@@ -199,8 +180,7 @@ def test_chunk_document_applies_token_budget_adjustment_when_enrichment_kwarg_is
 
     assert [c.text for c in via_document] == [c.text for c in direct]
 
-    # enrichment="none" (the default) must also pass cleanly, not just
-    # metadata_tagging — the old bug crashed regardless of the value.
+    # enrichment="none" (the default) must also pass cleanly — old bug crashed regardless of value.
     chunk_document(text, strategy="sliding_window_tokens", chunk_size=100, overlap=10, enrichment="none")
 
 

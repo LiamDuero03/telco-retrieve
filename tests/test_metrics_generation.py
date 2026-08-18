@@ -1,21 +1,13 @@
 """Tests for open_telco_rag.evaluation.metrics.generation.
 
-test_answer_relevancy_empty_reverse_questions_returns_zero_not_nan is a
-regression test for a real bug found via testing evaluate_question(): an
-LLM response that validly parses to an EMPTY list (not malformed, just
-zero reverse-questions) passed the `isinstance(reverse_qs, list)` check
-and reached np.mean([]) further down, which returns NaN (with a
-RuntimeWarning) instead of raising or returning a clean fallback --
-silently poisoning that question's answer_relevancy score. faithfulness()
-already had the equivalent empty-list guard for its own analogous
-empty-claims case; answer_relevancy() didn't.
+test_answer_relevancy_empty_reverse_questions_returns_zero_not_nan: regression
+test — a validly-empty reverse-questions list used to reach np.mean([]) ->
+NaN instead of a clean 0.0; faithfulness() already guarded this,
+answer_relevancy() didn't.
 
-The test_*_exception_path_logs_a_warning tests cover cleanup step 4
-(Production Auditor): every except Exception block in this module used to
-fall back to 0.0 silently unless debug=True (opt-in, off by default) --
-indistinguishable from a genuinely low-quality answer in a real (non-debug)
-grid run. They now always log a warning first; these tests lock that in
-via caplog rather than requiring debug=True to see it.
+test_*_exception_path_logs_a_warning: locks in that exception handlers now
+always log a warning instead of silently falling back to 0.0 (previously
+indistinguishable from a genuinely bad answer unless debug=True).
 """
 from __future__ import annotations
 
@@ -24,7 +16,9 @@ import math
 
 import pytest
 
-from open_telco_rag.evaluation.metrics.generation import answer_relevancy, faithfulness
+from open_telco_rag.evaluation.metrics.generation import (
+    _is_not_found_answer, _is_not_found_answer_mc_tf, answer_relevancy, faithfulness,
+)
 
 
 class _FakeEmbedder:
@@ -52,9 +46,7 @@ def test_answer_relevancy_computes_a_real_score_for_nonempty_reverse_questions()
     score = answer_relevancy("What does the AMF handle?", "The AMF handles registration.",
                               _FakeEmbedder(), llm_call=llm_call)
 
-    # Same fake embedding for every text -> cosine similarity of ~1.0 for
-    # each reverse question against the original (the metric's own
-    # 1e-10 epsilon in the denominator keeps it just under exactly 1.0).
+    # Identical fake embeddings -> cosine similarity ~1.0 (epsilon keeps it just under 1.0).
     assert score == pytest.approx(1.0)
 
 
@@ -81,3 +73,68 @@ def test_answer_relevancy_exception_path_logs_a_warning_without_debug(caplog):
 
     assert score == 0.0
     assert any("reverse_questions raised" in r.message for r in caplog.records)
+
+
+# ── _is_not_found_answer vs _is_not_found_answer_mc_tf split ────────────────
+#
+# Regression: five phrases ("cannot determine", "insufficient information",
+# etc.) were added for mc/tf abstention detection, but the SAME phrase list
+# also gated faithfulness()/answer_relevancy() -- so a substantively
+# correct open-ended answer that happens to use one of them mid-explanation
+# got force-zeroed. Split into a narrower open-question list and a broader
+# mc/tf-only one.
+
+def test_is_not_found_answer_does_not_match_mc_tf_only_phrases():
+    answer = ("There is insufficient information to characterize every edge case, "
+              "but the core procedure is X.")
+    assert not _is_not_found_answer(answer)
+    assert _is_not_found_answer_mc_tf(answer)  # still recognized for mc/tf abstention
+
+
+def test_is_not_found_answer_still_matches_the_original_retrieval_failure_phrases():
+    """The split must not weaken genuine not-found detection for open
+    questions -- only the new mc/tf-only additions are excluded."""
+    assert _is_not_found_answer("The context does not contain this information.")
+    assert _is_not_found_answer_mc_tf("The context does not contain this information.")
+
+
+def test_faithfulness_not_force_zeroed_by_an_mc_tf_only_phrase_mid_sentence():
+    """The regression, end to end: an open-ended answer that's
+    substantively correct but happens to say "insufficient information"
+    while hedging must be scored normally, not force-zeroed."""
+    answer = ("There is insufficient information to characterize every edge case, "
+              "but the AMF handles registration and mobility management.")
+    responses = iter([
+        '["The AMF handles registration and mobility management."]',  # decompose_claims
+        '[true]',                                                     # verify_claims
+    ])
+    llm_call = lambda prompt, max_tokens=512: next(responses)
+
+    score = faithfulness(
+        answer, [_FakeChunk("The AMF handles registration and mobility management.")],
+        llm_call=llm_call,
+    )
+
+    assert score == 1.0
+
+
+def test_faithfulness_still_force_zeroed_by_a_genuine_not_found_phrase():
+    """Confirms the short-circuit for a REAL not-found answer still fires
+    before any LLM call -- the split didn't weaken this."""
+    def _unreachable(prompt, max_tokens=512):
+        pytest.fail("faithfulness should short-circuit before calling llm_call")
+
+    score = faithfulness("The context does not contain this information.",
+                          [_FakeChunk("irrelevant")], llm_call=_unreachable)
+
+    assert score == 0.0
+
+
+def test_answer_relevancy_not_force_zeroed_by_an_mc_tf_only_phrase_mid_sentence():
+    answer = ("There is insufficient information to characterize every edge case, "
+              "but the AMF handles registration and mobility management.")
+    llm_call = lambda prompt, max_tokens=256: '["What does the AMF handle?", "What manages mobility?"]'
+
+    score = answer_relevancy("What does the AMF handle?", answer, _FakeEmbedder(), llm_call=llm_call)
+
+    assert score == pytest.approx(1.0)

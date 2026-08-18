@@ -23,7 +23,6 @@ def _resolve_parent_chunks(results: list[SearchResult]) -> list[SearchResult]:
             if parent_id in seen_parents:
                 continue
             seen_parents.add(parent_id)
-            # Create a new SearchResult with full parent text substituted
             resolved.append(SearchResult(
                 text=full_parent_text,
                 distance=r.distance,

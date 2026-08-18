@@ -54,12 +54,11 @@ class SentenceTransformerEmbedder:
             print(f"Loading embedding model: {self._model_name}")
             load_start = time.perf_counter()
 
-            # OPTIMIZATION: Prevent PyTorch thread thrashing on high-core CPUs (e.g., 95-core RunPod hosts)
+            # cap threads: avoids PyTorch thread thrashing on high-core CPUs (e.g. 95-core RunPod hosts)
             if not torch.cuda.is_available():
                 cpu_cores = max(1, min(16, (os.cpu_count() or 2) - 1))
                 torch.set_num_threads(cpu_cores)
 
-            # OPTIMIZATION: Hardware-Aware Initialization
             if torch.cuda.is_available():
                 self._model = SentenceTransformer(
                     self._model_name,
@@ -72,17 +71,8 @@ class SentenceTransformerEmbedder:
                     device="cpu"
                 )
 
-            # DIAGNOSTIC: the gap between "Loading weights: 100%" (fast --
-            # just materializing tensors from the safetensors file) and this
-            # print is where the SentenceTransformer constructor actually
-            # moves the model onto the GPU (.to("cuda")) -- on a fresh
-            # process this is also the first CUDA/HIP call, which can be
-            # slow to initialize context, and on ROCm has been known to
-            # stall outright. Previously nothing printed here at all, so a
-            # slow-but-working load and a genuine hang were indistinguishable
-            # from the console. Now a run that goes quiet for a long time
-            # AFTER this print is stuck somewhere else (most likely the
-            # first embed() batch, see below), not here.
+            # DIAGNOSTIC: prints once GPU move + first CUDA/HIP context init finish (can
+            # stall on ROCm) -- lets a hang here be distinguished from one in first embed()
             print(f"Embedding model ready on {self._model.device} "
                   f"in {time.perf_counter() - load_start:.1f}s")
 
@@ -92,13 +82,8 @@ class SentenceTransformerEmbedder:
 
         optimal_batch_size = 256 if torch.cuda.is_available() else 32
 
-        # DIAGNOSTIC: the first embed() call in a process is the first real
-        # forward-pass workload on the GPU -- if something is going to
-        # stall on VRAM pressure (batch too large for this model on this
-        # GPU) or a slow/hung CUDA-HIP context, this is where it happens.
-        # Announce it explicitly with the batch size so a quiet console
-        # after this print is unambiguously "still working on this batch",
-        # not "did the process even start doing anything".
+        # DIAGNOSTIC: first embed() is the first real GPU forward pass -- can stall on
+        # VRAM pressure or a hung CUDA/HIP context, so log batch size explicitly here
         is_first_embed = not self._first_embed_done
         if is_first_embed:
             print(f"Embedding first batch of this process: {len(texts)} texts "
@@ -107,16 +92,8 @@ class SentenceTransformerEmbedder:
             embed_start = time.perf_counter()
 
         if torch.cuda.is_available():
-            # Explicit autocast around the forward pass, on top of the model
-            # already being loaded with torch_dtype=torch.float16 (see
-            # _load()) — the weights being fp16 doesn't guarantee every op
-            # sentence-transformers runs internally gets dispatched to
-            # Tensor Cores correctly; autocast makes that dispatch explicit
-            # at the op level, while still letting numerically-sensitive
-            # ops (layer norm, softmax) fall back to fp32 automatically —
-            # something static fp16 weights alone don't do. Using the
-            # non-deprecated torch.autocast(device_type=...) form rather
-            # than the older torch.cuda.amp.autocast alias.
+            # fp16 weights alone don't guarantee ops dispatch to Tensor Cores; autocast
+            # forces that while still letting sensitive ops (layernorm, softmax) run fp32
             with torch.autocast(device_type="cuda", dtype=torch.float16):
                 embeddings = self._model.encode(
                     texts,

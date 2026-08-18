@@ -1,28 +1,10 @@
-"""Regression tests for a real, confirmed-by-reproduction bug: cli/main.py's
-config-driven helpers (_load_chunking_strategies, _load_enrichment_strategies,
-_strategy_requires_llm, _enrichment_requires_llm) used to resolve
-"configs/<file>.json" relative to the process's CURRENT WORKING DIRECTORY
-only. Running the CLI from anywhere other than the exact repo root (the
-normal case for an installed console-script, or simply invoking the CLI
-from a different shell CWD) made every one of these silently fall back to
-a degraded default:
-
-  _load_chunking_strategies()   -> ["text_baseline"] only
-  _load_enrichment_strategies() -> ["none"] only
-
-Since these two feed argparse's `choices=` for `--strategy`/`--enrichment`,
-this made argparse reject `--strategy sliding_window_tokens` (or
-hierarchical_markdown/parent_child/lumber_chunker) and `--enrichment
-acronym_expansion` (or metadata_tagging/llm_metadata) as "invalid choice"
-even though those strategies are fully implemented -- purely a function of
-which directory the command happened to be run from.
-
-Fixed via _resolve_config_path(): CWD-relative is still checked FIRST (so
-existing behavior for anyone running from the repo root is unchanged), but
-falls back to a package-relative location (cli/main.py's own directory ->
-repo root -> configs/) that works regardless of CWD -- the same pattern
-SentenceTransformerEmbedder/OpenRouterEmbedder already use correctly for
-embedding_models.json.
+"""Regression: cli/main.py's config helpers (_load_chunking_strategies,
+_load_enrichment_strategies, _strategy_requires_llm, _enrichment_requires_llm)
+resolved configs/<file>.json relative to CWD only, so running from outside the
+repo root silently fell back to degraded defaults (["text_baseline"], ["none"]),
+making argparse reject valid --strategy/--enrichment choices. Fixed via
+_resolve_config_path(): CWD-relative checked first, falls back to package-relative
+(same pattern SentenceTransformerEmbedder/OpenRouterEmbedder already use).
 """
 from __future__ import annotations
 
@@ -59,9 +41,7 @@ def test_load_enrichment_strategies_works_from_a_different_cwd(tmp_path, monkeyp
 def test_strategy_requires_llm_works_from_a_different_cwd(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
-    # Previously always False from a non-repo-root CWD, regardless of the
-    # strategy -- would silently skip prompting for --llm-backend setup for
-    # a strategy that genuinely needs it.
+    # Previously always False outside repo root, skipping required --llm-backend prompt.
     assert cli_main._strategy_requires_llm("lumber_chunker") is True
     assert cli_main._strategy_requires_llm("text_baseline") is False
 
@@ -74,9 +54,7 @@ def test_enrichment_requires_llm_works_from_a_different_cwd(tmp_path, monkeypatc
 
 
 def test_cwd_relative_configs_dir_still_takes_priority_when_present(tmp_path, monkeypatch):
-    """A deliberate local configs/ override (CWD-relative) must still win
-    over the package-relative fallback -- confirms the fix didn't flip the
-    two locations' precedence, only added the fallback."""
+    """Confirms CWD-relative configs/ still wins over the package-relative fallback."""
     local_configs = tmp_path / "configs"
     local_configs.mkdir()
     (local_configs / "chunking_strategies.json").write_text('{"only_this_one": {}}', encoding="utf-8")

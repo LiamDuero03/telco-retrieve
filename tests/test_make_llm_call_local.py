@@ -1,8 +1,5 @@
-"""Tests for open_telco_rag.evaluation._claude.make_llm_call()'s new
-"local" backend — previously only "claude"/"openrouter" existed, meaning
-evaluation metrics (faithfulness/answer_relevancy/context_recall/
-answer_correctness) had no way to run against a self-hosted GPU server at
-all, only cloud APIs.
+"""Tests for make_llm_call()'s "local" backend, added so eval metrics can
+run against a self-hosted GPU server (previously only claude/openrouter).
 """
 from __future__ import annotations
 

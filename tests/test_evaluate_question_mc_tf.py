@@ -1,14 +1,12 @@
-"""Tests for evaluate_question()'s mc/tf scoring branch — the real design
-fix: mc/tf exact-match correctness used to be written into faithfulness/
-answer_relevancy/context_recall/answer_correctness (OE-specific metrics,
-with answer_relevancy even hardcoded to 1.0 regardless of anything). These
-confirm the fix directly: accuracy is now set, and the four OE metrics are
-left at their -1.0 "not applicable" default for mc/tf questions.
+"""Tests for evaluate_question()'s mc/tf scoring branch.
 
-search()/generate() are patched at their source module
-(open_telco_rag.core.pipeline) since evaluate_question() imports them
-locally inside the function body — patching the module attribute affects
-that local import at call time.
+Fix: mc/tf correctness used to be written into the OE metrics (faithfulness/
+answer_relevancy/etc, with answer_relevancy hardcoded to 1.0). Now accuracy is
+set directly and the four OE metrics stay at their -1.0 "not applicable" default.
+
+search()/generate() are patched on pipeline_module since evaluate_question()
+imports them locally — patching the module attribute affects that import at
+call time.
 """
 from __future__ import annotations
 
@@ -65,9 +63,7 @@ def test_mc_incorrect_answer_sets_accuracy_zero(monkeypatch):
 
 
 def test_tf_correctly_false_answer_sets_accuracy_one(monkeypatch):
-    """A correctly-labeled FALSE answer is a CORRECT tf item, not a
-    mismatch -- confirms exact-match scoring (not some "always expects
-    True" bias)."""
+    """Confirms exact-match scoring has no "always expects True" bias."""
     monkeypatch.setattr(pipeline_module, "search", lambda *a, **kw: _fake_chunks())
     monkeypatch.setattr(pipeline_module, "generate", lambda *a, **kw: {
         "answer": "False", "sources": [], "chunks_used": 1,
@@ -86,10 +82,8 @@ def test_tf_correctly_false_answer_sets_accuracy_one(monkeypatch):
 
 
 def test_open_question_still_computes_oe_metrics_not_accuracy(monkeypatch):
-    """Confirms the fix didn't accidentally break the OE path — accuracy
-    stays "not applicable" and faithfulness/answer_relevancy still
-    actually run (using the real metric functions, so this also proves
-    they still receive a genuine llm_call/embedder rather than crashing)."""
+    """Confirms the fix didn't break the OE path — metrics still run with a
+    real llm_call/embedder rather than crashing."""
     monkeypatch.setattr(pipeline_module, "search", lambda *a, **kw: _fake_chunks())
     monkeypatch.setattr(pipeline_module, "generate", lambda *a, **kw: {
         "answer": "The AMF handles registration and mobility management.",
@@ -97,10 +91,7 @@ def test_open_question_still_computes_oe_metrics_not_accuracy(monkeypatch):
     })
 
     def _fake_llm_call(prompt, max_tokens=1024):
-        # decompose_claims / verify_claims / reverse_questions all expect
-        # a JSON array back -- return something trivially valid+empty so
-        # faithfulness()/answer_relevancy() short-circuit to 0.0 rather
-        # than raising, without needing a real LLM.
+        # Empty JSON array short-circuits faithfulness()/answer_relevancy() to 0.0.
         return "[]"
 
     class _FakeEmbedder:
@@ -119,26 +110,16 @@ def test_open_question_still_computes_oe_metrics_not_accuracy(monkeypatch):
 
     assert result.error == ""
     assert result.accuracy == -1.0
-    # faithfulness/answer_relevancy ran (returned 0.0 from the empty-claims
-    # short circuit above) rather than being skipped/left at their default.
+    # Ran and returned 0.0 (empty-claims short circuit), not skipped/left at default.
     assert result.faithfulness == 0.0
     assert result.answer_relevancy == 0.0
 
 
-# ── _match_deterministic_answer — real, confirmed-in-production bug ────────
-#
-# Aggregating a real 24-combination grid's all_results.json showed mc/tf
-# accuracy at exactly 0/120 in EVERY combination, zero variance across 6
-# very different embedding models, with several manually-inspected answers
-# confirmed substantively correct on reading. Root cause: the RAG generator
-# (a reasoning-style model, e.g. openai/gpt-oss-120b) routinely explains
-# before concluding -- "No, this is incorrect because..." for a tf question
-# whose reference_answer is "False" -- which the original pure exact-match/
-# startswith/"ANSWER IS X"-substring logic could never match, regardless of
-# retrieval quality. This is a COMPLETELY SEPARATE bug from the judge-side
-# parse_json() <think>-tag issue (see test_claude_parse_json.py) -- mc/tf
-# scoring never calls the judge or parse_json() at all, only the RAG
-# generator's own raw answer text.
+# ── _match_deterministic_answer ──
+# Regression: reasoning models explain before concluding ("No, this is incorrect
+# because...") which pure exact-match/startswith logic never matched, causing
+# mc/tf accuracy=0/120 across a real grid. Separate from parse_json()'s <think>-tag
+# bug (test_claude_parse_json.py) — mc/tf scoring never calls the judge.
 
 def test_tf_reasoning_style_no_answer_matches_false_reference():
     answer = ("No, this is not correct. According to the specification, the "
@@ -153,18 +134,13 @@ def test_tf_reasoning_style_yes_answer_matches_true_reference():
 
 
 def test_tf_reasoning_style_no_answer_does_not_match_true_reference():
-    """The lenient matching must still be a REAL mismatch check, not
-    "any explanation scores 1.0" -- a "No" answer against a "True"
-    reference is genuinely wrong."""
+    """Lenient matching must still catch real mismatches, not score every explanation 1.0."""
     answer = "No, this is not correct according to the specification."
     assert _match_deterministic_answer(answer, "True", "tf") == "incorrect"
 
 
 def test_tf_does_not_spuriously_match_boolean_word_buried_mid_explanation():
-    """"False" reference must not match an answer that merely CONTAINS the
-    word "false" somewhere deep in its reasoning without that being the
-    actual leading conclusion -- avoids the opposite failure mode (false
-    positives) while fixing the false negatives."""
+    """Must not match on the word "false" buried in reasoning — avoids false positives."""
     answer = ("The specification does not explicitly state this is false; however, "
               "after careful analysis of clause 5.2, the correct determination is "
               "that the statement holds and is therefore accurate.")
@@ -188,30 +164,21 @@ def test_mc_bare_letter_prefix_still_matches_original_behavior():
 
 
 def test_mc_the_answer_is_b_phrasing_matches():
-    """Regression test for a real bug in the matcher fix itself: the
-    original explicit-phrasing regex's [^A-Z0-9]{0,10} gap excluded the
-    word "IS" (I/S are uppercase LETTERS, not outside A-Z0-9), so "The
-    answer is B." -- arguably the single most natural way to phrase this
-    -- silently never matched at all. Caught by this fix's own end-to-end
-    test (test_mc_end_to_end_generator_receives_options_not_the_bare_
-    question) once the generation-prompt fix started actually eliciting
-    this exact phrasing from a fake generator."""
+    """Regression: [^A-Z0-9]{0,10} gap excluded "IS" (uppercase letters), so
+    "The answer is B." never matched."""
     assert _match_deterministic_answer("The answer is B.", "B", "mc") == "correct"
     assert _match_deterministic_answer("I believe the correct option is C.", "C", "mc") == "correct"
 
 
 def test_mc_the_answer_is_not_b_phrasing_does_not_spuriously_match():
-    """The "(?:\\s+IS)?" widening must not reopen the negation false-
-    positive door -- "answer is NOT B" must still correctly fail, the
-    same way the plain punctuation-only gap already protected against it
-    (see test_tf_does_not_spuriously_match_boolean_word_buried_mid_
-    explanation for the tf analogue)."""
+    """The "IS" widening must not reopen the negation false-positive door
+    ("answer is NOT B" must still fail)."""
     assert _match_deterministic_answer("The answer is not B, it is actually C.", "B", "mc") == "incorrect"
 
 
 def test_tf_end_to_end_via_evaluate_question_with_reasoning_style_generator(monkeypatch):
-    """Same real-world shape as the confirmed incident, exercised through
-    the full evaluate_question() path, not just the helper directly."""
+    """Same shape as the confirmed incident, exercised through the full
+    evaluate_question() path."""
     monkeypatch.setattr(pipeline_module, "search", lambda *a, **kw: _fake_chunks())
     monkeypatch.setattr(pipeline_module, "generate", lambda *a, **kw: {
         "answer": ("No, the secMethods attribute is not optional -- the specification "
@@ -230,16 +197,9 @@ def test_tf_end_to_end_via_evaluate_question_with_reasoning_style_generator(monk
     assert result.accuracy == 1.0
 
 
-# ── _build_generation_question — real, confirmed-in-production bug ─────────
-#
-# Real DEBUG output on a live run confirmed: even after the matcher fix
-# above, mc accuracy stayed at 0/N. Raw answer previews for mc questions
-# were pure open-ended prose that never mentioned an option letter at all.
-# Root cause: q.options was never referenced anywhere in evaluate.py, and
-# no generator template has any mc/tf-specific instruction either -- mc/tf
-# questions were sent through the EXACT SAME generation prompt as open
-# questions. The matcher was correctly implemented but had nothing to
-# match against.
+# ── _build_generation_question ──
+# Regression: mc/tf questions used the same generation prompt as open questions
+# — q.options was never referenced, so answers never mentioned an option letter.
 
 def test_build_generation_question_includes_options_and_letter_instruction_for_mc():
     q = EvalQuestion(
@@ -276,9 +236,8 @@ def test_build_generation_question_leaves_open_questions_unchanged():
 
 
 def test_build_generation_question_falls_back_to_bare_question_when_mc_has_no_options():
-    """Defensive: a malformed mc question with no options dict must not
-    crash -- just falls back to the bare question rather than injecting
-    an empty/broken "Options:" block."""
+    """Malformed mc question with no options must fall back to the bare question,
+    not crash."""
     q = EvalQuestion(
         question="Which interface?", keywords=[], corpus="3gpp",
         answer_type="mc", options=None, reference_answer="B",
@@ -287,9 +246,8 @@ def test_build_generation_question_falls_back_to_bare_question_when_mc_has_no_op
 
 
 def test_mc_end_to_end_generator_receives_options_not_the_bare_question(monkeypatch):
-    """The actual fix, exercised through the full evaluate_question() path
-    -- confirms the generator is called with options included, and that
-    search() (retrieval) is NOT polluted with the options text."""
+    """Confirms the generator receives options, and retrieval search() is not
+    polluted with them."""
     monkeypatch.setattr(pipeline_module, "search", lambda *a, **kw: _fake_chunks())
 
     captured = {}
@@ -336,15 +294,9 @@ def test_tf_end_to_end_generator_receives_true_false_instruction(monkeypatch):
     assert result.accuracy == 1.0
 
 
-# ── Abstention — distinguishing "retrieval failed" from "reasoning wrong" ──
-#
-# Design requirement: a generator honestly saying the context doesn't
-# contain enough information is a DIFFERENT failure than confidently
-# picking the wrong answer -- collapsing both into "incorrect" makes a
-# retrieval/chunking problem indistinguishable from a generation/reasoning
-# one in the aggregate numbers, and would reward forced-guessing (tf's
-# ~50% random-guess floor looks "better" than honest abstention despite
-# being strictly less informative about retrieval quality).
+# ── Abstention ──
+# Design: honest abstention is a different failure than confidently guessing wrong
+# — collapsing both into "incorrect" would reward forced-guessing over honesty.
 
 def test_build_generation_question_mc_explicitly_permits_abstention():
     q = EvalQuestion(
@@ -388,7 +340,7 @@ def test_match_deterministic_answer_commitment_is_checked_before_abstention_phra
     as conditions that cause an Update Bearer Request." -- a clean,
     unambiguous commitment to A, whose justification explains why the
     OTHER options are wrong (completely normal mc reasoning) using the
-    phrase "not mentioned", which is also on _is_not_found_answer()'s
+    phrase "not mentioned", which is also on _is_not_found_answer_mc_tf()'s
     phrase list. With abstention checked first (the original ordering),
     this was misclassified as "abstained" despite clearly committing to a
     letter -- and because BOTH a correct commitment and a wrong one could
@@ -407,20 +359,15 @@ def test_match_deterministic_answer_commitment_is_checked_before_abstention_phra
               "the sending of an Update Bearer Request (from PGW to S-GW, then to SGSN). The other options "
               "(allocating additional IP addresses or a UE-initiated handover) are not mentioned as conditions "
               "that cause an Update Bearer Request.")
-    # Committed to A -- correct when the reference IS A...
+    # Committed to A: correct when reference is A...
     assert _match_deterministic_answer(answer, "A", "mc") == "correct"
-    # ...and INCORRECT (not "abstained") when the reference is something
-    # else -- proving this isn't just "always correct now", the
-    # commitment is genuinely being checked against the reference.
+    # ...incorrect (not abstained) when reference differs — proves commitment is checked.
     assert _match_deterministic_answer(answer, "B", "mc") == "incorrect"
 
 
 def test_match_deterministic_answer_still_abstains_when_no_commitment_is_present_at_all():
-    """A genuine abstention -- no letter/boolean commitment pattern
-    anywhere, only an honest "insufficient information" -- must still
-    classify as abstained. The commitment-first reordering only changes
-    what happens when a commitment IS found; it must not make abstention
-    unreachable."""
+    """Genuine abstention (no commitment pattern) must still classify as
+    abstained after the reordering."""
     answer = "The context does not contain enough information to determine which option is correct."
     assert _match_deterministic_answer(answer, "B", "mc") == "abstained"
 
@@ -464,8 +411,7 @@ def test_tf_end_to_end_abstained_answer_sets_outcome_and_zero_accuracy(monkeypat
 
 
 def test_mc_end_to_end_correct_answer_sets_outcome_field_too(monkeypatch):
-    """mc_tf_outcome must be populated on the SUCCESS path too, not just
-    for abstained/incorrect answers."""
+    """mc_tf_outcome must be populated on the success path too, not just abstained/incorrect."""
     monkeypatch.setattr(pipeline_module, "search", lambda *a, **kw: _fake_chunks())
     monkeypatch.setattr(pipeline_module, "generate", lambda *a, **kw: {
         "answer": "B", "sources": [], "chunks_used": 1,
@@ -511,11 +457,8 @@ def test_open_question_mc_tf_outcome_stays_none(monkeypatch):
 # ── End-to-end structured-output wiring ─────────────────────────────────
 
 def test_mc_end_to_end_response_schema_reaches_generate_and_drives_the_outcome(monkeypatch):
-    """The actual root-cause fix, exercised through the full
-    evaluate_question() path: response_schema must reach generate() (and
-    therefore the generator), and a structured JSON answer must be read
-    directly -- no regex, no phrase-list matching -- to produce the
-    outcome."""
+    """Root-cause fix: response_schema must reach generate(), and the JSON answer
+    is read directly — no regex, no phrase-list matching."""
     monkeypatch.setattr(pipeline_module, "search", lambda *a, **kw: _fake_chunks())
 
     captured = {}
@@ -568,8 +511,7 @@ def test_tf_end_to_end_structured_abstained_answer_sets_outcome(monkeypatch):
 
 
 def test_open_question_response_schema_is_none(monkeypatch):
-    """Confirms open questions get NO structural constraint -- generate()
-    still gets called, but with response_schema=None."""
+    """Confirms open questions get no structural constraint — response_schema=None."""
     monkeypatch.setattr(pipeline_module, "search", lambda *a, **kw: _fake_chunks())
 
     captured = {}

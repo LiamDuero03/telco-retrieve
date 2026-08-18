@@ -45,14 +45,14 @@ class CAMARASource:
     # ── Pattern-based exclusions (matched against filename) ───────────────────
     EXCLUDED_PATTERNS = [
         r'\d{4}_Week\d+_syncCalls\.md',   # weekly sync meeting notes
-        r'\d{4}-\d{2}-\d{2}.*\.md',       # date-prefixed meeting minutes we don't want
+        r'\d{4}-\d{2}-\d{2}.*\.md',       # date-prefixed meeting minutes
         r'^linting.*\.yaml$',             # linting configs
         r'^\..*',                          # hidden files
-        r'MoM_\d+\.md',              # ADD: MoM_231023.md format
-        r'MOM-\d{4}-\d+.*\.md',      # ADD: MOM-2024-01-18.md format
-        r'^issue_.*\.md$',           # ADD: all issue templates
-        r'^pull_request_.*\.md$',    # ADD: PR templates
-        r'^CHANGELOG.*\.md$',        # ADD: all changelog variants
+        r'MoM_\d+\.md',              # e.g. MoM_231023.md
+        r'MOM-\d{4}-\d+.*\.md',      # e.g. MOM-2024-01-18.md
+        r'^issue_.*\.md$',           # issue templates
+        r'^pull_request_.*\.md$',    # PR templates
+        r'^CHANGELOG.*\.md$',        # changelog variants
     ]
 
     # ── Path component exclusions (any path component matching → skip) ─────────
@@ -78,14 +78,12 @@ class CAMARASource:
         """Load Markdown or YAML file as text."""
         path = Path(path)
 
-        # File-level exclusion
         if path.name in self.EXCLUDED_FILES:
             return ""
         if any(re.search(p, path.name, re.IGNORECASE)
                for p in self.EXCLUDED_PATTERNS):
             return ""
 
-        # Path-level exclusion — skip if any parent dir is excluded
         for part in path.parts:
             if part in self.EXCLUDED_PATH_PARTS:
                 return ""
@@ -116,7 +114,6 @@ class CAMARASource:
         text = (text.replace('â€œ', '"')
                     .replace('â€', '"')
                     .replace('â€™', "'"))
-        # Collapse whitespace
         text = re.sub(r'\n{3,}', '\n\n', text)
         return text.strip()
 
@@ -130,8 +127,7 @@ class CAMARASource:
         }
 
         # ── Repo name (top-level CAMARA repo folder) ──────────────────────
-        # Walk path parts to find the first CamelCase or known-pattern dir
-        # after the data/camara root
+        # First CamelCase or known-pattern dir after the data/camara root
         repo_name = None
         for part in path.parts:
             if (part.lower() not in {
@@ -155,7 +151,6 @@ class CAMARASource:
         if suffix in (".yaml", ".yml"):
             meta["file_type"] = "openapi"
             meta["spec_name"] = path.stem
-            # Try to get API version from YAML info block
             try:
                 with open(path, encoding="utf-8", errors="ignore") as f:
                     data = yaml.safe_load(f)
@@ -169,7 +164,6 @@ class CAMARASource:
                 pass
 
         elif suffix == ".md":
-            # Classify markdown by filename
             if name_low == "readme.md":
                 meta["file_type"] = "readme"
                 meta["doc_role"]  = "api_overview"
@@ -203,7 +197,6 @@ class CAMARASource:
 
         sections = []
 
-        # API title and description
         info = data.get("info", {})
         if info.get("title"):
             sections.append(f"# {info['title']}")
@@ -212,7 +205,6 @@ class CAMARASource:
         if info.get("description"):
             sections.append(info["description"])
 
-        # Servers
         servers = data.get("servers", [])
         if servers:
             sections.append("## Servers")
@@ -221,7 +213,6 @@ class CAMARASource:
                 url  = s.get("url", "")
                 sections.append(f"- {desc}: {url}" if desc else f"- {url}")
 
-        # Paths — endpoints with descriptions
         paths = data.get("paths", {})
         for endpoint, methods in paths.items():
             if not isinstance(methods, dict):
@@ -238,7 +229,6 @@ class CAMARASource:
                 if description:
                     sections.append(description)
 
-                # Parameters
                 params = details.get("parameters", [])
                 if params:
                     param_lines = ["**Parameters:**"]
@@ -253,14 +243,12 @@ class CAMARASource:
                             )
                     sections.append("\n".join(param_lines))
 
-                # Request body
                 req_body = details.get("requestBody", {})
                 if req_body and isinstance(req_body, dict):
                     rb_desc = req_body.get("description", "")
                     if rb_desc:
                         sections.append(f"**Request body:** {rb_desc}")
 
-                # Responses
                 responses = details.get("responses", {})
                 if responses:
                     resp_lines = ["**Responses:**"]
@@ -270,7 +258,6 @@ class CAMARASource:
                             resp_lines.append(f"- {code}: {resp_desc}")
                     sections.append("\n".join(resp_lines))
 
-        # Components — schemas with descriptions
         components = data.get("components", {})
         schemas    = components.get("schemas", {})
         if schemas:

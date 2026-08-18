@@ -16,8 +16,8 @@ class OpenRouterEmbedder:
         self,
         model_key: str = "minilm",
         models_file: str | Path = Path(__file__).parent.parent.parent / "configs" / "embedding_models.json",
-        # Lowered to 200 to safely stay under OpenAI's per-request payload limits
-        batch_size: int = 200, 
+        # kept low to stay under OpenAI's per-request payload limit
+        batch_size: int = 200,
     ):
         models_file = Path(models_file)
         if not models_file.exists():
@@ -40,7 +40,7 @@ class OpenRouterEmbedder:
             
         self.url = "https://openrouter.ai/api/v1/embeddings"
         
-        # Thread-Safe Connection Pooling
+        # shared session for thread-safe connection pooling
         self.session = requests.Session()
         adapter = HTTPAdapter(pool_connections=20, pool_maxsize=20)
         self.session.mount('https://', adapter)
@@ -76,13 +76,13 @@ class OpenRouterEmbedder:
                 if response.status_code == 200:
                     json_resp = response.json()
                     
-                    # NEW: Catch OpenRouter's hidden provider errors!
+                    # OpenRouter can return HTTP 200 with an error embedded in the body
                     if "error" in json_resp and json_resp["error"]:
                         error_msg = json_resp["error"].get("message", "Unknown provider error")
                         print(f"  [API Error] OpenRouter returned an error: {error_msg}. Retrying...")
                         time.sleep(backoff)
                         backoff *= 2
-                        continue # Force the loop to retry
+                        continue
                         
                     data = json_resp.get("data", [])
                     data_sorted = sorted(data, key=lambda x: x["index"])

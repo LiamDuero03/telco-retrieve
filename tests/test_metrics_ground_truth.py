@@ -1,10 +1,7 @@
-"""Tests for open_telco_rag.evaluation.metrics.ground_truth -- previously
-had zero test coverage. Added during cleanup step 5 (Pipeline Tester)
-alongside step 4 (Production Auditor)'s fix to this module's exception
-handling: every except Exception block used to fall back to 0.0/f1=0.0/
-sem=0.0 silently unless debug=True (opt-in, off by default) --
-indistinguishable from a genuinely low-quality answer in a real (non-debug)
-grid run. They now always log a warning first; covered here via caplog.
+"""Tests for open_telco_rag.evaluation.metrics.ground_truth (previously
+uncovered). Exception handlers used to fall back to 0.0 silently unless
+debug=True — indistinguishable from a genuinely bad answer in a non-debug
+grid run — and now always log a warning first, verified here via caplog.
 """
 from __future__ import annotations
 
@@ -41,7 +38,7 @@ def test_context_recall_computes_a_real_score():
 
 
 def test_context_recall_caps_at_one_even_if_supported_exceeds_total():
-    # Defensive against a judge miscounting -- shouldn't score above 1.0.
+    # Guards against a judge miscounting; score must not exceed 1.0.
     llm_call = lambda prompt, max_tokens=256: '{"total": 2, "supported": 5}'
 
     score = context_recall("ref", [_FakeChunk("ctx")], llm_call=llm_call)
@@ -63,8 +60,7 @@ def test_context_recall_exception_path_logs_a_warning_without_debug(caplog):
 def test_answer_correctness_blends_f1_and_semantic_similarity():
     llm_call = lambda prompt, max_tokens=256: '{"correct": 2, "incorrect": 0, "missing": 0}'
 
-    # Identical embeddings for every text -> semantic similarity ~1.0;
-    # correct=2/incorrect=0/missing=0 -> precision=recall=f1=1.0.
+    # Identical embeddings -> sem~1.0; correct=2/incorrect=0/missing=0 -> f1=1.0.
     score = answer_correctness("The AMF handles registration.", "The AMF handles registration.",
                                 _FakeEmbedder(), llm_call=llm_call)
 
@@ -76,9 +72,7 @@ def test_answer_correctness_f1_exception_path_logs_a_warning_and_still_scores_se
         score = answer_correctness("answer", "reference", _FakeEmbedder(),
                                     llm_call=_raising_llm_call)
 
-    # f1 falls back to 0.0 but the embedding-based semantic half still
-    # computes independently (separate try/except) -- weight=0.5 default
-    # means score == 0.5 * 0 + 0.5 * sem, not a hard 0.0.
+    # f1 and semantic halves use separate try/except; f1 fails, sem still computes (weight=0.5).
     assert score == pytest.approx(0.5 * 1.0, abs=1e-6)
     assert any("answer_correctness: f1 raised" in r.message for r in caplog.records)
 
@@ -93,6 +87,6 @@ def test_answer_correctness_embedding_exception_path_logs_a_warning(caplog):
     with caplog.at_level(logging.WARNING, logger="open_telco_rag.evaluation.metrics.ground_truth"):
         score = answer_correctness("answer", "reference", _RaisingEmbedder(), llm_call=llm_call)
 
-    # f1=1.0 (perfect), sem falls back to 0.0 -> score == 0.5 * 1.0 + 0.5 * 0
+    # f1=1.0, sem falls back to 0.0 -> score == 0.5*1.0 + 0.5*0
     assert score == pytest.approx(0.5, abs=1e-6)
     assert any("answer_correctness: embedding raised" in r.message for r in caplog.records)

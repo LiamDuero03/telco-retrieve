@@ -12,22 +12,15 @@ import argparse
 import sys
 from pathlib import Path
 
-# _CONFIGS_DIR resolves configs/ package-relative (this file lives at
-# telcolens/cli/main.py, so .parent.parent is the repo root — same
-# pattern SentenceTransformerEmbedder/OpenRouterEmbedder use for
-# embedding_models.json), checked as a fallback in _resolve_config_path()
-# below AFTER the CWD-relative lookup. Without this fallback, running the
-# CLI from anywhere other than the repo root makes the config loaders
-# silently fall back to their minimal defaults ("text_baseline" / "none"),
-# rejecting valid --strategy/--enrichment choices as "invalid choice".
+# Fallback path to configs/ (package-relative) when CWD-relative lookup
+# misses — without it, running outside repo root silently falls back to
+# minimal defaults, rejecting valid --strategy/--enrichment choices.
 _CONFIGS_DIR = Path(__file__).resolve().parent.parent / "configs"
 
 
 def _resolve_config_path(filename: str) -> Path | None:
-    """Finds `<filename>` under configs/, checking CWD-relative first (for
-    a deliberate local override) then falling back to the package-relative
-    location — see _CONFIGS_DIR's comment above for why the fallback
-    exists. Returns None if neither location has it.
+    """Finds `<filename>` under configs/: CWD-relative first (local override),
+    then package-relative (see _CONFIGS_DIR above). None if neither exists.
     """
     cwd_relative = Path("configs") / filename
     if cwd_relative.exists():
@@ -55,9 +48,8 @@ def _load_enrichment_strategies() -> list[str]:
 
 
 def _strategy_requires_llm(strategy: str) -> bool:
-    """Look up whether a chunking strategy needs an LLM client (e.g. lumber_chunker),
-    driven by the requires_llm flag in configs/chunking_strategies.json rather than
-    a hardcoded strategy-name check — new LLM-based strategies just need the flag set.
+    """Whether a chunking strategy needs an LLM client, per its requires_llm
+    flag in chunking_strategies.json — new LLM strategies just set the flag.
     """
     import json
     path = _resolve_config_path("chunking_strategies.json")
@@ -71,12 +63,8 @@ def _strategy_requires_llm(strategy: str) -> bool:
 
 
 def _enrichment_requires_llm(enrichment: str) -> bool:
-    """Same idea as _strategy_requires_llm, for enrichment strategies (e.g.
-    llm_metadata) via configs/enrichment_strategies.json's own requires_llm
-    flag — kept as a separate function/JSON file rather than merged with
-    _strategy_requires_llm since chunking strategies and enrichment
-    strategies are independent choices (either, both, or neither can need
-    an LLM in a given ingest run).
+    """Same as _strategy_requires_llm but for enrichment strategies — kept
+    separate since chunking and enrichment LLM needs are independent.
     """
     import json
     path = _resolve_config_path("enrichment_strategies.json")
@@ -89,12 +77,9 @@ def _enrichment_requires_llm(enrichment: str) -> bool:
         return False
 
 def main(argv: list[str] | None = None) -> None:
-    # Force UTF-8 output regardless of the host console's default code page
-    # (e.g. Windows consoles commonly default to cp1252, which can't encode
-    # the emoji used in status messages throughout this CLI and its
-    # dependencies — that raises UnicodeEncodeError and crashes the whole
-    # command). hasattr-guarded since sys.stdout/stderr can be swapped for
-    # something without .reconfigure() (e.g. under a test runner).
+    # Force UTF-8: Windows consoles often default to cp1252, which can't
+    # encode the emoji in status messages and crashes with UnicodeEncodeError.
+    # hasattr-guarded since stdout/stderr may lack .reconfigure() (e.g. tests).
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     if hasattr(sys.stderr, "reconfigure"):
@@ -353,7 +338,7 @@ def _get_source(source_type: str, use_marker: bool = False):
     if source_type_clean in ("oran",):
         from open_telco_rag.sources.oran import ORANSource
         return ORANSource(use_marker=use_marker)
-    elif source_type_clean in ("3gpp", "tpp"):  # <--- Handled alias here
+    elif source_type_clean in ("3gpp", "tpp"):
         from open_telco_rag.sources.tgpp import TPPSource
         return TPPSource()
     elif source_type_clean in ("camara",):
@@ -388,7 +373,6 @@ def _get_store(source_type: str, model_key: str, db_path: str, collection: str =
     from open_telco_rag.stores.chroma import ChromaStore
     col = collection or f"{source_type}_{model_key}"
 
-    # Map CLI metric option strings directly to Chroma's native naming layout
     metric_map = {"l2": "l2", "cosine": "cosine", "ip": "ip"}
     chosen_space = metric_map.get(distance_metric.lower(), "l2")
 
@@ -397,18 +381,11 @@ def _get_store(source_type: str, model_key: str, db_path: str, collection: str =
         collection_name=col,
         metadata={
             "hnsw:space": chosen_space,
-            # Bulk-load tuning: how many vectors accumulate before Chroma's
-            # HNSW segment (batch_size) resizes its internal buffer / (sync_
-            # threshold) syncs the graph to disk. Chroma's defaults (~100 /
-            # ~1000) are tuned for interactive/incremental use, not bulk
-            # ingestion of thousands-to-millions of chunks — raising both
-            # means far fewer, larger syncs during a big ingest run. Only
-            # applied at collection CREATION time (get_or_create_collection
-            # ignores metadata for a collection that already exists), and
-            # only affects write throughput, not search correctness. Safe to
-            # be this aggressive because a mid-run crash is no longer a
-            # silent-data-loss risk either way — see
-            # core/pipeline.py's completion-marker mechanism.
+            # Bulk-ingest tuning: raises Chroma's HNSW batch_size/sync_threshold
+            # defaults (~100/~1000) for far fewer syncs on large ingests. Only
+            # takes effect at collection creation; write-throughput only,
+            # doesn't affect search. Safe since mid-run crashes are handled
+            # by pipeline.py's completion-marker mechanism.
             "hnsw:batch_size": 1000,
             "hnsw:sync_threshold": 10000,
         }
@@ -422,16 +399,12 @@ def _get_reranker(model_key: str):
 
 
 def _get_llm_client(backend: str = "local", base_url: str | None = None, api_key: str | None = None):
-    """Construct the LLM client for chunking strategies that require one
-    (e.g. lumber_chunker). Mirrors _get_embedder's local/openrouter split.
+    """LLM client for strategies needing one (e.g. lumber_chunker); mirrors
+    _get_embedder's local/openrouter split.
 
-    api_key is only used for backend="local" (vLLM et al. commonly require
-    --api-key) — LocalLLMClient itself falls back to the LOCAL_LLM_API_KEY
-    env var when api_key is None, same pattern as base_url/LOCAL_LLM_BASE_URL.
-
-    Only called when the selected strategy's requires_llm flag is true —
-    strategies that don't need an LLM never touch this, so nothing here
-    affects them.
+    api_key only applies to backend="local" — falls back to LOCAL_LLM_API_KEY
+    env var when None. Only called when requires_llm is true for the chosen
+    strategy.
     """
     if backend == "openrouter":
         from open_telco_rag.generators.local_llm import OpenRouterLLMClient
@@ -455,14 +428,18 @@ def _run_ingest(args) -> None:
     strategy = getattr(args, "strategy", "text_baseline")
     
     source     = _get_source(args.source_type, use_marker=use_marker)
+
+    if use_marker and not os.environ.get("DATALAB_API_KEY"):
+        # Otherwise each worker process in Phase 1 discovers this independently,
+        # one failed file at a time — same rationale as the LLM check below.
+        print("\n❌ DATALAB_API_KEY not set — required for --use-marker.")
+        print("   Add it to your .env file: DATALAB_API_KEY=your_key_here")
+        sys.exit(1)
+
     embed_backend = getattr(args, "embed_backend", "local")
-    # 256 matches SentenceTransformerEmbedder's own internal GPU micro-batch
-    # size (optimal_batch_size = 256 if CUDA else 32) — the old default of 64
-    # meant a GPU embedding call was never actually fed enough texts to reach
-    # the batch size the code itself considers GPU-optimal. CPU-only local
-    # embedding still works fine at 256 (sentence-transformers just iterates
-    # its own smaller internal micro-batches); override with --batch-size on
-    # memory-constrained hardware.
+    # 256 matches SentenceTransformerEmbedder's GPU micro-batch size (old
+    # default of 64 never filled a GPU-optimal batch). CPU-only still works
+    # fine; override with --batch-size on memory-constrained hardware.
     default_batch_size = 500 if embed_backend == "openrouter" else 256
     batch_size_arg = getattr(args, "batch_size", None) or default_batch_size
     embedder = _get_embedder(args.model, backend=embed_backend)
@@ -481,7 +458,6 @@ def _run_ingest(args) -> None:
     print(f"  Strategy:   {strategy.upper()}")
     print(f"  Distance:   {distance_metric.upper()}")
 
-    # Aligns CLI argument structures seamlessly into dynamic chunker targets
     chunk_kwargs = {
         "source": source,
         "store": store,
@@ -494,17 +470,10 @@ def _run_ingest(args) -> None:
         "batch_size": batch_size_arg,
     }
 
-    # LLM-based chunking (e.g. lumber_chunker) and/or LLM-based enrichment
-    # (llm_metadata) — only touched when the chosen strategy's/enrichment's
-    # requires_llm flag is set in chunking_strategies.json /
-    # enrichment_strategies.json respectively. Neither is affected if the
-    # other doesn't apply; a run can need chunking's LLM, enrichment's LLM,
-    # both, or neither. Both share one --llm-backend/--llm-base-url
-    # connection (a single vLLM server serving one model is the common
-    # case) — chunking_model and enrichment_model can still differ, since
-    # that's just the "model" field sent in each request, but they'll hit
-    # the same server. Point --llm-base-url at a second server if chunking
-    # and enrichment genuinely need two different models served separately.
+    # LLM-based chunking/enrichment only kick in per their requires_llm flags
+    # (independent — either, both, or neither can apply). Both share one
+    # --llm-backend/--llm-base-url connection; point at a second server if
+    # chunking and enrichment need different models served separately.
     needs_chunking_llm = _strategy_requires_llm(strategy)
     needs_enrichment_llm = _enrichment_requires_llm(enrichment)
 
@@ -529,9 +498,8 @@ def _run_ingest(args) -> None:
               f"({resolved_base if llm_backend == 'local' else 'openrouter.ai'}) "
               f"— model: {chunking_model}  [{needs_desc}]")
 
-        # Fail fast, once, with a clear message — rather than letting Phase 1
-        # discover a bad endpoint/model 23 processes at a time, each retrying
-        # independently on every single file.
+        # Fail fast once here — otherwise each worker process discovers a bad
+        # endpoint/model independently, retrying per file.
         print("  Checking LLM connectivity...", end=" ", flush=True)
         try:
             llm_client.completion.create(
@@ -553,11 +521,9 @@ def _run_ingest(args) -> None:
             chunk_kwargs["llm_client"] = llm_client
             chunk_kwargs["model_name"] = chunking_model
         if needs_enrichment_llm:
-            # Deliberately a DIFFERENT kwarg key from chunking's "llm_client"
-            # — _process_file_worker pops this one out before calling
-            # chunk_document(), so it never leaks into a chunking strategy
-            # that doesn't accept an llm_client kwarg and has no **kwargs
-            # catch-all (e.g. chunk_sliding_window_tokens would TypeError).
+            # Different kwarg key from chunking's llm_client: _process_file_worker
+            # pops it before chunk_document(), avoiding a TypeError in strategies
+            # without an llm_client param or **kwargs (e.g. sliding_window_tokens).
             chunk_kwargs["enrichment_llm_client"] = llm_client
 
     # Pull structural constraints from the strategy definition JSON
@@ -681,18 +647,15 @@ def _run_evaluate(args) -> None:
     embedder = _get_embedder(args.model, backend=embed_backend)
     output_dir = None if args.no_save else Path(args.output)
 
-    # LLM for evaluation metrics
     llm_call = make_llm_call(
         args.generator, args.generator_model,
         base_url=getattr(args, "llm_base_url", None),
         api_key=getattr(args, "llm_api_key", None),
     )
 
-    # LLM for RAG answer generation — base_url/api_key fall back to the
-    # metrics ones (--llm-base-url/--llm-api-key) if not given their own,
-    # same fallback convention --rag-generator/--rag-generator-model
-    # already use, so a single GPU endpoint can serve both roles unless
-    # you deliberately point them at two different servers/ports.
+    # RAG generation's base_url/api_key fall back to the metrics ones
+    # (--llm-base-url/--llm-api-key) unless given their own — lets one GPU
+    # endpoint serve both roles.
     rag_generator_name  = args.rag_generator       or args.generator
     rag_generator_model = args.rag_generator_model or args.generator_model
     rag_base_url = getattr(args, "rag_llm_base_url", None) or getattr(args, "llm_base_url", None)
@@ -702,7 +665,6 @@ def _run_evaluate(args) -> None:
     print(f"  Metrics LLM  : {args.generator} / {args.generator_model or 'default'}")
     print(f"  RAG gen LLM  : {rag_generator_name} / {rag_generator_model or 'default'}")
 
-    # Load custom questions file if provided
     custom_questions = None
     if args.questions_file:
         import json
@@ -808,11 +770,9 @@ def _update_leaderboard(
     from datetime import datetime
 
     def _avg(r):
-        # mean_accuracy included now that mc/tf correctness has its own
-        # dedicated field instead of being blended into mean_faithfulness/
-        # mean_answer_relevancy (see results.py) — a mixed mc+tf+open run's
-        # "average" column previously silently excluded mc/tf entirely from
-        # this figure once that blending was removed; this restores it.
+        # mean_accuracy included since mc/tf correctness got its own field
+        # (see results.py) instead of blending into faithfulness/relevancy —
+        # restores it to "average" for mixed mc+tf+open runs.
         scores = [getattr(r, "mean_accuracy", -1.0), r.mean_faithfulness, r.mean_answer_relevancy,
                   r.mean_similarity, r.mean_context_recall, r.mean_answer_correctness]
         valid = [s for s in scores if s >= 0]
@@ -821,39 +781,30 @@ def _update_leaderboard(
     q_results = getattr(result, "question_results", [])
     
     import statistics
-    # Calculate averages across all processed questions
     avg_total = statistics.mean([getattr(q, "latency", 0.0) for q in q_results]) if q_results else 0.0
     avg_search = statistics.mean([getattr(q, "search_latency", 0.0) for q in q_results]) if q_results else 0.0
-    avg_rerank = statistics.mean([getattr(q, "rerank_latency", 0.0) for q in q_results]) if q_results else 0.0 # <-- ADDED
+    avg_rerank = statistics.mean([getattr(q, "rerank_latency", 0.0) for q in q_results]) if q_results else 0.0
     avg_gen = statistics.mean([getattr(q, "gen_latency", 0.0) for q in q_results]) if q_results else 0.0
-    
+
     total_prompt_tokens = sum([getattr(q, "prompt_tokens", 0) for q in q_results])
     total_completion_tokens = sum([getattr(q, "completion_tokens", 0) for q in q_results])
-    total_rerank_tokens = sum([getattr(q, "rerank_tokens", 0) for q in q_results]) # <-- ADDED
-    
-    # Sum the advanced token metrics -- cached_tokens/reasoning_tokens are
-    # now `int | None` on QuestionResult (None = "not computed", not the
-    # same as a real 0 — see results.py), so `or 0` is needed to keep
-    # these sums from crashing on None; a getattr() default alone doesn't
-    # help here since the ATTRIBUTE exists, it's just set to None.
+    total_rerank_tokens = sum([getattr(q, "rerank_tokens", 0) for q in q_results])
+
+    # cached_tokens/reasoning_tokens are `int | None` (None = not computed,
+    # not 0 — see results.py); `or 0` needed since the attribute exists but
+    # may be None, so getattr's default alone won't catch it.
     total_cached_tokens = sum([(getattr(q, "cached_tokens", 0) or 0) for q in q_results])
     total_reasoning_tokens = sum([(getattr(q, "reasoning_tokens", 0) or 0) for q in q_results])
 
-    # Extract exact cost from whichever questions HAVE a known one (cost
-    # is `float | None` now — None means "not computed", e.g. every
-    # question ran through claude.py which has no pricing table wired up
-    # yet; a real value, including 0.0, means it IS known — e.g. local.py
-    # reporting a genuine $0.00 for a self-hosted vLLM run). Only fall
-    # back to the static per-token pricing-matrix estimate when NOT ONE
-    # question had a known cost -- previously this fell back whenever the
-    # summed cost was exactly 0.0, which wrongly overwrote a genuinely
-    # free local-vLLM run's real $0.00 with an estimated dollar figure.
+    # cost is `float | None`: None = not computed (e.g. claude.py has no
+    # pricing table), a real value incl. 0.0 = known (e.g. free local vLLM).
+    # Only fall back to the pricing-matrix estimate when NO question has a
+    # known cost — else a genuine $0.00 run got overwritten with an estimate.
     known_costs = [getattr(q, "cost", None) for q in q_results]
     known_costs = [c for c in known_costs if c is not None]
     if known_costs:
         exact_cost = sum(known_costs)
     else:
-        # Dynamic lookup fallback dictionary per million tokens mapping
         PRICING_MATRIX = {
             "anthropic/claude-sonnet-4.5": {"prompt": 3.00, "completion": 15.00},
             "meta-llama/llama-3.3-70b-instruct": {"prompt": 0.70, "completion": 0.90},
@@ -861,14 +812,12 @@ def _update_leaderboard(
             "default": {"prompt": 0.70, "completion": 0.90}
         }
 
-        # Cleanly match model attributes or apply secure generic defaults fallback layout
         pricing = PRICING_MATRIX.get(rag_model, PRICING_MATRIX["default"])
 
         prompt_cost = (total_prompt_tokens / 1_000_000) * pricing["prompt"]
         completion_cost = (total_completion_tokens / 1_000_000) * pricing["completion"]
         exact_cost = prompt_cost + completion_cost
     
-    # Extract the filename or fallback to default
     q_file_label = "default"
     if questions_file:
         q_file_label = Path(questions_file).name
@@ -906,8 +855,8 @@ def _update_leaderboard(
         "run_cost_usd":          round(exact_cost, 6),      
         "inject_metadata":       inject_metadata,
         "accuracy":              round(max(0, getattr(result, "mean_accuracy", -1.0)),  3),
-        "faithfulness":          round(result.mean_faithfulness,               3),
-        "answer_relevancy":      round(result.mean_answer_relevancy,           3),
+        "faithfulness":          round(max(0, result.mean_faithfulness),       3),
+        "answer_relevancy":      round(max(0, result.mean_answer_relevancy),   3),
         "mean_similarity":       round(result.mean_similarity,                 3),
         "coverage_ratio":        round(max(0, getattr(result, "mean_coverage_ratio", -1.0)), 3),
         "context_recall":        round(max(0, result.mean_context_recall),     3),
@@ -915,8 +864,8 @@ def _update_leaderboard(
         "average":               _avg(result),
         "by_format":             getattr(result, "by_format", {}),
         "bl_accuracy":           round(max(0, getattr(baseline_result, "mean_accuracy", -1.0)), 3) if baseline_result else None,
-        "bl_faithfulness":       round(baseline_result.mean_faithfulness,               3) if baseline_result else None,
-        "bl_answer_relevancy":   round(baseline_result.mean_answer_relevancy,           3) if baseline_result else None,
+        "bl_faithfulness":       round(max(0, baseline_result.mean_faithfulness),     3) if baseline_result else None,
+        "bl_answer_relevancy":   round(max(0, baseline_result.mean_answer_relevancy), 3) if baseline_result else None,
         "bl_context_recall":     round(max(0, baseline_result.mean_context_recall),     3) if baseline_result else None,
         "bl_answer_correctness": round(max(0, baseline_result.mean_answer_correctness), 3) if baseline_result else None,
         "bl_average":            _avg(baseline_result) if baseline_result else None,
@@ -928,10 +877,8 @@ def _update_leaderboard(
         try:
             rows = json.loads(leaderboard_path.read_text(encoding="utf-8"))
         except Exception as e:
-            # A corrupted/truncated leaderboard.json (not just "doesn't
-            # exist yet") must not be silently reset to [] and then
-            # overwritten, destroying prior history. Preserve the
-            # unreadable file under a .corrupted-<timestamp> name instead.
+            # Corrupted/truncated leaderboard.json must not be silently reset and
+            # overwritten, destroying history — back it up as .corrupted-<timestamp>.
             import shutil
             from datetime import datetime
             backup_path = leaderboard_path.with_suffix(
@@ -972,7 +919,6 @@ def _run_delete_collection(args) -> None:
     print(f"\nAttempting to delete collection '{args.collection}' from '{args.db_path}'...")
     
     try:
-        # Check if it exists first to provide a better error message
         existing_collections = [c.name for c in client.list_collections()]
         if args.collection not in existing_collections:
             print(f"❌ Error: Collection '{args.collection}' does not exist.")

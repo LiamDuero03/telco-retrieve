@@ -139,19 +139,12 @@ def test_completion_marker_written_when_data_dir_has_no_matching_files(tmp_path)
 
 
 def test_a_failed_background_write_prevents_a_false_completion_marker(data_dir, tmp_path, monkeypatch):
-    """Regression test for a real, confirmed-in-production bug: a
-    background store.add() failure inside the writer thread pool used to
-    be completely silent (wait(db_futures) never checked .exception()) —
-    the run would proceed straight to writing _ingest_complete.json as if
-    every chunk had been persisted. Found via audit_ingestion_grid.py:
-    entire ingestion runs claiming hundreds of thousands of chunks stored
-    while the real ChromaDB collection held a few hundred.
-
-    Patches ChromaStore.add to raise, exactly where a real concurrent-write
-    failure against the SQLite-backed collection would have raised, and
-    confirms the failure is no longer swallowed: no completion marker gets
-    written, and the returned stats reflect the failure.
-    """
+    """Regression: background store.add() failures in the writer thread
+    pool were silent (wait() never checked .exception()), so ingest wrote
+    a completion marker as if every chunk persisted -- caught via
+    audit_ingestion_grid.py showing claimed counts far above real DB
+    counts. Patches ChromaStore.add to raise; confirms no marker is
+    written and stats reflect the failure."""
     embedder = SentenceTransformerEmbedder(model_key="minilm")
     stores = _make_stores(tmp_path, ["none"])
 
@@ -174,25 +167,11 @@ def test_a_failed_background_write_prevents_a_false_completion_marker(data_dir, 
 
 
 def test_a_failed_completion_marker_write_does_not_misreport_a_successful_ingest(data_dir, tmp_path, monkeypatch):
-    """Regression test for a real bug caught by code review: post-write
-    bookkeeping (CSV logging, _write_completion_marker()) used to share
-    the SAME try/except as the embed-and-write loop itself. Every chunk,
-    for every variant, could be fully and correctly stored, and yet a
-    failure in something as low-stakes as writing one variant's small
-    _ingest_complete.json marker would be caught by the same handler that
-    treats a write-critical failure as total data loss -- printing
-    "[ERROR] Bulk multi-enrichment indexing failed" and setting
-    error_files = len(files) for EVERY variant, including ones whose own
-    bookkeeping succeeded fine.
-
-    Patches _write_completion_marker to raise only for one variant
-    ("none") and confirms: (1) chunks_stored/error_files for BOTH variants
-    still accurately reflect that every chunk was actually stored (no
-    false error_files inflation for either variant), (2) the OTHER
-    variant's ("acronym_expansion") completion marker still gets written
-    correctly -- one variant's bookkeeping failure doesn't take down an
-    unrelated variant's.
-    """
+    """Regression: post-write bookkeeping (marker write) used to share the
+    embed-and-write loop's try/except, so one variant's marker-write
+    failure got misreported as total data loss for every variant. Patches
+    _write_completion_marker to fail for one variant only; confirms the
+    other variant's stats/marker are unaffected."""
     embedder = SentenceTransformerEmbedder(model_key="minilm")
     enrichment_strategies = ["none", "acronym_expansion"]
     stores = _make_stores(tmp_path, enrichment_strategies)
@@ -231,18 +210,11 @@ def test_a_failed_completion_marker_write_does_not_misreport_a_successful_ingest
 
 
 def test_writes_are_split_into_sub_batches_never_exceeding_store_max_batch_size(tmp_path, monkeypatch):
-    """Regression test for a real, confirmed-in-production crash: writing
-    615,291 chunks at embed batch=4096 previously accumulated into a
-    SEPARATE write_batch_size=32768 buffer before a single store.add()
-    call fired, which exceeds Chroma's real hard limit
-    (ValueError("Batch size of 32768 is greater than max batch size of
-    5461")) -- and the crash only surfaced after the progress bar had
-    already reported the run 100% done. Forces a store's max_batch_size
-    artificially low and an embed batch_size well above it, then spies on
-    the real ChromaStore.add to confirm no single call ever receives more
-    ids than max_batch_size -- proving the write path actually splits,
-    not just that batch_size alone happens to stay under Chroma's limit.
-    """
+    """Regression: writing 615k chunks accumulated into a write buffer
+    larger than Chroma's real max_batch_size, crashing only after the
+    progress bar reported 100% done. Spies on ChromaStore.add to confirm
+    writes actually split at max_batch_size, not just that batch_size
+    happens to stay under it."""
     embedder = SentenceTransformerEmbedder(model_key="minilm")
     stores = _make_stores(tmp_path, ["none"])
     stores["none"].max_batch_size = 2  # artificially tiny, well below batch_size below
@@ -276,14 +248,10 @@ def test_writes_are_split_into_sub_batches_never_exceeding_store_max_batch_size(
 
 
 def test_chunks_stored_reflects_only_confirmed_writes_on_a_mid_variant_failure(tmp_path, monkeypatch):
-    """Regression test: chunks_stored used to be incremented at EMBED time,
-    before the write was even attempted, so a write failure partway
-    through a variant's buffer still left chunks_stored reporting the
-    full pre-failure total rather than what was actually persisted.
-    Forces the store's second add() call to fail and confirms
-    chunks_stored reflects only the chunks from sub-batches that
-    genuinely succeeded before the failure.
-    """
+    """Regression: chunks_stored used to increment at embed time, not
+    write time, so a mid-buffer write failure over-reported it. Forces
+    the second add() call to fail and confirms the count reflects only
+    sub-batches that actually succeeded."""
     embedder = SentenceTransformerEmbedder(model_key="minilm")
     stores = _make_stores(tmp_path, ["none"])
     stores["none"].max_batch_size = 2

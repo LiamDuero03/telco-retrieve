@@ -1,11 +1,9 @@
-"""Unit tests for _process_file_worker's enrichment_llm_client kwarg
-threading: it must reach enrich_chunks() (for llm_metadata) but must never
-leak into chunk_document()'s kwargs — some chunking strategies (e.g.
-chunk_sliding_window_tokens) have no **kwargs catch-all and would TypeError
-on an unexpected key. Uses a real tiny local file — chunking/enrichment
-here use the real (non-LLM) code paths; only enrich_llm_metadata's actual
-LLM call would need a real client, and that's covered separately in
-test_enrich_llm_metadata.py.
+"""Unit tests for _process_file_worker's enrichment_llm_client kwarg threading:
+must reach enrich_chunks() (for llm_metadata) but never leak into
+chunk_document()'s kwargs — some chunking strategies (e.g.
+chunk_sliding_window_tokens) have no **kwargs catch-all and would TypeError on
+an unexpected key. Uses real (non-LLM) chunking/enrichment code paths; the
+actual LLM call is covered separately in test_enrich_llm_metadata.py.
 """
 from __future__ import annotations
 
@@ -57,10 +55,7 @@ def test_enrichment_llm_client_reaches_enrich_chunks_not_chunk_document(tmp_path
 
 
 def test_enrichment_llm_client_key_never_reaches_chunk_document_kwargs(tmp_path):
-    """chunk_document()'s active_kwargs must not contain
-    enrichment_llm_client — patch chunk_document itself and assert on the
-    kwargs it actually received.
-    """
+    """chunk_document()'s kwargs must not contain enrichment_llm_client."""
     data_dir, file_path = _write_doc(tmp_path)
     fake_client = object()
 
@@ -89,10 +84,8 @@ def test_enrichment_llm_client_key_never_reaches_chunk_document_kwargs(tmp_path)
 
 
 def test_no_kwargs_catchall_strategy_does_not_crash_with_enrichment_llm_client_present(tmp_path):
-    """chunk_sliding_window_tokens has no **kwargs catch-all -- if
-    enrichment_llm_client ever leaked into chunk_document()'s kwargs this
-    would TypeError. Runs for real (no mocking) to prove it end-to-end.
-    """
+    """chunk_sliding_window_tokens has no **kwargs catch-all, so a leaked
+    enrichment_llm_client would TypeError. Runs for real, no mocking."""
     data_dir, file_path = _write_doc(tmp_path)
     fake_client = object()
 

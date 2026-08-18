@@ -1,8 +1,7 @@
 """Unit tests for LocalLLMClient/_LocalCompletionAPI's Authorization header
 behavior and cli/main.py's _get_llm_client() threading of api_key.
 
-No real network calls anywhere here — requests.post is mocked throughout,
-so nothing actually hits a local/vLLM server.
+requests.post is mocked throughout; no real network calls hit a local/vLLM server.
 """
 from __future__ import annotations
 

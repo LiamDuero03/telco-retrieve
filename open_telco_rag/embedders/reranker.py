@@ -46,11 +46,8 @@ def load_reranker(model_key: str = "ms-marco-minilm"):
 class CrossEncoderReranker:
     """Reranks retrieved chunks using a standard cross-encoder model.
 
-    Unlike bi-encoder embedding models which encode query and chunk
-    independently, a cross-encoder takes both together and scores
-    their relevance jointly — significantly more accurate but slower.
-    Use after initial retrieval to rerank a larger candidate set down
-    to a smaller, higher-quality set.
+    Scores query+chunk jointly (unlike bi-encoders, which encode them
+    separately) — more accurate but slower; use on a small candidate set.
     """
 
     DEFAULT_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
@@ -105,10 +102,7 @@ class CrossEncoderReranker:
 # ── OTel reranker (Qwen3-based causal LM) ────────────────────────────────────
 
 class OTelReranker:
-    """Telecom-domain reranker from the OTel model family.
-
-    Uses a Qwen3-based causal LM fine-tuned for relevance scoring on
-    telecom specifications. Scores P(yes) from yes/no logits.
+    """Telecom-domain reranker: Qwen3-based causal LM, scores P(yes) from yes/no logits.
 
     Available models (via load_reranker() or direct):
         farbodtavakkoli/OTel-Reranker-0.6B  (recommended)

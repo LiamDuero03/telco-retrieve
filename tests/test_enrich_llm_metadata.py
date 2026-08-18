@@ -1,13 +1,10 @@
-"""Unit tests for enrich_llm_metadata / _enrich_chunks_async
-(open_telco_rag.core.enrichment) — the LLM-based enrichment strategy.
+"""Unit tests for enrich_llm_metadata / _enrich_chunks_async — the LLM-based
+enrichment strategy.
 
-No real network calls anywhere here — httpx.AsyncClient is mocked
-throughout, same spirit as test_local_llm_client.py's requests.post
-mocking. Exercises the backend-agnostic rewrite specifically: request URL
-built from llm_client.base_url (not hardcoded to OpenRouter), Authorization
-header conditional on llm_client.api_key, and using real LocalLLMClient /
-OpenRouterLLMClient instances (not hand-rolled fakes) so a regression in
-either class's .base_url/.api_key attributes would be caught here too.
+httpx.AsyncClient is mocked throughout, no real network calls. Uses real
+LocalLLMClient/OpenRouterLLMClient instances (not fakes) so a regression in
+their .base_url/.api_key attributes is caught here too; exercises the
+backend-agnostic URL/auth-header construction specifically.
 """
 from __future__ import annotations
 
@@ -36,11 +33,8 @@ def _json_response(content: str, status_ok: bool = True):
 
 
 def _patch_async_client(post_side_effect):
-    """Returns the patch() context manager for httpx.AsyncClient, standing
-    in as an async context manager whose .post() is driven by
-    post_side_effect. Also returns the inner client mock so tests can
-    assert on call_args after the fact.
-    """
+    """Patches httpx.AsyncClient as an async context manager driven by post_side_effect.
+    Returns (patcher, inner client mock) so tests can assert on call_args."""
     client_instance = MagicMock()
     client_instance.post = AsyncMock(side_effect=post_side_effect)
 
@@ -101,6 +95,52 @@ def test_max_tokens_defaults_to_1500():
     assert kwargs["json"]["max_tokens"] == 1500
 
 
+def test_timeout_defaults_to_180_and_is_overridable_via_kwarg():
+    """Regression: a flat 60s httpx timeout under real concurrency was silently
+    dropping chunks whose GPU time had already been spent ("failed for chunk N"
+    with no truncation warning) -- must default higher and stay overridable."""
+    client = LocalLLMClient(base_url="http://localhost:8000/v1")
+    chunks = [_chunk("Some technical content about the AMF.")]
+
+    with patch("httpx.AsyncClient") as mock_client_cls:
+        ctx = MagicMock()
+        ctx.__aenter__ = AsyncMock(return_value=MagicMock(
+            post=AsyncMock(return_value=_json_response("[]"))
+        ))
+        ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = ctx
+
+        enrich_llm_metadata(chunks, llm_client=client)
+        assert mock_client_cls.call_args.kwargs["timeout"] == 180
+
+        enrich_llm_metadata(chunks, llm_client=client, timeout=300)
+        assert mock_client_cls.call_args.kwargs["timeout"] == 300
+
+
+def test_frequency_penalty_defaults_to_0_4_and_is_overridable_via_kwarg():
+    """Regression: some truncations' JSONDecodeError offsets ran 100k+ chars
+    into a 3000-token budget -- a repetition loop, not genuinely long content.
+    frequency_penalty must be sent by default to discourage that."""
+    client = LocalLLMClient(base_url="http://localhost:8000/v1")
+    chunks = [_chunk("Some technical content about the AMF.")]
+
+    patcher, client_mock = _patch_async_client(
+        AsyncMock(return_value=_json_response("[]"))
+    )
+    with patcher:
+        enrich_llm_metadata(chunks, llm_client=client)
+    _, kwargs = client_mock.post.call_args
+    assert kwargs["json"]["frequency_penalty"] == 0.4
+
+    patcher, client_mock = _patch_async_client(
+        AsyncMock(return_value=_json_response("[]"))
+    )
+    with patcher:
+        enrich_llm_metadata(chunks, llm_client=client, frequency_penalty=0.8)
+    _, kwargs = client_mock.post.call_args
+    assert kwargs["json"]["frequency_penalty"] == 0.8
+
+
 def test_max_tokens_override_via_kwarg():
     client = LocalLLMClient(base_url="http://localhost:8000/v1")
     chunks = [_chunk("Some technical content about the AMF.")]
@@ -116,12 +156,8 @@ def test_max_tokens_override_via_kwarg():
 
 
 def test_truncated_response_prints_specific_warning_and_leaves_chunk_unenriched(capsys):
-    """finish_reason == "length" means max_tokens cut the response off
-    mid-generation -- should be reported as a truncation, not a generic
-    parse failure, and the chunk should be safely left unenriched (the
-    truncated content usually also fails json.loads, but the warning
-    should fire regardless of whether it happens to parse).
-    """
+    """finish_reason=="length" means truncation; must warn specifically, not report
+    a generic parse failure, and leave the chunk safely unenriched."""
     client = LocalLLMClient(base_url="http://localhost:8000/v1")
     original = "Some technical content about the AMF."
     chunks = [_chunk(original)]
@@ -204,6 +240,26 @@ def test_dict_wrapped_response_unwraps_first_key():
         result = enrich_llm_metadata(chunks, llm_client=client)
 
     assert "RIC: Radio Intelligent Controller" in result[0].text
+
+
+def test_empty_dict_response_is_treated_as_no_explanations_not_a_crash(capsys):
+    """Regression: a model asked for "nothing notable" sometimes returns {}
+    instead of the requested [] -- list(explanations.keys())[0] on an empty
+    dict raised an unhandled IndexError ("list index out of range"), masking
+    a legitimate empty result as a parse failure. Must leave the chunk
+    unenriched, same as an empty list, with no error printed at all."""
+    client = LocalLLMClient(base_url="http://localhost:8000/v1")
+    original = "Body text with nothing notable in it."
+    chunks = [_chunk(original)]
+
+    patcher, _ = _patch_async_client(
+        AsyncMock(return_value=_json_response("{}"))
+    )
+    with patcher:
+        result = enrich_llm_metadata(chunks, llm_client=client)
+
+    assert result[0].text == original
+    assert "list index out of range" not in capsys.readouterr().out
 
 
 def test_empty_chunk_text_is_skipped_without_a_request():
