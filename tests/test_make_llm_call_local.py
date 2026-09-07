@@ -57,7 +57,7 @@ def test_local_llm_call_sends_authorization_header_when_api_key_given(monkeypatc
 
 
 def test_local_llm_call_falls_back_to_env_vars(monkeypatch):
-    monkeypatch.setenv("LOCAL_LLM_BASE_URL", "http://10.0.0.5:9000/v1")
+    monkeypatch.setenv("LOCAL_LLM_BASE_URL", "http://localhost:9000/v1")
     monkeypatch.setenv("LOCAL_LLM_API_KEY", "env-key")
     captured = {}
 
@@ -71,5 +71,5 @@ def test_local_llm_call_falls_back_to_env_vars(monkeypatch):
     llm_call = make_llm_call("local", model="local-model")
     llm_call("prompt")
 
-    assert captured["url"] == "http://10.0.0.5:9000/v1/chat/completions"
+    assert captured["url"] == "http://localhost:9000/v1/chat/completions"
     assert captured["headers"]["Authorization"] == "Bearer env-key"

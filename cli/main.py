@@ -279,13 +279,13 @@ def main(argv: list[str] | None = None) -> None:
     # ── push-hf ───────────────────────────────────────────────────────────────
     p_push_hf = sub.add_parser("push-hf", help="Push local Chroma+FTS database folder to HF Hub")
     p_push_hf.add_argument("db_path", help="Path to local database directory (e.g. ./runs/run_name)")
-    p_push_hf.add_argument("repo_id", help="Target HF dataset repo ID (e.g. LiamDuero/3gpp-rel19-rag-grid)")
+    p_push_hf.add_argument("repo_id", help="Target HF dataset repo ID (e.g. <your-hf-username>/telco-rag-grid)")
     p_push_hf.add_argument("--path-in-repo", default=None, help="Folder name inside HF repository")
     p_push_hf.add_argument("--public", action="store_true", help="Make dataset public (default: private)")
 
     # ── pull-hf ───────────────────────────────────────────────────────────────
     p_pull_hf = sub.add_parser("pull-hf", help="Pull database folder from HF Hub for evaluation")
-    p_pull_hf.add_argument("repo_id", help="HF dataset repo ID (e.g. LiamDuero/3gpp-rel19-rag-grid)")
+    p_pull_hf.add_argument("repo_id", help="HF dataset repo ID (e.g. <your-hf-username>/telco-rag-grid)")
     p_pull_hf.add_argument("path_in_repo", help="Folder name inside HF repository (e.g. run_name)")
     p_pull_hf.add_argument("--local-dir", default="./runs", help="Local directory to store downloaded DB")
 

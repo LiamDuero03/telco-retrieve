@@ -219,11 +219,7 @@ open-telco-rag ingest 3gpp \
 
 Connectivity is checked once, up front, before any files are processed — a bad endpoint/model fails fast with one clear message instead of every parsing worker independently discovering (and retrying against) a dead server.
 
-**Minimizing LLM calls across a grid**: neither chunking nor enrichment depends on the embedding model — running `ingest_multi_enrichment()` (or the CLI) once per (model × chunking config) reruns those LLM passes for every model, for no benefit. `liam/llm_ingestion_grid.py` (alongside `master_grid.py`/`lumber_chunker_grid.py`, also under `liam/`) enforces the alternative: chunk+enrich each (chunking config, enrichment strategy) pair exactly once, cache it, then only repeat the (cheap, LLM-free) embedding step per model. See that file's module docstring for the full design.
-
-**Adding LLM-based coverage to an already-completed non-LLM `master_grid.py` run**: `master_grid_llm_completion.py` runs *only* the LLM-based work `master_grid.py` itself never covers — `lumber_chunker` chunking (all enrichment variants) plus `llm_metadata` enrichment on top of `master_grid.py`'s existing 4 chunking strategies — for every model in `MODELS`. It imports `MODELS`/`CHUNKING_STRATEGIES`/`ENRICHMENT_STRATEGIES`/`run_name_for()`/`EMBED_BATCH_SIZE_OVERRIDES`/`HF_REPO_ID`/etc. directly from `master_grid.py` rather than duplicating them, so run names and the Hugging Face destination (`final-ingestion-grid/`) match exactly — new runs land alongside the ones `master_grid.py` already pushed, as part of the same grid. Same two-phase, chunk-once/enrich-once, embed-per-model design as `llm_ingestion_grid.py`. Set `LLM_BASE_URL`/`CHUNKING_MODEL`/`ENRICHMENT_MODEL`/`LUMBER_CHUNKER_THETA` at the top of the file before running it.
-
-
+**Minimizing LLM calls across a grid**: neither chunking nor enrichment depends on the embedding model, so for a sweep over many embedding models, chunk and enrich each (chunking config, enrichment strategy) pair once, cache the result, and repeat only the cheap LLM-free embedding step per model — rather than rerunning the LLM passes for every model.
 
 ### Marker preprocessing
 
@@ -516,8 +512,6 @@ open-telco-rag/
 |   ├── chunking_strategies.json     # Central registry for character/token splitters
 |   ├── enrichment_strategies.json   # Central registry for tagging, glossary, & LLM expansion
 │   └── eval_questions/          # evaluation question sets per corpus
-├── liam/                        # personal/experimental grid, audit, and one-off scripts --
-│                                 # not part of the installable package (see liam/README.md)
 └── pyproject.toml
 ```
 
