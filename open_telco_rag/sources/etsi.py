@@ -1,4 +1,4 @@
-"""ETSI specification source — full telecom corpus."""
+"""ETSI specification source - full telecom corpus."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 from open_telco_rag.core.cleaning import base_clean
 from open_telco_rag.core.marker_loader import MarkerMixin
 
-# Map folder name → (doc_type, group)
+# Map folder name -> (doc_type, group)
 _FOLDER_MAP: dict[str, tuple[str, str]] = {
     "gs_ENI":      ("GS", "ENI"),
     "gr_ENI":      ("GR", "ENI"),

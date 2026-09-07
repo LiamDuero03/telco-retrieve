@@ -72,7 +72,7 @@ def test_document_id_falls_back_to_metadata_source_when_doc_id_is_missing():
     assert _document_id(chunk) == "some-file.md"
 
 
-# ── canonical_source_hit — unguarded (store=None), backward compatible ──────
+# ── canonical_source_hit - unguarded (store=None), backward compatible ──────
 
 def test_canonical_source_hit_returns_not_applicable_when_no_canonical_source():
     assert canonical_source_hit([_chunk(doc_id="a::minilm::0")], None) == -1
@@ -173,7 +173,7 @@ def test_canonical_source_hit_with_store_still_returns_not_applicable_for_none_e
     assert canonical_source_hit([_chunk(doc_id="a::minilm::0")], None, store=store) == -1
 
 
-# ── canonical_source_hit(expected_release=...) — same spec, different release ─
+# ── canonical_source_hit(expected_release=...) - same spec, different release ─
 #
 # 3GPP's canonical_source is a spec number alone (e.g. "25401"); it doesn't
 # distinguish releases, and a spec's own metadata never carries version/
@@ -219,7 +219,7 @@ def test_canonical_source_hit_picks_a_later_result_matching_both_source_and_rele
     assert canonical_source_hit(results, "25401", expected_release="Rel-19") == 1
 
 
-# ── exact_chunk_hit — chunk-level, not document-level ───────────────────────
+# ── exact_chunk_hit - chunk-level, not document-level ───────────────────────
 #
 # canonical_source_hit() only proves "a chunk from the right document came
 # back". exact_chunk_hit() proves the literal chunk the question was

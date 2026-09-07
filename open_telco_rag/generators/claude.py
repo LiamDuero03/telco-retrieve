@@ -1,4 +1,4 @@
-"""Claude generator — Anthropic API backend."""
+"""Claude generator - Anthropic API backend."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import time
 
 import anthropic
 
+from open_telco_rag.generators._prompts import DEFAULT_PROMPT_MODE, resolve_system_prompt
 from open_telco_rag.generators._zero_retrieval import zero_retrieval_answer
 
 
@@ -34,12 +35,14 @@ class ClaudeGenerator:
         temperature: float = 0.0,
         max_retries: int   = 3,
         api_key:     str | None = None,
+        prompt_mode: str   = DEFAULT_PROMPT_MODE,
     ):
         self.model       = model
         self.max_tokens  = max_tokens
         self.temperature = temperature
         self.max_retries = max_retries
         self._api_key    = api_key or os.environ.get("ANTHROPIC_API_KEY")
+        self.prompt_mode = prompt_mode
 
         if not self._api_key:
             raise ValueError(
@@ -57,24 +60,14 @@ class ClaudeGenerator:
     ) -> dict:
         """Generate a grounded answer from retrieved chunks.
 
-        response_schema is accepted for interface parity with Local/OpenRouterGenerator
-        but NOT wired up — Claude's structured output is tool-use-based, not the
-        response_format: json_schema those backends use. Silently falls back to
-        free-text (evaluate.py's parser treats this as "not structured"), so mc/tf
-        generation here doesn't get schema-constrained accuracy benefits yet.
+        response_schema is accepted for interface parity but NOT wired up -
+        Claude's structured output is tool-use-based. Falls back to free text.
         TODO: wire Claude tool-use if this backend is ever used as RAG_GENERATOR.
 
-        Returns:
-            dict with keys: answer, sources, chunks_used, retrieved_chunks
+        Returns a dict: answer, sources, chunks_used, retrieved_chunks.
         """
         if not results:
-            # Always the prose form (response_schema=None), never the
-            # structured-JSON one -- Claude never emits structured output
-            # here (see this method's own docstring), so suddenly
-            # returning JSON only on this one code path would be a more
-            # surprising inconsistency than staying prose, which the
-            # shared not-found phrase list already scores correctly. See
-            # generators/_zero_retrieval.py.
+            # Always prose here (Claude never emits structured output); see _zero_retrieval.py.
             return {
                 "answer":           zero_retrieval_answer(None),
                 "sources":          [],
@@ -86,10 +79,7 @@ class ClaudeGenerator:
         sources = list({r.metadata.get("source", "") for r in results})
 
         prompt = (
-            f"You are a {source_type} technical expert. "
-            "Answer the question using only the context provided. "
-            "If the answer is not in the context, say so clearly. "
-            "Be precise and technical.\n\n"
+            f"{resolve_system_prompt(source_type, self.prompt_mode)}\n\n"
             f"Context:\n{context}\n\n"
             f"Question: {question}\n\n"
             "Answer:"
@@ -115,8 +105,7 @@ class ClaudeGenerator:
                 else:
                     raise
 
-        # Anthropic SDK uses input_tokens/output_tokens, not local.py/openrouter.py's
-        # prompt_tokens/completion_tokens -- normalized so evaluate.py reads usage uniformly
+        # Anthropic SDK uses input/output_tokens; normalise to prompt/completion.
         usage = getattr(response, "usage", None)
         prompt_tokens     = getattr(usage, "input_tokens", 0) or 0 if usage else 0
         completion_tokens = getattr(usage, "output_tokens", 0) or 0 if usage else 0
@@ -132,7 +121,6 @@ class ClaudeGenerator:
                 "completion_tokens": completion_tokens,
                 "total_tokens":      prompt_tokens + completion_tokens,
             },
-            # None ("not computed"), not 0.0 -- no pricing table here yet (unlike
-            # openrouter.py's MODEL_PRICING); 0.0 would misread as genuinely free
+            # None, not 0.0: no pricing table here yet.
             "cost": None,
         }

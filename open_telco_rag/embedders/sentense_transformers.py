@@ -54,7 +54,7 @@ class SentenceTransformerEmbedder:
             print(f"Loading embedding model: {self._model_name}")
             load_start = time.perf_counter()
 
-            # cap threads: avoids PyTorch thread thrashing on high-core CPUs (e.g. 95-core RunPod hosts)
+            # Cap threads to avoid thrashing on high-core CPUs.
             if not torch.cuda.is_available():
                 cpu_cores = max(1, min(16, (os.cpu_count() or 2) - 1))
                 torch.set_num_threads(cpu_cores)
@@ -71,8 +71,7 @@ class SentenceTransformerEmbedder:
                     device="cpu"
                 )
 
-            # DIAGNOSTIC: prints once GPU move + first CUDA/HIP context init finish (can
-            # stall on ROCm) -- lets a hang here be distinguished from one in first embed()
+            # Logs once GPU move + first CUDA/HIP init finish.
             print(f"Embedding model ready on {self._model.device} "
                   f"in {time.perf_counter() - load_start:.1f}s")
 
@@ -82,8 +81,7 @@ class SentenceTransformerEmbedder:
 
         optimal_batch_size = 256 if torch.cuda.is_available() else 32
 
-        # DIAGNOSTIC: first embed() is the first real GPU forward pass -- can stall on
-        # VRAM pressure or a hung CUDA/HIP context, so log batch size explicitly here
+        # First embed() is the first real GPU forward pass; log it.
         is_first_embed = not self._first_embed_done
         if is_first_embed:
             print(f"Embedding first batch of this process: {len(texts)} texts "
@@ -92,8 +90,7 @@ class SentenceTransformerEmbedder:
             embed_start = time.perf_counter()
 
         if torch.cuda.is_available():
-            # fp16 weights alone don't guarantee ops dispatch to Tensor Cores; autocast
-            # forces that while still letting sensitive ops (layernorm, softmax) run fp32
+            # autocast forces Tensor Core dispatch while keeping sensitive ops fp32.
             with torch.autocast(device_type="cuda", dtype=torch.float16):
                 embeddings = self._model.encode(
                     texts,

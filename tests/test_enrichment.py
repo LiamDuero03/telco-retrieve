@@ -109,7 +109,7 @@ def test_no_extra_kwargs_still_sets_enriched_flag_but_does_not_prepend_header():
     result = enrich_metadata_tagging(chunks)
 
     assert result[0].metadata == {"enriched": True}
-    assert result[0].text == original_text  # nothing prepended — no header_parts
+    assert result[0].text == original_text  # nothing prepended - no header_parts
 
 
 # ── enrich_chunks dispatch ─────────────────────────────────────────────────────

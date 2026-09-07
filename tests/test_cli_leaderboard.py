@@ -55,7 +55,7 @@ def test_corrupted_leaderboard_is_backed_up_not_silently_discarded(tmp_path, cap
         corpus="3gpp", collection="3gpp_minilm",
     )
 
-    # Starts fresh with just the new row — old content unreadable, not merged, but not lost.
+    # Starts fresh with just the new row - old content unreadable, not merged, but not lost.
     rows = json.loads(leaderboard_path.read_text(encoding="utf-8"))
     assert len(rows) == 1
     assert rows[0]["corpus"] == "3gpp"

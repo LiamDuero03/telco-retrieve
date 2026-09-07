@@ -12,9 +12,7 @@ import argparse
 import sys
 from pathlib import Path
 
-# Fallback path to configs/ (package-relative) when CWD-relative lookup
-# misses — without it, running outside repo root silently falls back to
-# minimal defaults, rejecting valid --strategy/--enrichment choices.
+# Package-relative configs/ fallback when the CWD-relative lookup misses.
 _CONFIGS_DIR = Path(__file__).resolve().parent.parent / "configs"
 
 
@@ -48,8 +46,8 @@ def _load_enrichment_strategies() -> list[str]:
 
 
 def _strategy_requires_llm(strategy: str) -> bool:
-    """Whether a chunking strategy needs an LLM client, per its requires_llm
-    flag in chunking_strategies.json — new LLM strategies just set the flag.
+    """Whether a chunking strategy needs an LLM, per its requires_llm flag in
+    chunking_strategies.json.
     """
     import json
     path = _resolve_config_path("chunking_strategies.json")
@@ -63,9 +61,7 @@ def _strategy_requires_llm(strategy: str) -> bool:
 
 
 def _enrichment_requires_llm(enrichment: str) -> bool:
-    """Same as _strategy_requires_llm but for enrichment strategies — kept
-    separate since chunking and enrichment LLM needs are independent.
-    """
+    """Same as _strategy_requires_llm, for enrichment strategies."""
     import json
     path = _resolve_config_path("enrichment_strategies.json")
     if path is None:
@@ -77,9 +73,7 @@ def _enrichment_requires_llm(enrichment: str) -> bool:
         return False
 
 def main(argv: list[str] | None = None) -> None:
-    # Force UTF-8: Windows consoles often default to cp1252, which can't
-    # encode the emoji in status messages and crashes with UnicodeEncodeError.
-    # hasattr-guarded since stdout/stderr may lack .reconfigure() (e.g. tests).
+    # Force UTF-8 so emoji don't crash cp1252 consoles.
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     if hasattr(sys.stderr, "reconfigure"):
@@ -381,11 +375,8 @@ def _get_store(source_type: str, model_key: str, db_path: str, collection: str =
         collection_name=col,
         metadata={
             "hnsw:space": chosen_space,
-            # Bulk-ingest tuning: raises Chroma's HNSW batch_size/sync_threshold
-            # defaults (~100/~1000) for far fewer syncs on large ingests. Only
-            # takes effect at collection creation; write-throughput only,
-            # doesn't affect search. Safe since mid-run crashes are handled
-            # by pipeline.py's completion-marker mechanism.
+            # Bulk-ingest tuning: fewer HNSW syncs on large ingests.
+            # Collection-creation only; write-throughput only, not search.
             "hnsw:batch_size": 1000,
             "hnsw:sync_threshold": 10000,
         }
@@ -399,12 +390,8 @@ def _get_reranker(model_key: str):
 
 
 def _get_llm_client(backend: str = "local", base_url: str | None = None, api_key: str | None = None):
-    """LLM client for strategies needing one (e.g. lumber_chunker); mirrors
-    _get_embedder's local/openrouter split.
-
-    api_key only applies to backend="local" — falls back to LOCAL_LLM_API_KEY
-    env var when None. Only called when requires_llm is true for the chosen
-    strategy.
+    """LLM client for strategies needing one (e.g. lumber_chunker). api_key
+    applies only to backend="local" (falls back to LOCAL_LLM_API_KEY).
     """
     if backend == "openrouter":
         from open_telco_rag.generators.local_llm import OpenRouterLLMClient
@@ -430,16 +417,13 @@ def _run_ingest(args) -> None:
     source     = _get_source(args.source_type, use_marker=use_marker)
 
     if use_marker and not os.environ.get("DATALAB_API_KEY"):
-        # Otherwise each worker process in Phase 1 discovers this independently,
-        # one failed file at a time — same rationale as the LLM check below.
-        print("\n❌ DATALAB_API_KEY not set — required for --use-marker.")
+        # Fail fast; else each Phase 1 worker discovers it per file.
+        print("\nDATALAB_API_KEY not set - required for --use-marker.")
         print("   Add it to your .env file: DATALAB_API_KEY=your_key_here")
         sys.exit(1)
 
     embed_backend = getattr(args, "embed_backend", "local")
-    # 256 matches SentenceTransformerEmbedder's GPU micro-batch size (old
-    # default of 64 never filled a GPU-optimal batch). CPU-only still works
-    # fine; override with --batch-size on memory-constrained hardware.
+    # 256 matches the GPU micro-batch size; override with --batch-size on tight hardware.
     default_batch_size = 500 if embed_backend == "openrouter" else 256
     batch_size_arg = getattr(args, "batch_size", None) or default_batch_size
     embedder = _get_embedder(args.model, backend=embed_backend)
@@ -470,10 +454,8 @@ def _run_ingest(args) -> None:
         "batch_size": batch_size_arg,
     }
 
-    # LLM-based chunking/enrichment only kick in per their requires_llm flags
-    # (independent — either, both, or neither can apply). Both share one
-    # --llm-backend/--llm-base-url connection; point at a second server if
-    # chunking and enrichment need different models served separately.
+    # LLM chunking/enrichment kick in per their requires_llm flags; both
+    # share one --llm-backend/--llm-base-url connection.
     needs_chunking_llm = _strategy_requires_llm(strategy)
     needs_enrichment_llm = _enrichment_requires_llm(enrichment)
 
@@ -498,8 +480,7 @@ def _run_ingest(args) -> None:
               f"({resolved_base if llm_backend == 'local' else 'openrouter.ai'}) "
               f"— model: {chunking_model}  [{needs_desc}]")
 
-        # Fail fast once here — otherwise each worker process discovers a bad
-        # endpoint/model independently, retrying per file.
+        # Fail fast; else each worker retries a bad endpoint per file.
         print("  Checking LLM connectivity...", end=" ", flush=True)
         try:
             llm_client.completion.create(
@@ -510,7 +491,7 @@ def _run_ingest(args) -> None:
             print("OK")
         except Exception as e:
             print("FAILED")
-            print(f"\n❌ Could not reach the LLM before starting ingestion: {e}")
+            print(f"\nCould not reach the LLM before starting ingestion: {e}")
             print(f"   Backend: {llm_backend}  |  Model: {chunking_model}"
                   + (f"  |  URL: {resolved_base}" if llm_backend == "local" else ""))
             if llm_backend == "local":
@@ -521,9 +502,7 @@ def _run_ingest(args) -> None:
             chunk_kwargs["llm_client"] = llm_client
             chunk_kwargs["model_name"] = chunking_model
         if needs_enrichment_llm:
-            # Different kwarg key from chunking's llm_client: _process_file_worker
-            # pops it before chunk_document(), avoiding a TypeError in strategies
-            # without an llm_client param or **kwargs (e.g. sliding_window_tokens).
+            # Distinct key from chunking's llm_client; popped before chunk_document().
             chunk_kwargs["enrichment_llm_client"] = llm_client
 
     # Pull structural constraints from the strategy definition JSON
@@ -565,7 +544,7 @@ def _run_search(args) -> None:
     if args.rerank:
         reranker = _get_reranker(args.reranker_model)
         print(f"Reranking enabled ({args.reranker_model}) — "
-              f"{args.top_k * 3} candidates → top {args.rerank_top_k}")
+              f"{args.top_k * 3} candidates -> top {args.rerank_top_k}")
 
     results = search(
         args.query,
@@ -619,7 +598,7 @@ def _run_ask(args) -> None:
     if args.rerank:
         reranker = _get_reranker(args.reranker_model)
         print(f"Reranking enabled ({args.reranker_model}) — "
-              f"{args.top_k * 3} candidates → top {args.rerank_top_k}")
+              f"{args.top_k * 3} candidates -> top {args.rerank_top_k}")
 
     results = search(
         args.question,
@@ -653,9 +632,7 @@ def _run_evaluate(args) -> None:
         api_key=getattr(args, "llm_api_key", None),
     )
 
-    # RAG generation's base_url/api_key fall back to the metrics ones
-    # (--llm-base-url/--llm-api-key) unless given their own — lets one GPU
-    # endpoint serve both roles.
+    # RAG base_url/api_key fall back to the metrics ones unless given their own.
     rag_generator_name  = args.rag_generator       or args.generator
     rag_generator_model = args.rag_generator_model or args.generator_model
     rag_base_url = getattr(args, "rag_llm_base_url", None) or getattr(args, "llm_base_url", None)
@@ -700,7 +677,7 @@ def _run_evaluate(args) -> None:
         reranker = None
         if args.rerank:
             reranker = _get_reranker(args.reranker_model)
-            print(f"  Reranker     : {args.reranker_model} → top {args.rerank_top_k}")
+            print(f"  Reranker     : {args.reranker_model} -> top {args.rerank_top_k}")
 
         result, baseline_result = evaluate_corpus(
             corpus            = corpus,
@@ -770,9 +747,7 @@ def _update_leaderboard(
     from datetime import datetime
 
     def _avg(r):
-        # mean_accuracy included since mc/tf correctness got its own field
-        # (see results.py) instead of blending into faithfulness/relevancy —
-        # restores it to "average" for mixed mc+tf+open runs.
+        # mean_accuracy included so "average" covers mixed mc+tf+open runs.
         scores = [getattr(r, "mean_accuracy", -1.0), r.mean_faithfulness, r.mean_answer_relevancy,
                   r.mean_similarity, r.mean_context_recall, r.mean_answer_correctness]
         valid = [s for s in scores if s >= 0]
@@ -790,16 +765,11 @@ def _update_leaderboard(
     total_completion_tokens = sum([getattr(q, "completion_tokens", 0) for q in q_results])
     total_rerank_tokens = sum([getattr(q, "rerank_tokens", 0) for q in q_results])
 
-    # cached_tokens/reasoning_tokens are `int | None` (None = not computed,
-    # not 0 — see results.py); `or 0` needed since the attribute exists but
-    # may be None, so getattr's default alone won't catch it.
+    # cached_tokens/reasoning_tokens can be None; `or 0` handles it.
     total_cached_tokens = sum([(getattr(q, "cached_tokens", 0) or 0) for q in q_results])
     total_reasoning_tokens = sum([(getattr(q, "reasoning_tokens", 0) or 0) for q in q_results])
 
-    # cost is `float | None`: None = not computed (e.g. claude.py has no
-    # pricing table), a real value incl. 0.0 = known (e.g. free local vLLM).
-    # Only fall back to the pricing-matrix estimate when NO question has a
-    # known cost — else a genuine $0.00 run got overwritten with an estimate.
+    # Fall back to the pricing-matrix estimate only when no question has a known cost.
     known_costs = [getattr(q, "cost", None) for q in q_results]
     known_costs = [c for c in known_costs if c is not None]
     if known_costs:
@@ -877,15 +847,14 @@ def _update_leaderboard(
         try:
             rows = json.loads(leaderboard_path.read_text(encoding="utf-8"))
         except Exception as e:
-            # Corrupted/truncated leaderboard.json must not be silently reset and
-            # overwritten, destroying history — back it up as .corrupted-<timestamp>.
+            # Back up a corrupted leaderboard.json rather than overwriting its history.
             import shutil
             from datetime import datetime
             backup_path = leaderboard_path.with_suffix(
                 f".corrupted-{datetime.now():%Y%m%d_%H%M%S}.json"
             )
             shutil.copy2(leaderboard_path, backup_path)
-            print(f"⚠️  Could not parse existing leaderboard at {leaderboard_path} "
+            print(f"Could not parse existing leaderboard at {leaderboard_path} "
                   f"({type(e).__name__}: {e}). Backed up the unreadable file to "
                   f"{backup_path} and starting a fresh leaderboard rather than "
                   f"silently discarding its history.")
@@ -896,7 +865,7 @@ def _update_leaderboard(
         json.dumps(rows, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
-    print(f"\n  Leaderboard updated → {leaderboard_path}  (avg={_avg(result):.3f})")
+    print(f"\n  Leaderboard updated -> {leaderboard_path}  (avg={_avg(result):.3f})")
 
 
 def _run_info(args) -> None:
@@ -921,15 +890,15 @@ def _run_delete_collection(args) -> None:
     try:
         existing_collections = [c.name for c in client.list_collections()]
         if args.collection not in existing_collections:
-            print(f"❌ Error: Collection '{args.collection}' does not exist.")
+            print(f"Error: Collection '{args.collection}' does not exist.")
             print(f"Available collections: {', '.join(existing_collections) if existing_collections else 'None'}")
             return
 
         client.delete_collection(name=args.collection)
         FTSStore(path=args.db_path, collection_name=args.collection).delete()
-        print(f"✅ Successfully deleted collection '{args.collection}'.")
+        print(f"Deleted collection '{args.collection}'.")
     except Exception as e:
-        print(f"❌ Failed to delete collection: {e}")
+        print(f"Failed to delete collection: {e}")
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""TM Forum specification source — full corpus."""
+"""TM Forum specification source - full corpus."""
 
 from __future__ import annotations
 
@@ -166,7 +166,7 @@ class TMForumSource(MarkerMixin):
     # ── Loaders ───────────────────────────────────────────────────────────
 
     def _load_docx(self, path: Path) -> str:
-        # DOCX uses python-docx only — Marker requires WeasyPrint/GTK (not available on Windows)
+        # DOCX uses python-docx only - Marker requires WeasyPrint/GTK (not available on Windows)
         try:
             from docx import Document
         except ImportError:

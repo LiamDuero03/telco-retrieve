@@ -84,8 +84,7 @@ def chunk_hierarchical_markdown(
 
         header_match = re.match(r"^(#{1,5})\s+(.*)$", part.strip())
         if header_match:
-            # Must flush under the PREVIOUS heading before updating active_heading_attr,
-            # or this flush mislabels content with the heading about to start.
+            # Flush under the previous heading before updating active_heading_attr.
             if current_text_block.strip():
                 chunks.append(Chunk(
                     text=current_text_block.strip(),
@@ -232,7 +231,7 @@ def chunk_parent_child(
     source_type: str = "",
     **kwargs: Any,
 ) -> list[Chunk]:
-    """Strategy 3: two-tier retrieval — large parent segments broken down
+    """Strategy 3: two-tier retrieval - large parent segments broken down
     into small, targeted child vectors.
     """
     parent_chunks = chunk_hierarchical_markdown(text, chunk_size=parent_size, source_type=source_type)
@@ -285,19 +284,19 @@ def chunk_lumber_chunker(
     llm_client: Any,
     model_name: str = "openai/gpt-4o-mini",
     source_type: str = "",
-    theta: int = 550,  # Optimal token context window from the paper
-    **kwargs: Any,  # Absorbs chunk_size/overlap from the CLI; unused — sized via theta instead
+    theta: int = 550,  # token context window (from the paper)
+    **kwargs: Any,  # absorbs unused CLI chunk_size/overlap
 ) -> list[Chunk]:
-    """Strategy 4: LumberChunker adapted for 3GPP Technical Specs.
-    Splits by major Markdown headers to process sections concurrently,
-    then runs the paper's rolling-window shift-detection inside each section.
+    """Strategy 4: LumberChunker adapted for 3GPP specs. Splits by major
+    Markdown headers, then runs the paper's rolling-window shift-detection
+    per section, concurrently.
     """
     if not text or not text.strip():
         return []
 
     tokenizer = tiktoken.get_encoding("cl100k_base")
 
-    # Split on top-level headers first, so the LLM never crosses a major clause boundary
+    # Split on top-level headers so the LLM never crosses a major clause boundary.
     section_pattern = re.compile(r"(^##?\s+.*$)", re.MULTILINE)
     parts = section_pattern.split(text)
     
@@ -335,12 +334,12 @@ def chunk_lumber_chunker(
                 group_tokens += len(tokenizer.encode(para_text))
                 curr_slice_idx += 1
 
-            # Last paragraph or end reached: consume the remaining group whole
+            # Last paragraph or end reached: consume the group whole.
             if len(group_paras) <= 1 or p_idx == N - 1:
                 section_chunks.append("\n\n".join([p.split(": ", 1)[1] for p in group_paras]))
                 break
 
-            # Prompt exactly as specified in the LumberChunker paper (Appendix B)
+            # Prompt from the LumberChunker paper, Appendix B.
             document_context = "\n".join(group_paras)
             system_prompt = (
                 "You will receive as input an English document with paragraphs identified by 'ID XXXX: <text>'.\n"
@@ -362,18 +361,16 @@ def chunk_lumber_chunker(
 
                 if match:
                     shift_id = int(match.group(1))
-                    # Guard against the LLM returning an out-of-window ID
-                    if p_idx < shift_id < curr_slice_idx:
-                        # Chunk spans p_idx up to (but excluding) shift_id
+                    if p_idx < shift_id < curr_slice_idx:  # ignore out-of-window IDs
                         chunk_text = "\n\n".join(paragraphs[p_idx:shift_id])
                         section_chunks.append(chunk_text)
-                        p_idx = shift_id  # Next group starts where the shift occurred
+                        p_idx = shift_id
                         continue
 
                 raise ValueError("Invalid or out-of-bounds ID returned.")
 
             except Exception:
-                # LLM call failed or returned garbage: fall back to a fixed-size block
+                # LLM failed or returned garbage: fall back to a fixed-size block.
                 fallback_limit = min(p_idx + 3, N)
                 chunk_text = "\n\n".join(paragraphs[p_idx:fallback_limit])
                 section_chunks.append(chunk_text)
@@ -381,14 +378,13 @@ def chunk_lumber_chunker(
 
         return section_chunks
 
-    # Run rolling-window processing concurrently per section
     final_chunks = []
     global_idx = 0
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
         futures = {executor.submit(process_section, sec, i): i for i, sec in enumerate(sections)}
 
-        # Preserve original section order despite concurrent completion
+        # Preserve section order despite concurrent completion.
         ordered_results = [None] * len(sections)
         for future in concurrent.futures.as_completed(futures):
             idx = futures[future]
@@ -408,17 +404,12 @@ def chunk_lumber_chunker(
 
     return final_chunks
 
-# --- Infrastructure Interface Entry Point ---
-
 def calculate_token_budget_safe_kwargs(strategy_str: str, chunk_size: int, overlap: int, enrichment: str) -> tuple[int, int]:
-    """
-    Adjusts token limits if post-chunking enrichment metadata tagging expands the token footprint.
-    """
+    """Shrink token limits to leave room for a metadata-tagging prefix."""
     allocated_chunk_size = chunk_size
     allocated_overlap = overlap
-    
+
     if strategy_str == "sliding_window_tokens" and enrichment == "metadata_tagging":
-        # Reserve buffer for the enrichment prefix so tokens don't overflow
         TOKEN_RESERVATION_BUFFER = 64
         allocated_chunk_size = max(128, chunk_size - TOKEN_RESERVATION_BUFFER)
         allocated_overlap = max(0, overlap - int(TOKEN_RESERVATION_BUFFER * 0.2))
@@ -453,13 +444,11 @@ def chunk_document(
             )
 
     strategy_str = strategy.value
-    # pop, not get: enrichment isn't a real chunker param, and
-    # chunk_sliding_window_tokens has no **kwargs to absorb it — get() left
-    # it in kwargs and crashed with TypeError when passed directly.
+    # pop: enrichment isn't a chunker param and sliding_window has no **kwargs.
     enrichment = kwargs.pop("enrichment", "none")
 
     if strategy == ChunkingStrategy.SLIDING_WINDOW_TOKENS:
-        # Accept either generic (chunk_size) or specific (chunk_tokens) names
+        # Accept generic (chunk_size) or specific (chunk_tokens) names.
         raw_size = kwargs.get("chunk_tokens", kwargs.get("chunk_size", 512))
         raw_overlap = kwargs.get("overlap_tokens", kwargs.get("overlap", 50))
 
@@ -470,7 +459,7 @@ def chunk_document(
         kwargs["chunk_tokens"] = safe_size
         kwargs["overlap_tokens"] = safe_overlap
 
-        # Remove now-duplicate generic keys to avoid conflicting kwargs
+        # Drop now-duplicate generic keys.
         if "chunk_size" in kwargs: del kwargs["chunk_size"]
         if "overlap" in kwargs: del kwargs["overlap"]
 

@@ -1,4 +1,4 @@
-"""CAMARA API specification source — full Fall25 corpus."""
+"""CAMARA API specification source - full Fall25 corpus."""
 
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ class CAMARASource:
         r'^CHANGELOG.*\.md$',        # changelog variants
     ]
 
-    # ── Path component exclusions (any path component matching → skip) ─────────
+    # ── Path component exclusions (any path component matching -> skip) ─────────
     EXCLUDED_PATH_PARTS = {
         ".github",
         "test_definitions",

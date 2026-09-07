@@ -1,8 +1,8 @@
 """
-Tier 2 metrics — ground truth required.
+Tier 2 metrics - ground truth required.
 
-  context_recall      — reference answer statements found in retrieved chunks
-  answer_correctness  — factual F1 + semantic similarity vs reference answer
+  context_recall      - reference answer statements found in retrieved chunks
+  answer_correctness  - factual F1 + semantic similarity vs reference answer
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ def context_recall(
 
     Score = supported_statements / total_statements
     1.0 = all reference statements are in the retrieved context.
-    0.0 = none are — retrieval completely missed the relevant content.
+    0.0 = none are - retrieval completely missed the relevant content.
     """
     if not reference_answer or not chunks:
         return 0.0
@@ -110,13 +110,13 @@ Reference answer:
     try:
         raw = llm_call(f1_prompt, 300)
         if debug:
-            _debug_log("answer_correctness", "f1 → raw response", raw)
+            _debug_log("answer_correctness", "f1 -> raw response", raw)
         obj       = parse_json(raw)
         correct   = max(0, int(obj.get("correct", 0)))
         incorrect = max(0, int(obj.get("incorrect", 0)))
         missing   = max(0, int(obj.get("missing", 0)))
         if debug:
-            _debug_log("answer_correctness", "f1 → parsed",
+            _debug_log("answer_correctness", "f1 -> parsed",
                        f"correct={correct} incorrect={incorrect} missing={missing}")
         precision = correct / (correct + incorrect) if (correct + incorrect) > 0 else 0.0
         recall    = correct / (correct + missing)   if (correct + missing)   > 0 else 0.0
@@ -126,7 +126,7 @@ Reference answer:
         logger.warning("answer_correctness: f1 raised %s: %s — scoring 0.0",
                         type(e).__name__, e)
         if debug:
-            _debug_log("answer_correctness", "f1 → exception", str(e))
+            _debug_log("answer_correctness", "f1 -> exception", str(e))
         f1 = 0.0
 
     try:
@@ -140,7 +140,7 @@ Reference answer:
         logger.warning("answer_correctness: embedding raised %s: %s — scoring 0.0",
                         type(e).__name__, e)
         if debug:
-            _debug_log("answer_correctness", "embedding → exception", str(e))
+            _debug_log("answer_correctness", "embedding -> exception", str(e))
         sem = 0.0
 
     return weight * f1 + (1.0 - weight) * sem

@@ -4,7 +4,9 @@ Evaluation orchestrator for Open Telco RAG.
 
 from __future__ import annotations
 
+import concurrent.futures
 import json
+import logging
 import re
 import time
 import tiktoken
@@ -12,7 +14,21 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
+from tqdm import tqdm
+
+
+class _TqdmLoggingHandler(logging.Handler):
+    """Routes logging.warning() through tqdm.write() so warnings don't break
+    an active progress bar. Installed for one evaluate_corpus() call."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            tqdm.write(self.format(record))
+        except Exception:
+            self.handleError(record)
+
 from open_telco_rag.evaluation._claude import claude_call
+from open_telco_rag.generators._prompts import DEFAULT_PROMPT_MODE
 from open_telco_rag.evaluation.questions import EvalQuestion, load_questions
 from open_telco_rag.evaluation.results import (
     QuestionResult, CorpusResult, aggregate, save_results, print_summary,
@@ -33,10 +49,19 @@ def _build_generator(
     model_name: str | None = None,
     base_url: str | None = None,
     api_key: str | None = None,
+    timeout: int = 60,
+    temperature: float = 0.0,
+    max_tokens: int = 1000,
+    prompt_mode: str = DEFAULT_PROMPT_MODE,
 ):
-    """Construct the RAG-answer Generator ("claude", "openrouter", or "local")
-    for pipeline.generate(). Same three backends make_llm_call() supports for
-    the judge, so --rag-generator and --generator select independently.
+    """Construct the RAG-answer Generator ("claude", "openrouter", or
+    "local") for pipeline.generate().
+
+    temperature only matters for self-consistency (n_generations>1).
+    prompt_mode: see generators/_prompts.py. Raise max_tokens for
+    reasoning-capable OpenRouter models, whose reasoning tokens share the
+    completion budget and can leave the visible answer empty. ClaudeGenerator
+    ignores the temperature/prompt_mode/max_tokens overrides here.
     """
     if generator_name == "claude":
         from open_telco_rag.generators.claude import ClaudeGenerator
@@ -44,11 +69,15 @@ def _build_generator(
 
     if generator_name == "local":
         from open_telco_rag.generators.local import LocalGenerator
-        return LocalGenerator(model=model_name or "local-model", base_url=base_url, api_key=api_key)
+        return LocalGenerator(model=model_name or "local-model", base_url=base_url,
+                               api_key=api_key, timeout=timeout, temperature=temperature,
+                               max_tokens=max_tokens, prompt_mode=prompt_mode)
 
     # openrouter (default)
     from open_telco_rag.generators.openrouter import OpenRouterGenerator
-    return OpenRouterGenerator(model=model_name or "meta-llama/llama-3.1-8b-instruct")
+    return OpenRouterGenerator(model=model_name or "meta-llama/llama-3.1-8b-instruct",
+                                timeout=timeout, temperature=temperature, max_tokens=max_tokens,
+                                prompt_mode=prompt_mode)
 
 def _local_token_count(text: str) -> int:
     """Calculates tokens locally using the cl100k_base encoding."""
@@ -61,12 +90,8 @@ def _local_token_count(text: str) -> int:
         return int(len(str(text).split()) * 1.3)
 
 def _snapshot_llm_usage(llm_call: Callable[[str, int], str]) -> tuple[int, int]:
-    """(cumulative prompt_tokens, completion_tokens) recorded so far on
-    llm_call — reads attributes _claude.py's call wrappers accumulate on
-    the callable itself, keeping the plain Callable[[str, int], str]
-    signature metrics functions expect. (0, 0) for any llm_call that
-    doesn't track usage; evaluate_question() takes the delta between two
-    snapshots, so an untracked callable just contributes (0, 0).
+    """(cumulative prompt_tokens, completion_tokens) recorded on llm_call by
+    _claude.py's wrappers. (0, 0) for a callable that doesn't track usage.
     """
     return (
         getattr(llm_call, "total_prompt_tokens", 0),
@@ -74,62 +99,79 @@ def _snapshot_llm_usage(llm_call: Callable[[str, int], str]) -> tuple[int, int]:
     )
 
 
-def _build_baseline_generator(llm_call: Callable[[str, int], str]):
-    """Generator that answers from LLM knowledge only — no context chunks."""
+def _build_baseline_generator(llm_call: Callable[[str, int], str], max_tokens: int = 1000):
+    """Generator that answers from LLM knowledge only - no context chunks.
+    Raise max_tokens for reasoning-capable OpenRouter models.
+    """
     class _BaselineGenerator:
         def generate(
             self, question: str, results: list, source_type: str = "telecom",
             response_schema: dict | None = None,
         ) -> dict:
-            # response_schema accepted for interface parity but unused — llm_call
-            # is a bare Callable with no structured-output mechanism. Callers still
-            # get free text; _parse_structured_verdict() falls back to prose parsing.
+            # response_schema accepted for parity but unused; llm_call has no
+            # structured-output mechanism (falls back to prose parsing).
             prompt = (
                 f"You are a {source_type} technical expert. "
                 "Answer the following question based on your knowledge. "
                 "Be precise and technical.\n\n"
                 f"Question: {question}\n\nAnswer:"
             )
-            answer = llm_call(prompt, max_tokens=1000)
+            # Before/after delta on llm_call's thread-local usage/cost
+            # tracking, to surface real usage/cost into this dict.
+            prompt_before, completion_before = (
+                getattr(llm_call, "total_prompt_tokens", 0), getattr(llm_call, "total_completion_tokens", 0),
+            )
+            cost_before = getattr(llm_call, "total_cost", None)
+            answer = llm_call(prompt, max_tokens=max_tokens)
+            prompt_after, completion_after = (
+                getattr(llm_call, "total_prompt_tokens", 0), getattr(llm_call, "total_completion_tokens", 0),
+            )
+            cost_after = getattr(llm_call, "total_cost", None)
+
+            usage = {}
+            if hasattr(llm_call, "total_prompt_tokens"):
+                usage = {
+                    "prompt_tokens":     prompt_after - prompt_before,
+                    "completion_tokens": completion_after - completion_before,
+                    "total_tokens":      (prompt_after - prompt_before) + (completion_after - completion_before),
+                }
+            # cost_before is None only because nothing accumulated on this
+            # thread yet -> treat as 0.0. cost_after None means the backend
+            # never computes a cost (local vLLM, Claude).
+            cost = (cost_after - (cost_before or 0.0)) if cost_after is not None else None
+
             return {
                 "answer":           answer,
                 "sources":          [],
                 "chunks_used":      0,
                 "retrieved_chunks": [],
+                "usage":            usage,
+                "cost":             cost,
             }
     return _BaselineGenerator()
 
 
-# Words a free-text tf answer uses for TRUE/FALSE when a reasoning model
-# explains before concluding (e.g. "No, because..."). Deliberately just
-# YES/NO, not CORRECT/INCORRECT — those are unsafe near negation ("this is
-# NOT correct" means FALSE, but matching "correct" alone would say TRUE).
+# TRUE/FALSE words a free-text tf answer might use. Just YES/NO -
+# CORRECT/INCORRECT is unsafe near negation.
 _TF_WORD_TO_BOOL: dict[str, str] = {
     "TRUE": "TRUE", "YES": "TRUE",
     "FALSE": "FALSE", "NO": "FALSE",
 }
 
-# Option letter as its own token at the very start of the answer (e.g. "B)
-# The E2 interface."). Excludes "I" — virtually always the pronoun ("I
-# believe..."), never a real option letter; a genuine lettered "I" option
-# is still caught by _MC_EXPLICIT_RE below.
+# Option letter as its own token at the start ("B) ..."). Excludes "I" (the pronoun).
 _MC_NEAR_START_RE = re.compile(r"^[\s*`\"']*([A-HJ-Z])\b")
-# Explicit "answer is B" / "option B" / "(B)" phrasing anywhere, for a
-# reasoning model that concludes with the letter. "(?:\s+IS)?" specifically
-# handles "the answer is B" — a plain punctuation-only gap excludes "IS"
-# (uppercase letters, not punctuation), so it would never match otherwise.
-# Only special-cases "IS" so negation safety is preserved ("ANSWER IS NOT
-# B" still fails to capture a letter).
+# "answer is B" / "option B" / "(B)" anywhere. "(?:\s+IS)?" handles "the
+# answer is B" while keeping negation safety ("ANSWER IS NOT B" captures nothing).
 _MC_EXPLICIT_RE = re.compile(r"(?:ANSWER|OPTION)(?:\s+IS)?[^A-Z0-9]{0,5}\(?([A-Z])\)?\b")
-_TF_EXPLICIT_RE = re.compile(r"ANSWER IS (TRUE|FALSE)\b")
+# BOOLEAN as an equivalent label to ANSWER: baseline prose answers
+# "**boolean**: false", not "ANSWER IS FALSE".
+_TF_EXPLICIT_RE = re.compile(r"(?:ANSWER|BOOLEAN)(?:\s+IS)?[^A-Z0-9]{0,5}(TRUE|FALSE)\b")
 
 
 def _mc_committed_letter(clean_ans: str) -> str | None:
-    """Returns the option letter clean_ans commits to (any letter, not just
-    a check against one specific reference), or None. Detecting ANY
-    commitment (not "does it match the reference") is what makes running
-    this before the abstention check safe — see _match_deterministic_answer_
-    prose()'s docstring."""
+    """The option letter clean_ans commits to (any letter), or None.
+    Detecting any commitment first is what makes running this before the
+    abstention check safe."""
     near_start = _MC_NEAR_START_RE.match(clean_ans)
     if near_start:
         return near_start.group(1)
@@ -144,8 +186,7 @@ def _tf_committed_bool(clean_ans: str) -> str | None:
     _mc_committed_letter()'s "detect ANY commitment first" reasoning."""
     if clean_ans in ("TRUE", "FALSE"):
         return clean_ans
-    # Checked as its own WORD among the first few, not a substring — avoids
-    # picking up "not false"/"falsely" buried in the explanation.
+    # Checked as a whole word, not a substring (avoids "not false"/"falsely").
     first_words = re.findall(r"[A-Z']+", clean_ans)[:3]
     for w in first_words:
         if w in _TF_WORD_TO_BOOL:
@@ -157,86 +198,22 @@ def _tf_committed_bool(clean_ans: str) -> str | None:
 
 
 def _match_deterministic_answer_prose(answer: str, reference_answer: Any, answer_type: str) -> str:
-    """FALLBACK ONLY — see _match_deterministic_answer(), the real entry
-    point. Used for legacy results (pre-structured-generation) and when a
-    generator/server doesn't honor response_format: json_schema (returns
-    free text instead — see _parse_structured_verdict()). Classifies an
-    mc/tf answer against reference_answer as "correct"/"incorrect"/
-    "abstained".
+    """FALLBACK ONLY - see _match_deterministic_answer(). Classifies an
+    mc/tf free-text answer against reference_answer as
+    "correct"/"incorrect"/"abstained".
 
-    Three confirmed production bugs were fixed here, all from the same
-    root cause (inferring a verdict from free prose after the fact) —
-    kept only as the fallback now that structured generation avoids the
-    whole class of bug:
-    1. Original matching was exact/prefix-match against raw text, so any
-       reasoning model that explains before concluding ("No, because...")
-       never matched — confirmed via a grid where mc/tf accuracy was
-       exactly 0/120 across all 24 combos despite many answers being
-       substantively correct.
-    2. A punctuation-only gap regex excluded the word "IS", so "the
-       answer is B" never matched (fixed by _MC_EXPLICIT_RE's optional
-       "(?:\\s+IS)?").
-    3. Abstention-phrase matching ran BEFORE commitment-detection, so an
-       answer that clearly committed to a letter but explained away a
-       wrong option using "not mentioned" (also on _is_not_found_answer's
-       phrase list) was misclassified "abstained" — silently capping
-       wrong_rate at 0.0. Fixed by checking commitment first; an
-       abstention phrase after a committed answer is just reasoning
-       prose, not real abstention.
+    Commitment (any letter / TRUE-FALSE word) is checked FIRST, abstention
+    phrases SECOND - so an answer that commits to a letter and then explains
+    a wrong option away with "not mentioned" isn't misread as an abstention.
+    Detecting ANY commitment (not just the reference letter) keeps a
+    wrong-but-confident answer scored "incorrect", not "abstained".
 
-    Still intentionally conservative: only a handful of yes/no phrasings
-    and near-start/explicit letter patterns are recognized. An unmatched,
-    non-abstained answer means the generator's phrasing doesn't map to
-    the reference's canonical form — worth surfacing as a prompt-template
-    issue, not silently guessed at.
+    "abstained" is tracked separately from "incorrect": an honest "not
+    enough context" points at retrieval, a confident wrong answer at
+    generation, and collapsing them would reward forced-guessing.
 
-    "abstained" is tracked separately from "incorrect" because an honest
-    "not enough context" points at retrieval/chunking, while a confident
-    wrong answer points at generation/reasoning — collapsing them would
-    also reward forced-guessing (tf's ~50% random floor beats honest
-    abstention in raw accuracy despite being less informative).
-
-    "abstained" (a real design distinction, not just a bug fix): a
-    generator honestly saying the provided context doesn't contain
-    enough information to answer is a DIFFERENT failure than confidently
-    picking the wrong letter/boolean — one points at retrieval/chunking
-    (nothing relevant was ever surfaced), the other at generation/judge
-    reasoning (something relevant WAS surfaced, but the model still got
-    it wrong). Collapsing both into "incorrect" (accuracy=0.0, same as a
-    genuinely wrong guess) makes those two completely different problems
-    indistinguishable in the aggregate numbers — and worse, would reward
-    forced-guessing: a generator that never abstains lands on tf's ~50%
-    random-guess floor by chance alone, which looks "better" than honest
-    abstention despite being strictly less informative about retrieval
-    quality.
-
-    Commitment (letter/boolean) is checked FIRST, abstention SECOND —
-    NOT the reverse. Real, confirmed bug this fixes: a real mc answer
-    read "The answer is A.\n\nJustification: ... The other options
-    (allocating additional IP addresses or a UE-initiated handover) are
-    not mentioned as conditions that cause an Update Bearer Request." —
-    a clean, unambiguous commitment to A, whose justification explains
-    why the OTHER options are wrong (completely normal mc reasoning) using
-    the phrase "not mentioned" — which is also on _is_not_found_answer_mc_tf()'s
-    phrase list. With abstention checked FIRST (the original ordering),
-    this answer was misclassified as "abstained" despite committing to a
-    letter, which silently capped wrong_rate at 0.0 across several real
-    grid combinations (a truly-wrong-but-confident answer that happened to
-    explain away a wrong option this same way would ALSO have been
-    swallowed into "abstained" instead of "incorrect", making wrong_rate
-    look suspiciously clean rather than genuinely zero). Checking
-    commitment first and only falling through to the abstention phrase
-    check when NO letter/boolean was found at all fixes this: an
-    abstention phrase appearing anywhere in an answer that has already
-    committed to a letter/boolean is just normal reasoning prose, not a
-    signal the generator didn't know the answer.
-
-    Critically, commitment-detection here checks for ANY letter/boolean,
-    not just whether reference_answer specifically appears — necessary
-    for this ordering to be safe: an answer committing to the WRONG
-    letter must still be classified "incorrect", not fall through to the
-    abstention check just because ITS specific reference letter wasn't
-    found (see _mc_committed_letter()/_tf_committed_bool()).
+    Conservative: an unmatched, non-abstained answer stays "incorrect" -
+    a prompt-template issue worth surfacing, not guessed at.
     """
     clean_ans = answer.strip().strip(".*`\"'").upper()
     clean_ref = str(reference_answer).strip().upper()
@@ -254,15 +231,10 @@ def _match_deterministic_answer_prose(answer: str, reference_answer: Any, answer
 
 
 # ── Structured, schema-constrained generation (mc/tf) ───────────────────────
-#
-# Root-cause fix instead of another prose-parsing patch: ask the model to
-# emit {"verdict": "answered"|"abstained", "option"/"boolean": ...,
-# "justification": str} via response_format: json_schema (see
-# generators/local.py — same mechanism enrich_llm_metadata() already uses,
-# with a real schema instead of generic json_object mode). When honored,
-# _match_deterministic_answer() reads the fields directly — no regex, no
-# phrase-list matching. _match_deterministic_answer_prose() is the fallback
-# for anything that doesn't honor it.
+# The model emits {"verdict": "answered"|"abstained", "option"/"boolean",
+# "justification"} via response_format: json_schema. When honoured,
+# _match_deterministic_answer() reads the fields directly; the prose parser
+# is the fallback.
 
 def _mc_response_schema(options: dict[str, str]) -> dict:
     """JSON schema for one mc answer. "option" enum is built from this
@@ -296,7 +268,7 @@ def _tf_response_schema() -> dict:
 
 def _response_schema_for(q: EvalQuestion) -> dict | None:
     """The response_format: json_schema payload for THIS question, or
-    None for open questions (no structural change there — free text
+    None for open questions (no structural change there - free text
     stays free text)."""
     if q.answer_type == "mc" and q.options:
         return _mc_response_schema(q.options)
@@ -306,14 +278,10 @@ def _response_schema_for(q: EvalQuestion) -> dict | None:
 
 
 def _parse_structured_verdict(answer: str, answer_type: str) -> dict | None:
-    """Parses answer as the mc/tf structured-verdict JSON object, or None if
-    it isn't one — the signal _match_deterministic_answer() uses to fall
-    back to prose parsing. None (not an exception) covers: server/model
-    doesn't honor json_schema at all; honors json_object generically but not
-    the schema/enum constraint; or legacy free-prose data. Checks for the
-    exact required key for this answer_type ("option"/"boolean") so a
-    wrong-shaped object (e.g. tf schema for an mc question) also falls
-    through to prose rather than being misread.
+    """Parse answer as the mc/tf structured-verdict JSON object, or None if
+    it isn't one (the signal to fall back to prose parsing). Checks the
+    required key for this answer_type ("option"/"boolean") so a wrong-shaped
+    object also falls through.
     """
     try:
         obj = json.loads(answer.strip())
@@ -327,26 +295,16 @@ def _parse_structured_verdict(answer: str, answer_type: str) -> dict | None:
     if required_key not in obj:
         return None
     if answer_type == "tf" and not _normalize_tf_boolean_in_place(obj):
-        # obj["boolean"] is neither a real bool/null nor an unambiguous
-        # "true"/"false" string -- can't trust it enough to classify, and
-        # coercing it with bool() would silently mis-score (bool("false")
-        # is True). Falls through to prose parsing on the raw text instead.
+        # obj["boolean"] isn't a bool/null or an unambiguous "true"/"false"
+        # string; fall through to prose parsing (bool("false") is True).
         return None
     return obj
 
 
 def _normalize_tf_boolean_in_place(obj: dict) -> bool:
-    """Normalizes obj["boolean"] to an actual Python bool/None, mutating
-    obj, and returns whether that succeeded.
-
-    The schema declares boolean as JSON boolean-or-null
-    (_tf_response_schema()), but guided decoding doesn't always enforce
-    that strictly -- a model/server can still emit the JSON STRING "false"
-    instead of the JSON literal false. Recognizes unambiguous string
-    spellings (case/whitespace-insensitive) so a real verdict isn't thrown
-    away; any other type (number, list, an unrecognized string, ...) is
-    rejected rather than guessed at -- see _classify_structured_verdict()'s
-    tf branch, which trusts this field's type unconditionally afterwards.
+    """Normalise obj["boolean"] to a real Python bool/None (mutating obj);
+    returns whether that succeeded. Accepts the JSON string "true"/"false"
+    (some servers emit it); rejects any other type rather than guessing.
     """
     boolean = obj["boolean"]
     if boolean is None or isinstance(boolean, bool):
@@ -362,7 +320,7 @@ def _normalize_tf_boolean_in_place(obj: dict) -> bool:
 def _classify_structured_verdict(obj: dict, reference_answer: Any, answer_type: str) -> str:
     """Classifies an already-parsed structured verdict dict (see
     _parse_structured_verdict()) against reference_answer. No regex, no
-    phrase-list matching — the model already told us directly whether it
+    phrase-list matching - the model already told us directly whether it
     answered or abstained."""
     if obj["verdict"] == "abstained":
         return "abstained"
@@ -371,9 +329,7 @@ def _classify_structured_verdict(obj: dict, reference_answer: Any, answer_type: 
     if answer_type == "mc":
         option = obj.get("option")
         if option is None:
-            # "answered" but option is null — inconsistent response a server
-            # that only validates shape can still emit. Treat as abstained
-            # rather than scoring "incorrect" against a missing answer.
+            # "answered" but option null: treat as abstained, not incorrect.
             return "abstained"
         return "correct" if str(option).strip().upper() == clean_ref else "incorrect"
 
@@ -381,18 +337,15 @@ def _classify_structured_verdict(obj: dict, reference_answer: Any, answer_type: 
     boolean = obj.get("boolean")
     if boolean is None:
         return "abstained"
-    # boolean is guaranteed a real Python bool here, never a stray type
-    # like the string "false" -- see _parse_structured_verdict()'s
-    # _normalize_tf_boolean_in_place() call, which already rejected/
-    # normalized anything else before this object could reach us.
+    # boolean is a real Python bool here (normalised in _parse_structured_verdict).
     ref_is_true = clean_ref in ("TRUE", "YES")
     return "correct" if boolean == ref_is_true else "incorrect"
 
 
 def _match_deterministic_answer(answer: str, reference_answer: Any, answer_type: str) -> str:
-    """Entry point for mc/tf scoring — use this, not the helper functions
+    """Entry point for mc/tf scoring - use this, not the helper functions
     directly. Tries the structured verdict path first (JSON produced under
-    response_format: json_schema — see _response_schema_for()); falls back
+    response_format: json_schema - see _response_schema_for()); falls back
     to prose parsing only when the answer doesn't match that shape.
     """
     structured = _parse_structured_verdict(answer, answer_type)
@@ -401,18 +354,51 @@ def _match_deterministic_answer(answer: str, reference_answer: Any, answer_type:
     return _match_deterministic_answer_prose(answer, reference_answer, answer_type)
 
 
+# ── Self-consistency (n_generations>1 in evaluate_question()) ───────────────
+# Retrieval runs once; generation repeats N times at a non-zero temperature.
+# For mc/tf: extract what each generation committed to, majority-vote on
+# that, then score the winning answer once against ground truth.
+
+def _extract_predicted_value(answer: str, answer_type: str) -> str | None:
+    """The raw predicted option letter (mc) or "TRUE"/"FALSE" (tf) an answer
+    commits to, or None if it abstains / can't be parsed (a votable category
+    of its own). Same structured-first, prose-fallback detection as
+    _match_deterministic_answer(), minus the reference comparison.
+    """
+    structured = _parse_structured_verdict(answer, answer_type)
+    if structured is not None:
+        if structured["verdict"] == "abstained":
+            return None
+        if answer_type == "mc":
+            option = structured.get("option")
+            return str(option).strip().upper() if option is not None else None
+        boolean = structured.get("boolean")
+        return None if boolean is None else ("TRUE" if boolean else "FALSE")
+
+    clean_ans = answer.strip().strip(".*`\"'").upper()
+    committed = _mc_committed_letter(clean_ans) if answer_type == "mc" else _tf_committed_bool(clean_ans)
+    return committed  # None covers abstention and unparseable alike
+
+
+def _majority_vote(values: list) -> tuple[int, dict]:
+    """values[i] is generation i's predicted value (None = abstained, a
+    valid votable category). Returns (winning_index, counts): winning_index
+    is the first value matching the plurality winner (ties broken by first
+    occurrence); counts maps each distinct value to its generation count.
+    """
+    counts: dict = {}
+    for v in values:
+        counts[v] = counts.get(v, 0) + 1
+    winner = max(counts, key=lambda k: counts[k])
+    winning_index = values.index(winner)
+    return winning_index, counts
+
+
 def _build_generation_question(q: EvalQuestion, active_question: str) -> str:
-    """Builds the question text sent to the RAG generator — kept separate
-    from active_question/search_query (used for retrieval) so option
-    text/format instructions never distort which chunks get retrieved.
-
-    The schema (_response_schema_for()) only constrains shape, not meaning,
-    so this text explains what each field means and when to use "abstained"
-    vs "answered", naming fields explicitly.
-
-    Abstention is permitted rather than forcing a guess: bad retrieval
-    should show up as low accuracy, not be masked by landing near tf's ~50%
-    guess floor by chance.
+    """The question text sent to the RAG generator - kept separate from the
+    retrieval query so option text / format instructions don't distort
+    retrieval. Explains each schema field and permits "abstained" rather
+    than forcing a guess.
     """
     if q.answer_type == "mc" and q.options:
         options_text = "\n".join(f"{letter}. {text}" for letter, text in sorted(q.options.items()))
@@ -455,21 +441,35 @@ def evaluate_question(
     rag_generator_name: str = "openrouter",
     rag_base_url:  str | None = None,
     rag_api_key:   str | None = None,
+    rag_generator_timeout: int = 60,
     inject_metadata: bool = False,
     include_keywords: bool = False,
     search_method: str = "dense",
     resolve_parents:  bool = False,
+    n_generations: int = 1,
+    generation_temperature: float | None = None,
+    rag_max_tokens: int = 1000,
+    prompt_mode: str = DEFAULT_PROMPT_MODE,
 ) -> QuestionResult:
-    """Run all applicable metrics for one question."""
+    """Run all applicable metrics for one question.
+
+    n_generations>1: self-consistency. Retrieval runs once; generation
+    repeats N times against the same context, then combined - majority vote
+    on the raw predicted value for mc/tf, averaged judge-metric scores for
+    open. RAG path only (baseline always makes one generation).
+
+    generation_temperature must be non-zero for n_generations>1 to mean
+    anything (else the repeats are byte-identical). None leaves it at 0.0.
+    rag_max_tokens: raise for reasoning-capable OpenRouter models.
+    prompt_mode: RAG branch only.
+    """
     from open_telco_rag.core.pipeline import search, generate
     
     active_question = q.question
     if inject_metadata and q.canonical_source:
         active_question = f"According to {q.corpus.upper()} document {q.canonical_source}, {q.question}"
 
-    # Built from active_question, not generation_question below — options/
-    # format instructions belong in the generation prompt only, and would
-    # distort retrieval if included in the search query.
+    # Retrieval query: no option text / format instructions.
     search_query = active_question
     if include_keywords and getattr(q, "keywords", None):
         kw_str = " ".join(q.keywords) if isinstance(q.keywords, list) else str(q.keywords)
@@ -477,9 +477,7 @@ def evaluate_question(
             search_query = f"{active_question} Keywords: {kw_str}"
 
     generation_question = _build_generation_question(q, active_question)
-    # None for open questions. Passed to both baseline and RAG generate()
-    # calls so mc/tf get schema-constrained verdicts either way.
-    response_schema = _response_schema_for(q)
+    response_schema = _response_schema_for(q)  # None for open questions
 
     result = QuestionResult(
         question=active_question, corpus=q.corpus,
@@ -491,11 +489,12 @@ def evaluate_question(
         start_time = time.perf_counter()
         if baseline:
             retrieved = []
-            generator = _build_baseline_generator(rag_llm_call or llm_call)
+            generator = _build_baseline_generator(rag_llm_call or llm_call, max_tokens=rag_max_tokens)
 
             gen_start = time.perf_counter()
             gen       = generate(generation_question, retrieved, source_type=q.corpus, generator=generator,
                                   response_schema=response_schema)
+            gens = [gen]  # baseline never repeats
             result.gen_latency = time.perf_counter() - gen_start
             result.search_latency = 0.0
         else:
@@ -536,47 +535,67 @@ def evaluate_question(
             generator = _build_generator(
                 rag_generator_name, model_name=rag_model_name,
                 base_url=rag_base_url, api_key=rag_api_key,
+                timeout=rag_generator_timeout,
+                temperature=(generation_temperature or 0.0) if n_generations > 1 else 0.0,
+                max_tokens=rag_max_tokens,
+                prompt_mode=prompt_mode,
             )
-            gen       = generate(generation_question, retrieved, source_type=q.corpus, generator=generator,
-                                  response_schema=response_schema)
+            gens = [
+                generate(generation_question, retrieved, source_type=q.corpus, generator=generator,
+                         response_schema=response_schema)
+                for _ in range(max(1, n_generations))
+            ]
             result.gen_latency = time.perf_counter() - gen_start
+
+        # Pick the representative generation. mc/tf with >1 generation:
+        # majority-vote on the raw predicted value; `gen` becomes the winner
+        # so scoring below is unchanged.
+        if len(gens) > 1 and q.answer_type in ("mc", "tf"):
+            predicted = [_extract_predicted_value(g.get("answer", ""), q.answer_type) for g in gens]
+            winning_index, vote_counts = _majority_vote(predicted)
+            gen = gens[winning_index]
+            result.self_consistency_n = len(gens)
+            result.self_consistency_votes = {
+                ("abstained/unparsed" if k is None else k): v for k, v in vote_counts.items()
+            }
+        else:
+            gen = gens[0]
 
         result.latency = time.perf_counter() - start_time
 
-        # Prefer the generator's real usage block over a tiktoken estimate;
-        # only estimate when usage data is genuinely absent. token_source
-        # records which happened so downstream analysis can tell them apart.
+        # Prefer the generator's real usage over a tiktoken estimate;
+        # token_source records which. Summed across every generation made.
         answer = gen.get("answer", "")
-        usage = gen.get("usage") or {}
-        real_prompt_tokens = usage.get("prompt_tokens")
-        real_completion_tokens = usage.get("completion_tokens")
+        usages = [g.get("usage") or {} for g in gens]
+        prompt_token_list = [u.get("prompt_tokens") for u in usages]
+        completion_token_list = [u.get("completion_tokens") for u in usages]
 
-        if real_prompt_tokens is not None and real_completion_tokens is not None:
-            result.prompt_tokens = real_prompt_tokens
-            result.completion_tokens = real_completion_tokens
-            result.total_tokens = usage.get(
-                "total_tokens", real_prompt_tokens + real_completion_tokens
+        if all(v is not None for v in prompt_token_list) and all(v is not None for v in completion_token_list):
+            result.prompt_tokens = sum(prompt_token_list)
+            result.completion_tokens = sum(completion_token_list)
+            result.total_tokens = sum(
+                u.get("total_tokens", (u.get("prompt_tokens") or 0) + (u.get("completion_tokens") or 0))
+                for u in usages
             )
             result.token_source = "api"
-            prompt_details = usage.get("prompt_tokens_details") or {}
-            completion_details = usage.get("completion_tokens_details") or {}
-            result.cached_tokens = prompt_details.get("cached_tokens")
-            result.reasoning_tokens = completion_details.get("reasoning_tokens")
+            cached_list = [(u.get("prompt_tokens_details") or {}).get("cached_tokens") for u in usages]
+            reasoning_list = [(u.get("completion_tokens_details") or {}).get("reasoning_tokens") for u in usages]
+            result.cached_tokens = sum(c for c in cached_list if c is not None) if any(c is not None for c in cached_list) else None
+            result.reasoning_tokens = sum(r for r in reasoning_list if r is not None) if any(r is not None for r in reasoning_list) else None
         else:
-            # Matches what generate() was actually called with above.
+            # Matches what generate() was actually called with above, once per generation made.
             prompt_payload = generation_question + " ".join([c.text for c in retrieved])
-            result.prompt_tokens = _local_token_count(prompt_payload)
-            result.completion_tokens = _local_token_count(answer)
+            result.prompt_tokens = _local_token_count(prompt_payload) * len(gens)
+            result.completion_tokens = sum(_local_token_count(g.get("answer", "")) for g in gens)
             result.total_tokens = result.prompt_tokens + result.completion_tokens
             result.token_source = "estimated"
             result.cached_tokens = None
             result.reasoning_tokens = None
 
-        # None ("not computed") only when the generator returned no cost at
-        # all (e.g. claude.py, no pricing table) — not unconditionally
-        # zeroed, so genuinely-free (local vLLM) isn't indistinguishable
-        # from never-computed.
-        result.cost = gen.get("cost")
+        # None only when every generation's cost was None (e.g. Claude, no
+        # pricing table); else summed across all generations.
+        costs = [g.get("cost") for g in gens]
+        result.cost = sum(c for c in costs if c is not None) if any(c is not None for c in costs) else None
 
         result.answer  = answer
         result.sources = gen.get("sources", [])
@@ -593,30 +612,64 @@ def evaluate_question(
         if q.answer_type in ("mc", "tf"):
             outcome = _match_deterministic_answer(answer, q.reference_answer, q.answer_type)
 
-            # accuracy is a plain 1.0/0.0 over all mc/tf (abstained = 0.0);
-            # mc_tf_outcome carries the three-way classification aggregate()
-            # uses for mean_accuracy_attempted/abstention_rate/wrong_rate.
+            # accuracy is 1.0/0.0 (abstained = 0.0); mc_tf_outcome carries
+            # the 3-way classification.
             result.mc_tf_outcome = outcome
             result.accuracy = 1.0 if outcome == "correct" else 0.0
             if debug:
-                # Whether the model/server honored json_schema, or fell
-                # back to prose parsing.
+                # Whether json_schema was honoured, or prose fallback.
                 structured = _parse_structured_verdict(answer, q.answer_type) is not None
                 print(f"  [DEBUG] [{q.answer_type}] reference={q.reference_answer!r} "
                       f"outcome={outcome} accuracy={result.accuracy} "
                       f"structured={'yes' if structured else 'NO (prose fallback)'} "
                       f"(answer: {answer[:120]!r})")
         else:
-            # judge_before/after bracket just these four judge calls — taken
-            # here (not at function top) so an earlier RAG/baseline
-            # generation call sharing the same llm_call isn't counted in the
-            # judge-token delta.
+            # Bracket just the judge calls, so an earlier generation call on
+            # the same llm_call isn't counted in the delta.
             judge_before = _snapshot_llm_usage(llm_call)
-            result.faithfulness     = faithfulness(answer, retrieved, llm_call=llm_call, debug=debug)
-            result.answer_relevancy = answer_relevancy(active_question, answer, embedder, llm_call=llm_call, debug=debug)
-            if q.reference_answer:
-                result.context_recall     = context_recall(q.reference_answer, retrieved, llm_call=llm_call, debug=debug)
-                result.answer_correctness = answer_correctness(answer, q.reference_answer, embedder, llm_call=llm_call, debug=debug)
+            if len(gens) > 1:
+                # Self-consistency for open: each judge metric computed per
+                # generation, then averaged (not voted). result.answer stays
+                # gens[0]'s text; the scores reflect all generations.
+                faithfulness_scores = []
+                relevancy_scores = []
+                recall_scores = []
+                correctness_scores = []
+                for g in gens:
+                    g_answer = g.get("answer", "")
+                    # faithfulness/context_recall are undefined with no
+                    # retrieved context; skip for baseline so the -1.0 "not
+                    # applicable" sentinel is kept rather than a misleading 0.0.
+                    if not baseline:
+                        faithfulness_scores.append(faithfulness(g_answer, retrieved, llm_call=llm_call, debug=debug))
+                    relevancy_scores.append(
+                        answer_relevancy(active_question, g_answer, embedder, llm_call=llm_call, debug=debug)
+                    )
+                    if q.reference_answer:
+                        if not baseline:
+                            recall_scores.append(
+                                context_recall(q.reference_answer, retrieved, llm_call=llm_call, debug=debug)
+                            )
+                        correctness_scores.append(
+                            answer_correctness(g_answer, q.reference_answer, embedder, llm_call=llm_call, debug=debug)
+                        )
+                if faithfulness_scores:
+                    result.faithfulness = sum(faithfulness_scores) / len(faithfulness_scores)
+                result.answer_relevancy = sum(relevancy_scores) / len(relevancy_scores)
+                if recall_scores:
+                    result.context_recall = sum(recall_scores) / len(recall_scores)
+                if correctness_scores:
+                    result.answer_correctness = sum(correctness_scores) / len(correctness_scores)
+                result.self_consistency_n = len(gens)
+            else:
+                # See above: faithfulness/context_recall skipped for baseline.
+                if not baseline:
+                    result.faithfulness = faithfulness(answer, retrieved, llm_call=llm_call, debug=debug)
+                result.answer_relevancy = answer_relevancy(active_question, answer, embedder, llm_call=llm_call, debug=debug)
+                if q.reference_answer:
+                    if not baseline:
+                        result.context_recall = context_recall(q.reference_answer, retrieved, llm_call=llm_call, debug=debug)
+                    result.answer_correctness = answer_correctness(answer, q.reference_answer, embedder, llm_call=llm_call, debug=debug)
             judge_after = _snapshot_llm_usage(llm_call)
             result.judge_prompt_tokens = judge_after[0] - judge_before[0]
             result.judge_completion_tokens = judge_after[1] - judge_before[1]
@@ -633,9 +686,8 @@ def evaluate_question(
             result.exact_chunk_hit = exact_chunk_hit(retrieved, q.chunk_id, q.source_text)
             result.coverage_ratio  = coverage_ratio(retrieved, sim_threshold)
 
-            # Separate from canonical_hit so a reader can tell "no ground
-            # truth available" (None) from "rejected as too generic" (False)
-            # — see is_discriminating_source() for the bug this guards against.
+            # Separate from canonical_hit: None = no ground truth, False =
+            # rejected as too generic.
             if q.canonical_source is None:
                 result.canonical_source_discriminating = None
             else:
@@ -670,20 +722,28 @@ def evaluate_corpus(
     reranker:      Any   = None,
     rerank_top_k:  int   = 5,
     debug:         bool  = False,
+    progress_bar:  bool  = False,
+    max_concurrency: int = 1,
     rag_generator_model: str | None = None,
     rag_generator_name: str = "openrouter",
     rag_base_url:  str | None = None,
     rag_api_key:   str | None = None,
+    rag_generator_timeout: int = 60,
+    n_generations: int = 1,
+    generation_temperature: float | None = None,
     inject_metadata: bool = False,
     include_keywords: bool = False,
     search_method: str = "dense",
     resolve_parents:  bool = False,
+    rag_max_tokens: int = 1000,
+    prompt_mode: str = DEFAULT_PROMPT_MODE,
 ) -> tuple[CorpusResult, CorpusResult | None]:
     """Run the full evaluation suite for one corpus.
 
-    Returns:
-        (rag_result, baseline_result) — baseline_result is None if
-        include_baseline=False.
+    rag_max_tokens / prompt_mode: passed through to evaluate_question().
+
+    Returns (rag_result, baseline_result); baseline_result is None if
+    include_baseline=False.
     """
     # Label for the leaderboard/results row.
     questions_source_name = "default"
@@ -701,13 +761,32 @@ def evaluate_corpus(
     
     resolved_rag_model = rag_generator_model or "meta-llama/llama-3.1-8b-instruct"
 
+    # Route logger.warning() through tqdm so it doesn't break the progress
+    # bar. Root logger; removed at the end of this function.
+    _tqdm_log_handler = None
+    if progress_bar:
+        _tqdm_log_handler = _TqdmLoggingHandler()
+        logging.getLogger().addHandler(_tqdm_log_handler)
+
     # ── RAG pass ──────────────────────────────────────────────────────────────
-    rag_results = []
-    for i, q in enumerate(qs, 1):
+    # max_concurrency>1 runs questions through a thread pool; the llm_call
+    # wrappers are blocking requests calls, so the GIL releases during I/O
+    # and N requests overlap. max_concurrency=1 uses the same machinery with
+    # one worker (still sequential). store/embedder are shared read-only
+    # across threads (chromadb supports concurrent readers).
+    rag_results: list[Any] = [None] * len(qs)
+    # tqdm.write() via emit() so output coexists with an active bar.
+    pbar = tqdm(total=len(qs), desc=f"{corpus}/{model} RAG", unit="q") if progress_bar else None
+    emit = pbar.write if pbar else print
+    running_correct = 0
+    running_scored = 0
+
+    def _run_one(idx: int, q: EvalQuestion):
         display_q = q.question
         if inject_metadata and q.canonical_source:
             display_q = f"According to {corpus.upper()} document {q.canonical_source}, {q.question}"
-        print(f"  [RAG {i}/{len(qs)}] {display_q[:65]}...")
+        if not progress_bar:
+            print(f"  [RAG {idx + 1}/{len(qs)}] {display_q[:65]}...")
         qr = evaluate_question(q, store, embedder, top_k, sim_threshold,
                                llm_call=llm_call, rag_llm_call=rag_llm_call,
                                baseline=False, reranker=reranker,
@@ -715,29 +794,58 @@ def evaluate_corpus(
                                rag_model_name=resolved_rag_model,
                                rag_generator_name=rag_generator_name,
                                rag_base_url=rag_base_url, rag_api_key=rag_api_key,
+                               rag_generator_timeout=rag_generator_timeout,
+                               n_generations=n_generations,
+                               generation_temperature=generation_temperature,
                                inject_metadata=inject_metadata,
                                include_keywords=include_keywords,
                                search_method=search_method,
-                               resolve_parents=resolve_parents,)
-        rag_results.append(qr)
-        if qr.error:
-            print(f"    [ERROR] {qr.error}")
-        elif qr.answer_type in ("mc", "tf"):
-            print(f"    accuracy={qr.accuracy:.2f}  sim={qr.mean_similarity:.3f}")
-        else:
-            print(f"    faithful={qr.faithfulness:.2f}  "
-                  f"relevancy={qr.answer_relevancy:.2f}  "
-                  f"sim={qr.mean_similarity:.3f}  "
-                  f"recall={qr.context_recall:.2f}  "
-                  f"correctness={qr.answer_correctness:.2f}")
-        if delay > 0 and i < len(qs):
+                               resolve_parents=resolve_parents,
+                               rag_max_tokens=rag_max_tokens,
+                               prompt_mode=prompt_mode,)
+        if delay > 0:
             time.sleep(delay)
+        return idx, qr
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, max_concurrency)) as executor:
+        futures = [executor.submit(_run_one, i, q) for i, q in enumerate(qs)]
+        # as_completed() so the bar updates as questions finish; rag_results
+        # is written back by index, so ordering is unaffected.
+        for future in concurrent.futures.as_completed(futures):
+            idx, qr = future.result()
+            rag_results[idx] = qr
+            if qr.error:
+                emit(f"    [ERROR] {qr.error}")
+            elif qr.answer_type in ("mc", "tf"):
+                if not progress_bar:
+                    print(f"    accuracy={qr.accuracy:.2f}  sim={qr.mean_similarity:.3f}")
+                running_scored += 1
+                running_correct += qr.accuracy
+            else:
+                if not progress_bar:
+                    print(f"    faithful={qr.faithfulness:.2f}  "
+                          f"relevancy={qr.answer_relevancy:.2f}  "
+                          f"sim={qr.mean_similarity:.3f}  "
+                          f"recall={qr.context_recall:.2f}  "
+                          f"correctness={qr.answer_correctness:.2f}")
+            if pbar:
+                postfix = {}
+                if running_scored:
+                    postfix["acc"] = f"{running_correct / running_scored:.2f}"
+                if qr.error:
+                    postfix["err"] = "yes"
+                pbar.set_postfix(postfix)
+                pbar.update(1)
+    if pbar:
+        pbar.close()
 
     rag_result = CorpusResult(
         corpus=corpus, model=model, top_k=top_k,
         timestamp=datetime.now().strftime("%Y%m%d_%H%M%S"),
         questions_file=questions_source_name,
         question_results=rag_results,
+        rag_generator_model=resolved_rag_model,
+        rag_generator_name=rag_generator_name,
         **aggregate(rag_results),
     )
 
@@ -751,28 +859,39 @@ def evaluate_corpus(
     if include_baseline:
         print(f"\n  Running BASELINE pass ({len(qs)} questions, no retrieval)…")
         bl_results = []
+        bl_pbar = tqdm(total=len(qs), desc=f"{corpus}/{model} baseline", unit="q") if progress_bar else None
+        bl_emit = bl_pbar.write if bl_pbar else print
         for i, q in enumerate(qs, 1):
-            print(f"  [BL  {i}/{len(qs)}] {q.question[:65]}...")
+            if not progress_bar:
+                print(f"  [BL  {i}/{len(qs)}] {q.question[:65]}...")
             qr = evaluate_question(q, store, embedder, top_k, sim_threshold,
                                    llm_call=llm_call, rag_llm_call=rag_llm_call,
-                                   baseline=True, debug=debug)
+                                   baseline=True, debug=debug, rag_max_tokens=rag_max_tokens)
             bl_results.append(qr)
             if qr.error:
-                print(f"    [ERROR] {qr.error}")
+                bl_emit(f"    [ERROR] {qr.error}")
             elif qr.answer_type in ("mc", "tf"):
-                print(f"    accuracy={qr.accuracy:.2f}")
+                if not progress_bar:
+                    print(f"    accuracy={qr.accuracy:.2f}")
             else:
-                print(f"    faithful={qr.faithfulness:.2f}  "
-                      f"relevancy={qr.answer_relevancy:.2f}  "
-                      f"recall={qr.context_recall:.2f}  "
-                      f"correctness={qr.answer_correctness:.2f}")
+                if not progress_bar:
+                    print(f"    faithful={qr.faithfulness:.2f}  "
+                          f"relevancy={qr.answer_relevancy:.2f}  "
+                          f"recall={qr.context_recall:.2f}  "
+                          f"correctness={qr.answer_correctness:.2f}")
+            if bl_pbar:
+                bl_pbar.update(1)
             if delay > 0 and i < len(qs):
                 time.sleep(delay)
+        if bl_pbar:
+            bl_pbar.close()
 
         baseline_result = CorpusResult(
             corpus=corpus, model=model, top_k=0,
             timestamp=datetime.now().strftime("%Y%m%d_%H%M%S"),
             question_results=bl_results,
+            rag_generator_model=resolved_rag_model,
+            rag_generator_name=rag_generator_name,
             **aggregate(bl_results),
         )
 
@@ -781,5 +900,8 @@ def evaluate_corpus(
 
         if output_dir:
             save_results(baseline_result, Path(output_dir) / "baseline")
+
+    if _tqdm_log_handler is not None:
+        logging.getLogger().removeHandler(_tqdm_log_handler)
 
     return rag_result, baseline_result
