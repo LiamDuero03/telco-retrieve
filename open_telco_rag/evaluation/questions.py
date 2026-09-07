@@ -1,7 +1,7 @@
 """
 Evaluation question dataclass and loader.
 
-Questions live in configs/eval_questions/{corpus}.json — one file per corpus.
+Questions live in configs/eval_questions/{corpus}.json - one file per corpus.
 This module handles loading and validation only. No hardcoded questions here.
 """
 
@@ -27,19 +27,10 @@ class EvalQuestion:
     options:          dict | None = None
     canonical_source: str | None = None
     reference_answer: str | None = None   # None until validated by domain expert
-    # chunk_id/source_text: the exact chunk this question was generated from
-    # (see qna_generation's generator._build_record()). None for questions
-    # predating this tracking, or hand-authored ones with no chunk provenance
-    # -- metrics.retrieval.exact_chunk_hit() treats that as "not applicable",
-    # same -1 convention as canonical_source's own not-applicable case.
+    # The exact chunk this question was generated from; None if not tracked.
     chunk_id:         str | None = None
     source_text:      str | None = None
-    # Release the source chunk was ingested from (e.g. "Rel-18"), where the
-    # corpus has a release concept -- 3GPP's canonical_source (a spec
-    # number) doesn't distinguish releases on its own, so
-    # metrics.retrieval.canonical_source_hit() needs this separately to
-    # avoid crediting a hit against a DIFFERENT release of the same spec.
-    # None for corpora without releases, or questions predating this field.
+    # Release the source chunk was ingested from (e.g. "Rel-18"); None where N/A.
     release:          str | None = None
 
     @classmethod
@@ -107,7 +98,7 @@ def load_all_questions(
     Load questions for all supported corpora.
 
     Returns:
-        dict mapping corpus name → list of EvalQuestion
+        dict mapping corpus name -> list of EvalQuestion
     """
     return {
         corpus: load_questions(corpus, questions_dir)

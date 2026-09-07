@@ -1,6 +1,6 @@
 """Unit tests for ETSISource.metadata().
 
-Covers the folder→(doc_type, group) lookup table, its three fallback
+Covers the folder->(doc_type, group) lookup table, its three fallback
 heuristics (prefix/suffix pattern, keyword match, generic "etsi" folder
 stem parsing), and doc_num/version extraction from PDF filenames. The
 .yaml/.yml branch reads file content, so those cases use tmp_path.

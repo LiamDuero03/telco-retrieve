@@ -31,9 +31,7 @@ class ChromaStore:
             metadata=metadata
         )
 
-        # queried, not hardcoded: max batch size derives from sqlite's
-        # SQLITE_MAX_VARIABLE_NUMBER, which varies by build -- callers splitting
-        # large writes (ingest() in core/pipeline.py) must use the real value
+        # Real value from the client; varies by sqlite build.
         self.max_batch_size  = self._client.get_max_batch_size()
 
     def add(
@@ -43,13 +41,26 @@ class ChromaStore:
         documents:  list[str],
         metadatas:  list[dict],
     ) -> None:
-        """Upserts (not insert-only) — re-adding an existing id overwrites it."""
+        """Upserts (not insert-only) - re-adding an existing id overwrites it."""
         self._collection.upsert(
             ids=ids,
             embeddings=embeddings,
             documents=documents,
             metadatas=metadatas,
         )
+
+    def update_metadata(self, ids: list[str], metadatas: list[dict]) -> None:
+        """Merge metadata into already-stored ids in place (embeddings/
+        documents untouched). Matches chromadb .update() semantics: pass only
+        the keys to add/overwrite."""
+        self._collection.update(ids=ids, metadatas=metadatas)
+
+    def get_metadata(self, ids: list[str]) -> list[dict]:
+        """Stored metadata for `ids`, re-mapped to the requested order. An
+        unknown id comes back as {}."""
+        result = self._collection.get(ids=ids, include=["metadatas"])
+        by_id = dict(zip(result["ids"], result["metadatas"]))
+        return [by_id.get(i, {}) for i in ids]
 
     def search(
         self,
@@ -84,8 +95,16 @@ class ChromaStore:
         return len(results["ids"]) > 0
 
     def all_doc_ids(self) -> list[str]:
-        """Every chunk id in this collection (include=[] keeps it a cheap ids-only
-        query even over a full corpus). Used by is_discriminating_source() in
-        evaluation/metrics/retrieval.py to check what fraction of the WHOLE corpus
-        a candidate canonical_source matches, not just one question's retrieved chunks."""
+        """Every chunk id in this collection (cheap ids-only query)."""
         return self._collection.get(include=[])["ids"]
+
+    def close(self) -> None:
+        """Release the SQLite connection(s). Call before deleting a store's
+        directory."""
+        self._client.close()
+
+    def __enter__(self) -> "ChromaStore":
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()

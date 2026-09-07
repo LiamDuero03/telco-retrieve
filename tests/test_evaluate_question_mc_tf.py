@@ -119,7 +119,7 @@ def test_open_question_still_computes_oe_metrics_not_accuracy(monkeypatch):
 # Regression: reasoning models explain before concluding ("No, this is incorrect
 # because...") which pure exact-match/startswith logic never matched, causing
 # mc/tf accuracy=0/120 across a real grid. Separate from parse_json()'s <think>-tag
-# bug (test_claude_parse_json.py) — mc/tf scoring never calls the judge.
+# bug (test_claude_parse_json.py) - mc/tf scoring never calls the judge.
 
 def test_tf_reasoning_style_no_answer_matches_false_reference():
     answer = ("No, this is not correct. According to the specification, the "
@@ -199,7 +199,7 @@ def test_tf_end_to_end_via_evaluate_question_with_reasoning_style_generator(monk
 
 # ── _build_generation_question ──
 # Regression: mc/tf questions used the same generation prompt as open questions
-# — q.options was never referenced, so answers never mentioned an option letter.
+# - q.options was never referenced, so answers never mentioned an option letter.
 
 def test_build_generation_question_includes_options_and_letter_instruction_for_mc():
     q = EvalQuestion(
@@ -296,7 +296,7 @@ def test_tf_end_to_end_generator_receives_true_false_instruction(monkeypatch):
 
 # ── Abstention ──
 # Design: honest abstention is a different failure than confidently guessing wrong
-# — collapsing both into "incorrect" would reward forced-guessing over honesty.
+# - collapsing both into "incorrect" would reward forced-guessing over honesty.
 
 def test_build_generation_question_mc_explicitly_permits_abstention():
     q = EvalQuestion(
@@ -361,7 +361,7 @@ def test_match_deterministic_answer_commitment_is_checked_before_abstention_phra
               "that cause an Update Bearer Request.")
     # Committed to A: correct when reference is A...
     assert _match_deterministic_answer(answer, "A", "mc") == "correct"
-    # ...incorrect (not abstained) when reference differs — proves commitment is checked.
+    # ...incorrect (not abstained) when reference differs - proves commitment is checked.
     assert _match_deterministic_answer(answer, "B", "mc") == "incorrect"
 
 

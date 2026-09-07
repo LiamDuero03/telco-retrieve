@@ -180,7 +180,7 @@ def test_chunk_document_applies_token_budget_adjustment_when_enrichment_kwarg_is
 
     assert [c.text for c in via_document] == [c.text for c in direct]
 
-    # enrichment="none" (the default) must also pass cleanly — old bug crashed regardless of value.
+    # enrichment="none" (the default) must also pass cleanly - old bug crashed regardless of value.
     chunk_document(text, strategy="sliding_window_tokens", chunk_size=100, overlap=10, enrichment="none")
 
 

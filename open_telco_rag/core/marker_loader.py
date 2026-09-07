@@ -1,21 +1,6 @@
-"""
-Shared Marker-based PDF loader using the Datalab hosted API (raw requests).
-
-Requires:
-    pip install requests
-    Set DATALAB_API_KEY in your .env file
-
-Usage in any source class:
-    from open_telco_rag.core.marker_loader import MarkerMixin
-
-    class ORANSource(MarkerMixin):
-        def __init__(self, use_marker: bool = False):
-            super().__init__(use_marker=use_marker)
-
-        def _load_pdf(self, path):
-            if self._use_marker:
-                return self._marker_load(path)
-            # existing pypdf fallback ...
+"""Marker-based PDF loader using the Datalab hosted API. Needs DATALAB_API_KEY
+in .env. Mix MarkerMixin into a source class and call self._marker_load(path)
+when self._use_marker.
 """
 
 from __future__ import annotations
@@ -25,10 +10,7 @@ from pathlib import Path
 
 
 class MarkerMixin:
-    """
-    Mixin that adds optional Marker-based PDF loading to any source class.
-    Uses the Datalab hosted API via raw HTTP requests — no local GPU needed.
-    """
+    """Adds optional Marker-based PDF loading (Datalab hosted API) to a source class."""
 
     def __init__(self, use_marker: bool = False):
         self._use_marker = use_marker
@@ -56,7 +38,7 @@ class MarkerMixin:
         resp.raise_for_status()
         check_url = resp.json()["request_check_url"]
 
-        # Poll until complete (max 10 minutes)
+        # Poll until complete (max ~10 min)
         for _ in range(300):
             result = requests.get(check_url, headers=headers).json()
             if result["status"] == "complete":

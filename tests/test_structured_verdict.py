@@ -107,7 +107,7 @@ def test_parse_structured_verdict_returns_none_for_malformed_json():
     assert _parse_structured_verdict('{"verdict": "answered", "option": ', "mc") is None
 
 
-# ── _parse_structured_verdict — tf "boolean" type guard ──────────────────
+# ── _parse_structured_verdict - tf "boolean" type guard ──────────────────
 #
 # Regression: the schema declares boolean as JSON boolean-or-null, but a
 # model/server can still emit the JSON STRING "false" instead of the JSON
@@ -195,7 +195,7 @@ def test_classify_structured_verdict_tf_answered_but_boolean_null_is_defensively
     assert _classify_structured_verdict(obj, "True", "tf") == "abstained"
 
 
-# ── _match_deterministic_answer — structured path takes priority ────────
+# ── _match_deterministic_answer - structured path takes priority ────────
 
 def test_match_deterministic_answer_uses_structured_path_when_available():
     """Confirms structured JSON is read directly, not via the prose

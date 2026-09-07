@@ -73,7 +73,7 @@ def test_variant_isolation_and_completion_markers(data_dir, tmp_path):
         assert stats[ev].chunks_stored > 0
         assert stores[ev].count() == stats[ev].chunks_stored
 
-    # Real content check — the deep-copy-per-variant isolation actually holds,
+    # Real content check - the deep-copy-per-variant isolation actually holds,
     # not just that both stores independently have "some" chunks.
     none_docs = stores["none"]._collection.get(include=["documents"])["documents"]
     acro_docs = stores["acronym_expansion"]._collection.get(include=["documents"])["documents"]

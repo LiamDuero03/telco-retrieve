@@ -104,7 +104,7 @@ def test_empty_question_list_does_not_crash():
 
 # ── mc_tf_outcome three-way breakdown ───────────────────────────────────────
 # Design requirement: honest abstention (retrieval gap) is a different failure
-# than a confident wrong answer (generation error) — a single accuracy number
+# than a confident wrong answer (generation error) - a single accuracy number
 # can't distinguish them; hence mean_accuracy_attempted/abstention_rate/wrong_rate.
 
 def test_mc_tf_outcome_rates_computed_across_correct_incorrect_abstained():
@@ -257,7 +257,7 @@ def test_mc_tf_outcome_rates_when_every_mc_tf_question_abstained():
     assert agg["mean_accuracy_attempted"] == -1.0
 
 
-# ── weighted_score_pct — the new composite metric ───────────────────────────
+# ── weighted_score_pct - the new composite metric ───────────────────────────
 #
 # score_pct = (1*mc_correct + 1*tf_correct + 5*oe_correct)
 #             / (1*mc_total  + 1*tf_total  + 5*oe_total)

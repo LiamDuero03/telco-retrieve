@@ -1,30 +1,16 @@
-"""LLM clients for pipeline stages needing an LLM during ingestion, not at
-answer-generation time — chunk_lumber_chunker (core/chunking.py) and
-enrich_llm_metadata (core/enrichment.py) use these.
-
-Deliberately a *different* interface from Generator (ClaudeGenerator /
-OpenRouterGenerator): those synthesize RAG answers from retrieved chunks;
-these answer narrow ingestion-time questions, matching what
-chunk_lumber_chunker already expects:
+"""LLM clients for ingestion-time stages (chunk_lumber_chunker,
+enrich_llm_metadata) - a different interface from the RAG-answer Generators.
 
     llm_client.completion.create(model=..., messages=[...])
     -> response.choices[0].message.content
 
-enrich_llm_metadata also reads .base_url/.api_key directly off the client
-(both classes expose these at the top level, not just inside .completion)
-since it builds its own async httpx requests rather than using .completion.create().
+.base_url/.api_key are also exposed at the top level for enrich_llm_metadata's
+own async httpx requests.
 
-Two backends, chosen the same way embeddings are (--embed-backend):
+    LocalLLMClient       - any OpenAI-compatible server, no API cost.
+    OpenRouterLLMClient  - reuses OPENROUTER_API_KEY; validate without a GPU.
 
-    LocalLLMClient      — any OpenAI-compatible server (vLLM, Ollama, etc.),
-                           no API cost, runs on your own GPU node.
-    OpenRouterLLMClient  — reuses OPENROUTER_API_KEY; validates chunk quality
-                           on a laptop/CI without a GPU before a full local run.
-
-Both are intentionally stateless (no open sessions/locks) so they survive
-being pickled into ProcessPoolExecutor workers — ingest() parallelizes
-file-level chunking across OS processes, and a live connection object
-would not reliably cross that boundary.
+Both are stateless so they can be pickled into ProcessPoolExecutor workers.
 """
 from __future__ import annotations
 
@@ -33,7 +19,7 @@ import time
 from typing import Any
 
 
-# ── Shared response shape (mimics the OpenAI SDK's response.choices[0].message.content) ──
+# ── Response shape mimicking the OpenAI SDK ──
 
 class _Message:
     __slots__ = ("content",)
@@ -57,11 +43,7 @@ class _CompletionResponse:
 
 
 class LLMConnectionError(RuntimeError):
-    """Raised when the LLM endpoint can't be reached or returns a bad response.
-
-    Distinct type (rather than letting requests' generic exceptions bubble up)
-    so logs get an actionable message and chunk_lumber_chunker's fallback can log it.
-    """
+    """Raised when the LLM endpoint can't be reached or returns a bad response."""
 
 
 # ── Local backend (vLLM / Ollama / any OpenAI-compatible server) ──────────────
@@ -79,11 +61,11 @@ class _LocalCompletionAPI:
         payload = {
             "model": model,
             "messages": messages,
-            # lumber_chunker only needs a short answer; cap tokens for throughput
+            # lumber_chunker only needs a short answer.
             "max_tokens": kwargs.get("max_tokens", 20),
             "temperature": kwargs.get("temperature", 0.0),
         }
-        # required by servers started with --api-key; omitted if none configured
+        # Omitted when no key is configured.
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
 
         last_error: Exception | None = None
@@ -132,20 +114,11 @@ class _LocalCompletionAPI:
 
 
 class LocalLLMClient:
-    """Talks to any local OpenAI-compatible chat completions server.
+    """Talks to any local OpenAI-compatible chat completions server (vLLM,
+    Ollama, llama.cpp, ...).
 
-    Works with vLLM, Ollama, llama.cpp's server mode, LM Studio, etc. —
-    anything exposing POST {base_url}/chat/completions in the standard
-    OpenAI request/response shape.
-
-    Args:
-        base_url:    Server URL, e.g. "http://localhost:8000/v1". Falls back to
-                     LOCAL_LLM_BASE_URL env var, then that default — works out
-                     of the box if the server runs on the default port.
-        timeout:     Seconds to wait per request before retrying.
-        max_retries: Retry attempts before giving up and raising LLMConnectionError.
-        api_key:     Bearer token for authenticated servers (e.g. vLLM --api-key).
-                     Falls back to LOCAL_LLM_API_KEY, then no Authorization header.
+    base_url falls back to LOCAL_LLM_BASE_URL then a default; api_key falls
+    back to LOCAL_LLM_API_KEY then no Authorization header.
     """
 
     def __init__(
@@ -222,18 +195,8 @@ class _OpenRouterCompletionAPI:
 
 
 class OpenRouterLLMClient:
-    """Same interface as LocalLLMClient, backed by OpenRouter instead.
-
-    Useful for validating lumber_chunker's output quality on a small
-    subset without a GPU, before committing GPU-hours to a full local run.
-    Reuses this project's existing OPENROUTER_API_KEY convention (see
-    OpenRouterGenerator / OpenRouterEmbedder).
-
-    Args:
-        api_key:     Falls back to the OPENROUTER_API_KEY env var.
-        timeout:     Seconds to wait per request before retrying.
-        max_retries: Retry attempts on transient errors / rate limits.
-    """
+    """Same interface as LocalLLMClient, backed by OpenRouter. api_key falls
+    back to OPENROUTER_API_KEY."""
 
     def __init__(
         self,
@@ -247,8 +210,7 @@ class OpenRouterLLMClient:
                 "OPENROUTER_API_KEY not set. Pass api_key= or set the "
                 "environment variable. Get a free key at https://openrouter.ai/keys"
             )
-        # exposed at top level so callers building their own requests (e.g.
-        # enrich_llm_metadata's async httpx client) can treat both backends identically
+        # Top-level so callers building their own requests treat both backends alike.
         from open_telco_rag.generators.openrouter import OPENROUTER_BASE_URL
         self.base_url = OPENROUTER_BASE_URL
         self.api_key = resolved_key

@@ -1,4 +1,4 @@
-"""Shared types — Protocols define pluggable contracts, dataclasses carry data."""
+"""Shared types - Protocols define pluggable contracts, dataclasses carry data."""
 
 from __future__ import annotations
 
@@ -131,8 +131,8 @@ class Generator(Protocol):
     """Anything that generates an answer from a question and retrieved chunks.
 
     Implementations:
-      - ClaudeGenerator         — Anthropic Claude
-      - OpenRouterGenerator     — Any model via OpenRouter (GPT-4o, Llama, Mistral...)
+      - ClaudeGenerator         - Anthropic Claude
+      - OpenRouterGenerator     - Any model via OpenRouter (GPT-4o, Llama, Mistral...)
 
     Returns a dict with keys:
       answer, sources, chunks_used, retrieved_chunks

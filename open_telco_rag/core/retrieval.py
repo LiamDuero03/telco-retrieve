@@ -62,14 +62,14 @@ def execute_retrieval(
     search_method:   str   = "dense",
     resolve_parents: bool  = False,  
 ) -> list[SearchResult]:
-    """Orchestrates search pipeline routing handling Dense, BM25 keyword, and Hybrid models."""
+    """Run dense / bm25 / hybrid retrieval, then optional reranking and parent resolution."""
     search_method = search_method.lower()
     candidate_k = top_k * 3 if reranker is not None else top_k
 
     dense_results: list[SearchResult] = []
     bm25_results: list[SearchResult] = []
 
-    # 1. Execute Dense Vector Match Pass
+    # Dense vector pass
     if search_method in ["dense", "hybrid"]:
         vector = embedder.embed([query])[0]
         dense_results = store.search(vector, n_results=candidate_k)
@@ -88,7 +88,7 @@ def execute_retrieval(
 
             dense_results = [r for r in dense_results if r.distance < distance_limit]
 
-    # 2. Execute BM25 Keyword Filter Pass
+    # BM25 keyword pass
     if search_method in ["bm25", "hybrid"]:
         store_path = getattr(store, "path", "chroma_db")
         store_col = getattr(store, "collection_name", "documents")
@@ -114,7 +114,7 @@ def execute_retrieval(
                     ))
 
 
-    # 3. Multi-Method Fusion Selection
+    # Fusion / selection
     if search_method == "dense":
         final_candidates = dense_results
     elif search_method == "bm25":
@@ -124,13 +124,13 @@ def execute_retrieval(
     else:
         final_candidates = dense_results
 
-    # 4. Handle Cross-Encoder Reranker Passes
+    # Rerank
     if reranker is not None and final_candidates:
         final_candidates = reranker.rerank(query, final_candidates, top_k=rerank_top_k)
     else:
         final_candidates = final_candidates[:top_k]
 
-    # 5. Expand to Parent Contexts if requested
+    # Expand to parent contexts
     if resolve_parents:
         final_candidates = _resolve_parent_chunks(final_candidates)
 

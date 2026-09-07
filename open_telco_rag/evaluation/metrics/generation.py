@@ -1,8 +1,8 @@
 """
-Tier 1 generation metrics — no ground truth required.
+Tier 1 generation metrics - no ground truth required.
 
-  faithfulness       — every claim grounded in retrieved chunks
-  answer_relevancy   — answer addresses the intent of the question
+  faithfulness       - every claim grounded in retrieved chunks
+  answer_relevancy   - answer addresses the intent of the question
 """
 
 from __future__ import annotations
@@ -17,9 +17,7 @@ from open_telco_rag.evaluation._claude import claude_call, parse_json
 
 logger = logging.getLogger(__name__)
 
-# Phrases that indicate the RAG failed to retrieve relevant content.
-# These answers should not score highly on relevancy or faithfulness --
-# used by faithfulness()/answer_relevancy() below via _is_not_found_answer().
+# Phrases that indicate retrieval failure; such answers shouldn't score high.
 _NOT_FOUND_PHRASES = [
     "does not contain",
     "not provided in",
@@ -32,21 +30,9 @@ _NOT_FOUND_PHRASES = [
     "provided context does not",
 ]
 
-# mc/tf-ONLY additions, used by evaluate.py's _match_deterministic_answer()
-# (via _is_not_found_answer_mc_tf() below) to classify an answer as
-# "abstained" rather than "incorrect" -- "I can't determine this"-style
-# phrasings _build_generation_question()'s own mc/tf instruction ("...say
-# so explicitly instead of guessing") is likely to elicit, beyond the
-# original retrieval-failure-specific wording above.
-#
-# Deliberately NOT folded into _NOT_FOUND_PHRASES/_is_not_found_answer():
-# an open-ended answer can legitimately use a phrase like "insufficient
-# information" or "cannot determine" mid-explanation while still being
-# substantively correct and on-topic (e.g. "...there is insufficient
-# information to characterize every edge case, but the core procedure is
-# X...") -- forcing faithfulness/answer_relevancy to 0.0 for that would be
-# a false positive open questions' much looser framing can't safely
-# tolerate the way mc/tf's narrow verdict-or-abstain framing can.
+# mc/tf-only additions: "can't determine"-style phrasings that count as an
+# abstain, not incorrect. Not used for open questions, where such phrases can
+# appear mid-explanation in a substantively correct answer.
 _MC_TF_ONLY_NOT_FOUND_PHRASES = [
     "cannot determine",
     "unable to determine",
@@ -56,17 +42,13 @@ _MC_TF_ONLY_NOT_FOUND_PHRASES = [
 ]
 
 def _is_not_found_answer(answer: str) -> bool:
-    """Open-question use (faithfulness()/answer_relevancy() below) --
-    the narrower, retrieval-failure-specific phrasing only."""
+    """Open-question use: the retrieval-failure phrasing only."""
     a = answer.lower()
     return any(phrase in a for phrase in _NOT_FOUND_PHRASES)
 
 
 def _is_not_found_answer_mc_tf(answer: str) -> bool:
-    """mc/tf prose-fallback use (evaluate.py's _match_deterministic_answer_
-    prose()) -- the broader set including _MC_TF_ONLY_NOT_FOUND_PHRASES;
-    see that list's own comment for why it's not also used for open
-    questions."""
+    """mc/tf prose-fallback use: the broader phrase set."""
     a = answer.lower()
     return any(phrase in a for phrase in _NOT_FOUND_PHRASES + _MC_TF_ONLY_NOT_FOUND_PHRASES)
 
@@ -116,7 +98,7 @@ Answer:
     try:
         raw_claims = llm_call(decompose_prompt, 512)
         if debug:
-            _debug_log("faithfulness", "decompose_claims → raw response", raw_claims)
+            _debug_log("faithfulness", "decompose_claims -> raw response", raw_claims)
         claims = parse_json(raw_claims)
         if not isinstance(claims, list) or not claims:
             return 0.0
@@ -124,7 +106,7 @@ Answer:
         logger.warning("faithfulness: decompose_claims raised %s: %s — scoring 0.0",
                         type(e).__name__, e)
         if debug:
-            _debug_log("faithfulness", "decompose_claims → exception", str(e))
+            _debug_log("faithfulness", "decompose_claims -> exception", str(e))
         return 0.0
 
     verify_prompt = f"""For each claim below, answer YES if it can be directly
@@ -141,10 +123,10 @@ Claims:
     try:
         raw_verdicts = llm_call(verify_prompt, 512)
         if debug:
-            _debug_log("faithfulness", "verify_claims → raw response", raw_verdicts)
+            _debug_log("faithfulness", "verify_claims -> raw response", raw_verdicts)
         verdicts = parse_json(raw_verdicts)
         if debug:
-            _debug_log("faithfulness", "verify_claims → parsed",
+            _debug_log("faithfulness", "verify_claims -> parsed",
                        f"verdicts={verdicts}  len={len(verdicts)}  expected={len(claims)}")
         if not isinstance(verdicts, list) or len(verdicts) == 0:
             return 0.0
@@ -157,7 +139,7 @@ Claims:
         logger.warning("faithfulness: verify_claims raised %s: %s — scoring 0.0",
                         type(e).__name__, e)
         if debug:
-            _debug_log("faithfulness", "verify_claims → exception", str(e))
+            _debug_log("faithfulness", "verify_claims -> exception", str(e))
         return 0.0
 
 
@@ -173,11 +155,11 @@ def answer_relevancy(
     Mean cosine similarity between the original question and N questions
     reverse-engineered from the answer.
 
-    Returns 0.0 if the answer indicates retrieval failure — a 'not found'
+    Returns 0.0 if the answer indicates retrieval failure - a 'not found'
     answer is not relevant regardless of how well it echoes the question.
 
     Score = (1/N) Σ cos(embed(qᵢ), embed(q₀))
-    High → answer is on-topic. Low → answer drifts from question intent.
+    High -> answer is on-topic. Low -> answer drifts from question intent.
     """
     if not answer:
         return 0.0
@@ -199,21 +181,20 @@ Answer:
     try:
         raw = llm_call(prompt, 256)
         if debug:
-            _debug_log("answer_relevancy", "reverse_questions → raw response", raw)
+            _debug_log("answer_relevancy", "reverse_questions -> raw response", raw)
         reverse_qs = parse_json(raw)
-        # An empty list would otherwise reach np.mean([]), which returns
-        # NaN rather than raising — silently poisoning the score.
+        # Empty list -> np.mean([]) is NaN, poisoning the score.
         if not isinstance(reverse_qs, list) or not reverse_qs:
             return 0.0
         reverse_qs = [str(q) for q in reverse_qs[:n_reverse]]
         if debug:
-            _debug_log("answer_relevancy", "reverse_questions → parsed",
+            _debug_log("answer_relevancy", "reverse_questions -> parsed",
                        "\n  ".join(reverse_qs))
     except Exception as e:
         logger.warning("answer_relevancy: reverse_questions raised %s: %s — scoring 0.0",
                         type(e).__name__, e)
         if debug:
-            _debug_log("answer_relevancy", "reverse_questions → exception", str(e))
+            _debug_log("answer_relevancy", "reverse_questions -> exception", str(e))
         return 0.0
 
     try:
@@ -230,5 +211,5 @@ Answer:
         logger.warning("answer_relevancy: embedding raised %s: %s — scoring 0.0",
                         type(e).__name__, e)
         if debug:
-            _debug_log("answer_relevancy", "embedding → exception", str(e))
+            _debug_log("answer_relevancy", "embedding -> exception", str(e))
         return 0.0

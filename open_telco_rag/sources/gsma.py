@@ -47,9 +47,9 @@ class GSMASource(MarkerMixin):
         """Extract GSMA document group, number and version from filename.
 
         Examples:
-          IG.01 v1.0.docx          → group: IG, doc_num: 01, version: v1.0
-          OPG.10 v2.0 Open Gateway → group: OPG, doc_num: 10, version: v2.0
-          SGP.21 v2.5.docx         → group: SGP, doc_num: 21, version: v2.5
+          IG.01 v1.0.docx          -> group: IG, doc_num: 01, version: v1.0
+          OPG.10 v2.0 Open Gateway -> group: OPG, doc_num: 10, version: v2.0
+          SGP.21 v2.5.docx         -> group: SGP, doc_num: 21, version: v2.5
         """
         path = Path(path)
         meta = {
@@ -93,7 +93,7 @@ class GSMASource(MarkerMixin):
     # ── Private loaders ───────────────────────────────────────────────────────
 
     def _load_docx(self, path: Path) -> str:
-        # DOCX uses python-docx — Marker API handles PDF only
+        # DOCX uses python-docx - Marker API handles PDF only
         try:
             from docx import Document
         except ImportError:

@@ -1,4 +1,4 @@
-"""ITU-T specification source — all series."""
+"""ITU-T specification source - all series."""
 
 from __future__ import annotations
 
@@ -98,10 +98,10 @@ class ITUSource(MarkerMixin):
         """Extract metadata from ITU-T filename.
 
         Handles all series and document types:
-          T-REC-Y.3172-201906-I!!PDF-E.pdf  → series=Y, rec_number=Y.3172
-          T-REC-Y.Sup96-202511-I!!PDF-E.pdf → series=Y, rec_number=Y.Sup96, doc_type=Supplement
-          T-REC-G.709-202006-I!!PDF-E.pdf   → series=G, rec_number=G.709
-          T-REC-Q.931-199805-I!!PDF-E.pdf   → series=Q, rec_number=Q.931
+          T-REC-Y.3172-201906-I!!PDF-E.pdf  -> series=Y, rec_number=Y.3172
+          T-REC-Y.Sup96-202511-I!!PDF-E.pdf -> series=Y, rec_number=Y.Sup96, doc_type=Supplement
+          T-REC-G.709-202006-I!!PDF-E.pdf   -> series=G, rec_number=G.709
+          T-REC-Q.931-199805-I!!PDF-E.pdf   -> series=Q, rec_number=Q.931
         """
         path = Path(path)
         meta = {

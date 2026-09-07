@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for telcolens's test suite.
+"""Shared pytest fixtures for telco-retrieve's test suite.
 
 Fixtures here are deterministic and offline: FakeLLMClient never makes a
 network call, and the fixture Chroma+FTS index pair is a small hand-built

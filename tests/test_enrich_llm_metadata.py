@@ -63,7 +63,7 @@ def test_client_without_base_url_skips_and_returns_chunks_unchanged(capsys):
     assert "no base_url attribute" in capsys.readouterr().out
 
 
-# ── URL/header construction — the core vLLM-compatibility fix ──────────────
+# ── URL/header construction - the core vLLM-compatibility fix ──────────────
 
 def test_local_client_builds_url_from_base_url_not_hardcoded_openrouter(monkeypatch):
     monkeypatch.delenv("LOCAL_LLM_API_KEY", raising=False)

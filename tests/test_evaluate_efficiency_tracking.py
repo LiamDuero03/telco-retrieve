@@ -81,7 +81,7 @@ def test_falls_back_to_local_estimate_when_generator_returns_no_usage(monkeypatc
     monkeypatch.setattr(pipeline_module, "generate", lambda *a, **kw: {
         "answer": "The AMF handles registration and mobility management.",
         "sources": [], "chunks_used": 1,
-        # No "usage" key — e.g. generators before this fix, or any custom/baseline generator.
+        # No "usage" key - e.g. generators before this fix, or any custom/baseline generator.
     })
 
     result = evaluate_question(
@@ -92,11 +92,11 @@ def test_falls_back_to_local_estimate_when_generator_returns_no_usage(monkeypatc
 
     assert result.error == ""
     assert result.token_source == "estimated"
-    # Estimate must be > 0 — a silent 0 would be the old bug in disguise.
+    # Estimate must be > 0 - a silent 0 would be the old bug in disguise.
     assert result.prompt_tokens > 0
     assert result.completion_tokens > 0
     assert result.total_tokens == result.prompt_tokens + result.completion_tokens
-    # No usage/cost data available — cost stays "not computed".
+    # No usage/cost data available - cost stays "not computed".
     assert result.cost is None
 
 
