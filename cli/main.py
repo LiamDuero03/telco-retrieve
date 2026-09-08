@@ -184,6 +184,19 @@ def main(argv: list[str] | None = None) -> None:
                       help="Backend for computing embeddings (default: local)")
     p_ask.add_argument("--resolve-parents", action="store_true",
                    help="Expand retrieved child chunks into full parent contexts")
+    p_ask.add_argument("--generator", choices=["claude", "openrouter", "local"], default="openrouter",
+                       help="LLM backend for the answer (default: openrouter). 'local' talks to any "
+                            "OpenAI-compatible server via --llm-base-url/--llm-api-key.")
+    p_ask.add_argument("--generator-model", default=None,
+                       help="Model id/key for --generator. Defaults: openrouter -> "
+                            "meta-llama/llama-3.1-8b-instruct; local -> whatever your server serves; "
+                            "claude -> the ClaudeGenerator default.")
+    p_ask.add_argument("--llm-base-url", default=None,
+                       help="Base URL for --generator local (default: env LOCAL_LLM_BASE_URL, "
+                            "else http://localhost:8000/v1). Ignored for claude/openrouter.")
+    p_ask.add_argument("--llm-api-key", default=None,
+                       help="API key for --generator local (default: env LOCAL_LLM_API_KEY). "
+                            "Ignored for claude/openrouter.")
 
     # ── evaluate ──────────────────────────────────────────────────────────────
     p_eval = sub.add_parser("evaluate", help="Run evaluation suite on a corpus")
@@ -387,6 +400,20 @@ def _get_reranker(model_key: str):
     """Load reranker by key from configs/reranker_models.json."""
     from open_telco_rag.embedders.reranker import load_reranker
     return load_reranker(model_key)
+
+
+def _get_generator(name: str, model: str | None = None,
+                   base_url: str | None = None, api_key: str | None = None):
+    """RAG-answer generator for `ask` — claude | openrouter | local.
+    Keep in sync with evaluation.evaluate._build_generator."""
+    if name == "claude":
+        from open_telco_rag.generators.claude import ClaudeGenerator
+        return ClaudeGenerator(model=model) if model else ClaudeGenerator()
+    if name == "local":
+        from open_telco_rag.generators.local import LocalGenerator
+        return LocalGenerator(model=model or "local-model", base_url=base_url, api_key=api_key)
+    from open_telco_rag.generators.openrouter import OpenRouterGenerator
+    return OpenRouterGenerator(model=model or "meta-llama/llama-3.1-8b-instruct")
 
 
 def _get_llm_client(backend: str = "local", base_url: str | None = None, api_key: str | None = None):
@@ -610,7 +637,13 @@ def _run_ask(args) -> None:
         search_method = getattr(args, "search_method", "dense"),
         resolve_parents = getattr(args, "resolve_parents", False),
     )
-    answer = generate(args.question, results, source_type=args.source_type)
+    generator = _get_generator(
+        getattr(args, "generator", "openrouter"),
+        model    = getattr(args, "generator_model", None),
+        base_url = getattr(args, "llm_base_url", None),
+        api_key  = getattr(args, "llm_api_key", None),
+    )
+    answer = generate(args.question, results, generator=generator, source_type=args.source_type)
 
     print(f"\nAnswer:\n{answer['answer']}")
     print(f"\nSources:     {answer['sources']}")
