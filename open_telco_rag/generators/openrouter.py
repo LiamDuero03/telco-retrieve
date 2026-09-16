@@ -51,6 +51,7 @@ class OpenRouterGenerator:
         model:       str   = "meta-llama/llama-3.1-8b-instruct",
         max_tokens:  int   = 1000,
         temperature: float = 0.0,
+        top_p:       float | None = None,
         api_key:     str | None = None,
         site_url:    str   = "",
         site_name:   str   = "Open Telco RAG",
@@ -60,6 +61,7 @@ class OpenRouterGenerator:
         self.model       = RECOMMENDED_MODELS.get(model, model)
         self.max_tokens  = max_tokens
         self.temperature = temperature
+        self.top_p       = top_p
         self._api_key    = api_key or os.environ.get("OPENROUTER_API_KEY")
         self.site_url    = site_url
         self.site_name   = site_name
@@ -103,7 +105,7 @@ class OpenRouterGenerator:
             }
 
         context = "\n\n---\n\n".join(r.text for r in results)
-        sources = list({r.metadata.get("source", "") for r in results})
+        sources = list(dict.fromkeys(r.metadata.get("source", "") for r in results))
 
         system_prompt = resolve_system_prompt(source_type, self.prompt_mode)
 
@@ -124,6 +126,8 @@ class OpenRouterGenerator:
             # Ask OpenRouter to return the real billed cost in usage.cost.
             "usage": {"include": True},
         }
+        if self.top_p is not None:
+            payload["top_p"] = self.top_p
         if response_schema is not None:
             payload["response_format"] = {
                 "type": "json_schema",

@@ -38,7 +38,7 @@ from open_telco_rag.evaluation.metrics.generation import (
 )
 from open_telco_rag.evaluation.metrics.retrieval import (
     cosine_sim_stats, distinct_sources_retrieved, canonical_source_hit,
-    exact_chunk_hit, coverage_ratio, is_discriminating_source,
+    exact_chunk_hit, chunk_rank, coverage_ratio, is_discriminating_source,
 )
 from open_telco_rag.evaluation.metrics.ground_truth import (
     context_recall, answer_correctness,
@@ -51,6 +51,7 @@ def _build_generator(
     api_key: str | None = None,
     timeout: int = 60,
     temperature: float = 0.0,
+    top_p: float | None = None,
     max_tokens: int = 1000,
     prompt_mode: str = DEFAULT_PROMPT_MODE,
 ):
@@ -58,6 +59,7 @@ def _build_generator(
     "local") for pipeline.generate().
 
     temperature only matters for self-consistency (n_generations>1).
+    top_p=None omits it from the API call (provider default applies).
     prompt_mode: see generators/_prompts.py. Raise max_tokens for
     reasoning-capable OpenRouter models, whose reasoning tokens share the
     completion budget and can leave the visible answer empty. ClaudeGenerator
@@ -65,19 +67,19 @@ def _build_generator(
     """
     if generator_name == "claude":
         from open_telco_rag.generators.claude import ClaudeGenerator
-        return ClaudeGenerator(model=model_name) if model_name else ClaudeGenerator()
+        return ClaudeGenerator(model=model_name, top_p=top_p) if model_name else ClaudeGenerator(top_p=top_p)
 
     if generator_name == "local":
         from open_telco_rag.generators.local import LocalGenerator
         return LocalGenerator(model=model_name or "local-model", base_url=base_url,
                                api_key=api_key, timeout=timeout, temperature=temperature,
-                               max_tokens=max_tokens, prompt_mode=prompt_mode)
+                               top_p=top_p, max_tokens=max_tokens, prompt_mode=prompt_mode)
 
     # openrouter (default)
     from open_telco_rag.generators.openrouter import OpenRouterGenerator
     return OpenRouterGenerator(model=model_name or "meta-llama/llama-3.1-8b-instruct",
-                                timeout=timeout, temperature=temperature, max_tokens=max_tokens,
-                                prompt_mode=prompt_mode)
+                                timeout=timeout, temperature=temperature, top_p=top_p,
+                                max_tokens=max_tokens, prompt_mode=prompt_mode)
 
 def _local_token_count(text: str) -> int:
     """Calculates tokens locally using the cl100k_base encoding."""
@@ -448,6 +450,7 @@ def evaluate_question(
     resolve_parents:  bool = False,
     n_generations: int = 1,
     generation_temperature: float | None = None,
+    generation_top_p: float | None = None,
     rag_max_tokens: int = 1000,
     prompt_mode: str = DEFAULT_PROMPT_MODE,
 ) -> QuestionResult:
@@ -512,6 +515,9 @@ def evaluate_question(
             )
             result.search_latency = time.perf_counter() - search_start
 
+            result.candidate_chunk_ids = [getattr(r, "doc_id", None) for r in retrieved_candidates]
+            result.candidate_chunk_texts = [getattr(r, "text", "") for r in retrieved_candidates]
+
             result.rerank_latency = 0.0
             result.rerank_tokens = 0
 
@@ -531,12 +537,16 @@ def evaluate_question(
             else:
                 retrieved = retrieved_candidates[:rerank_top_k]
 
+            result.used_chunk_ids = [getattr(r, "doc_id", None) for r in retrieved]
+            result.used_chunk_texts = [getattr(r, "text", "") for r in retrieved]
+
             gen_start = time.perf_counter()
             generator = _build_generator(
                 rag_generator_name, model_name=rag_model_name,
                 base_url=rag_base_url, api_key=rag_api_key,
                 timeout=rag_generator_timeout,
                 temperature=(generation_temperature or 0.0) if n_generations > 1 else 0.0,
+                top_p=generation_top_p,
                 max_tokens=rag_max_tokens,
                 prompt_mode=prompt_mode,
             )
@@ -558,6 +568,7 @@ def evaluate_question(
             result.self_consistency_votes = {
                 ("abstained/unparsed" if k is None else k): v for k, v in vote_counts.items()
             }
+            result.self_consistency_agreement = max(vote_counts.values()) / len(gens)
         else:
             gen = gens[0]
 
@@ -684,6 +695,8 @@ def evaluate_question(
                 retrieved, q.canonical_source, store=store, expected_release=q.release,
             )
             result.exact_chunk_hit = exact_chunk_hit(retrieved, q.chunk_id, q.source_text)
+            result.candidate_chunk_rank = chunk_rank(retrieved_candidates, q.chunk_id, q.source_text)
+            result.used_chunk_rank = chunk_rank(retrieved, q.chunk_id, q.source_text)
             result.coverage_ratio  = coverage_ratio(retrieved, sim_threshold)
 
             # Separate from canonical_hit: None = no ground truth, False =
@@ -697,11 +710,8 @@ def evaluate_question(
 
     except Exception as e:
         result.error = str(e)
-        result.latency = 0.0
-        result.prompt_tokens = 0
-        result.completion_tokens = 0
-        result.search_latency = 0.0 
-        result.gen_latency = 0.0
+        result.error_type = type(e).__name__
+        result.latency = time.perf_counter() - start_time
 
     return result
 
@@ -731,6 +741,7 @@ def evaluate_corpus(
     rag_generator_timeout: int = 60,
     n_generations: int = 1,
     generation_temperature: float | None = None,
+    generation_top_p: float | None = None,
     inject_metadata: bool = False,
     include_keywords: bool = False,
     search_method: str = "dense",
@@ -775,6 +786,7 @@ def evaluate_corpus(
     # one worker (still sequential). store/embedder are shared read-only
     # across threads (chromadb supports concurrent readers).
     rag_results: list[Any] = [None] * len(qs)
+    rag_wall_start = time.perf_counter()
     # tqdm.write() via emit() so output coexists with an active bar.
     pbar = tqdm(total=len(qs), desc=f"{corpus}/{model} RAG", unit="q") if progress_bar else None
     emit = pbar.write if pbar else print
@@ -797,6 +809,7 @@ def evaluate_corpus(
                                rag_generator_timeout=rag_generator_timeout,
                                n_generations=n_generations,
                                generation_temperature=generation_temperature,
+                               generation_top_p=generation_top_p,
                                inject_metadata=inject_metadata,
                                include_keywords=include_keywords,
                                search_method=search_method,
@@ -838,6 +851,7 @@ def evaluate_corpus(
                 pbar.update(1)
     if pbar:
         pbar.close()
+    rag_wall_clock = time.perf_counter() - rag_wall_start
 
     rag_result = CorpusResult(
         corpus=corpus, model=model, top_k=top_k,
@@ -846,6 +860,12 @@ def evaluate_corpus(
         question_results=rag_results,
         rag_generator_model=resolved_rag_model,
         rag_generator_name=rag_generator_name,
+        total_wall_clock_seconds=rag_wall_clock,
+        max_concurrency=max(1, max_concurrency),
+        # Mirrors evaluate_question()'s own resolution: temperature is forced
+        # to 0.0 whenever n_generations==1, regardless of what was configured.
+        rag_generator_temperature=(generation_temperature or 0.0) if n_generations > 1 else 0.0,
+        rag_generator_top_p=generation_top_p,
         **aggregate(rag_results),
     )
 
@@ -859,6 +879,7 @@ def evaluate_corpus(
     if include_baseline:
         print(f"\n  Running BASELINE pass ({len(qs)} questions, no retrieval)…")
         bl_results = []
+        bl_wall_start = time.perf_counter()
         bl_pbar = tqdm(total=len(qs), desc=f"{corpus}/{model} baseline", unit="q") if progress_bar else None
         bl_emit = bl_pbar.write if bl_pbar else print
         for i, q in enumerate(qs, 1):
@@ -885,6 +906,7 @@ def evaluate_corpus(
                 time.sleep(delay)
         if bl_pbar:
             bl_pbar.close()
+        bl_wall_clock = time.perf_counter() - bl_wall_start
 
         baseline_result = CorpusResult(
             corpus=corpus, model=model, top_k=0,
@@ -892,6 +914,8 @@ def evaluate_corpus(
             question_results=bl_results,
             rag_generator_model=resolved_rag_model,
             rag_generator_name=rag_generator_name,
+            total_wall_clock_seconds=bl_wall_clock,
+            max_concurrency=1,  # baseline pass is a plain sequential for-loop, always
             **aggregate(bl_results),
         )
 

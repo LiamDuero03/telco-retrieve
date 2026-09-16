@@ -19,6 +19,8 @@ class ClaudeGenerator:
                      Options: claude-sonnet-4-6, claude-opus-4-6, claude-haiku-4-5-20251001
         max_tokens:  Maximum tokens in the response.
         temperature: Sampling temperature (0.0 = deterministic).
+        top_p:       Nucleus sampling threshold. None (default) omits it, using
+                     Anthropic's own default.
         max_retries: Retries on API overload with exponential backoff.
         api_key:     Anthropic API key. Falls back to ANTHROPIC_API_KEY env var.
 
@@ -33,6 +35,7 @@ class ClaudeGenerator:
         model:       str   = "claude-sonnet-4-6",
         max_tokens:  int   = 1000,
         temperature: float = 0.0,
+        top_p:       float | None = None,
         max_retries: int   = 3,
         api_key:     str | None = None,
         prompt_mode: str   = DEFAULT_PROMPT_MODE,
@@ -40,6 +43,7 @@ class ClaudeGenerator:
         self.model       = model
         self.max_tokens  = max_tokens
         self.temperature = temperature
+        self.top_p       = top_p
         self.max_retries = max_retries
         self._api_key    = api_key or os.environ.get("ANTHROPIC_API_KEY")
         self.prompt_mode = prompt_mode
@@ -76,7 +80,7 @@ class ClaudeGenerator:
             }
 
         context = "\n\n---\n\n".join(r.text for r in results)
-        sources = list({r.metadata.get("source", "") for r in results})
+        sources = list(dict.fromkeys(r.metadata.get("source", "") for r in results))
 
         prompt = (
             f"{resolve_system_prompt(source_type, self.prompt_mode)}\n\n"
@@ -87,14 +91,18 @@ class ClaudeGenerator:
 
         client = anthropic.Anthropic(api_key=self._api_key)
 
+        create_kwargs = dict(
+            model       = self.model,
+            max_tokens  = self.max_tokens,
+            temperature = self.temperature,
+            messages    = [{"role": "user", "content": prompt}],
+        )
+        if self.top_p is not None:
+            create_kwargs["top_p"] = self.top_p
+
         for attempt in range(self.max_retries):
             try:
-                response = client.messages.create(
-                    model       = self.model,
-                    max_tokens  = self.max_tokens,
-                    temperature = self.temperature,
-                    messages    = [{"role": "user", "content": prompt}],
-                )
+                response = client.messages.create(**create_kwargs)
                 break
             except Exception as e:
                 if "overloaded" in str(e).lower() and attempt < self.max_retries - 1:

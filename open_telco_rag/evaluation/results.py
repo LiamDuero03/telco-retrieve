@@ -75,10 +75,24 @@ class QuestionResult:
     # None/0 when n_generations==1.
     self_consistency_n:     int  = 0
     self_consistency_votes: dict | None = None
+    # winning_votes / self_consistency_n. -1.0 unless mc/tf with n_generations>1.
+    self_consistency_agreement: float = -1.0
 
     # ── Tier 1: no ground truth (open/fill_blank only; -1.0 = not applicable) ─
     faithfulness:     float = -1.0
     answer_relevancy: float = -1.0
+
+    # candidate_* = pre-rerank pool, rank order. used_* = what the generator saw.
+    # [] for baseline. Text travels with the id since the corpus can be re-chunked.
+    candidate_chunk_ids:   list[str] = field(default_factory=list)
+    candidate_chunk_texts: list[str] = field(default_factory=list)
+    used_chunk_ids:        list[str] = field(default_factory=list)
+    used_chunk_texts:      list[str] = field(default_factory=list)
+
+    # 1-indexed rank of the correct chunk in candidate/used_chunk_ids; 0 = not
+    # found, -1 = not applicable. Same sentinel convention as exact_chunk_hit.
+    candidate_chunk_rank: int = -1
+    used_chunk_rank:      int = -1
 
     # ── Retrieval metrics: computed for every non-baseline question ──────────
     mean_similarity:  float = 0.0
@@ -102,6 +116,7 @@ class QuestionResult:
     answer_correctness: float = -1.0
 
     error: str = ""
+    error_type: str = ""   # type(exception).__name__, "" if error is also ""
 
 
 @dataclass
@@ -116,6 +131,9 @@ class CorpusResult:
     # embedder), so a pushed result.json is self-describing. "" for older results.
     rag_generator_model: str = ""
     rag_generator_name:  str = ""   # "local" / "openrouter" / "claude"
+
+    rag_generator_temperature: float = 0.0
+    rag_generator_top_p:       float | None = None
 
     questions_file: str = ""
 
@@ -148,6 +166,7 @@ class CorpusResult:
     n_canonical_source_non_discriminating: int = 0
     # Stronger companion to canonical_hit_rate. -1.0 with no chunk provenance.
     exact_chunk_hit_rate:  float = -1.0
+    mean_reciprocal_rank: float = -1.0   # mean of 1/used_chunk_rank; -1.0 with no provenance
     mean_coverage_ratio:   float = -1.0
 
     # ── Tier 2 aggregates (-1.0 = not computed) ───────────────────────────────
@@ -156,16 +175,28 @@ class CorpusResult:
 
     # ── Efficiency aggregates (sum/mean per combination) ────────────────────
     mean_latency:            float = 0.0
+    max_latency:             float = 0.0
+    p95_latency:             float = 0.0
     mean_search_latency:     float = 0.0
     mean_rerank_latency:     float = 0.0
     mean_gen_latency:        float = 0.0
 
+    total_wall_clock_seconds: float = 0.0
+    max_concurrency:          int   = 1
+
     total_prompt_tokens:     int   = 0
     total_completion_tokens: int   = 0
     total_tokens:            int   = 0
+    max_total_tokens:        int   = 0
+    p95_total_tokens:        float = 0.0
     mean_prompt_tokens:      float = 0.0
     mean_completion_tokens:  float = 0.0
     mean_total_tokens:       float = 0.0
+
+    total_reasoning_tokens: int   | None = None   # None = never reported, not zero
+    mean_reasoning_tokens:  float | None = None
+    total_cached_tokens:    int   | None = None
+    mean_cached_tokens:     float | None = None
 
     # Judge-call tokens, separate from generation totals above.
     total_judge_prompt_tokens:     int = 0
@@ -262,18 +293,31 @@ def _mean_or_zero(values: list[float]) -> float:
     return statistics.mean(values) if values else 0.0
 
 
+def _percentile(values: list[float], p: float) -> float:
+    """Nearest-rank percentile (p in [0, 100]), 0.0 for empty."""
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    idx = min(len(ordered) - 1, max(0, round(p / 100 * (len(ordered) - 1))))
+    return ordered[idx]
+
+
 def _aggregate_efficiency(results: list[QuestionResult]) -> dict:
     """Latency/token/judge-token/cost aggregates for CorpusResult. Straight
     sum/mean over every result, no sentinel filtering - an errored question's
     0.0/0/None defaults still count as a data point, same as elsewhere.
     """
-    prompt_tokens     = [r.prompt_tokens for r in results]
-    completion_tokens = [r.completion_tokens for r in results]
+    latencies          = [r.latency for r in results]
+    prompt_tokens      = [r.prompt_tokens for r in results]
+    completion_tokens  = [r.completion_tokens for r in results]
     total_tokens       = [r.total_tokens for r in results]
     judge_prompt       = [r.judge_prompt_tokens for r in results]
     judge_completion   = [r.judge_completion_tokens for r in results]
 
     known_costs = [r.cost for r in results if r.cost is not None]
+
+    known_reasoning = [r.reasoning_tokens for r in results if r.reasoning_tokens is not None]
+    known_cached    = [r.cached_tokens    for r in results if r.cached_tokens    is not None]
 
     token_source_counts: dict[str, int] = {}
     for r in results:
@@ -281,7 +325,9 @@ def _aggregate_efficiency(results: list[QuestionResult]) -> dict:
             token_source_counts[r.token_source] = token_source_counts.get(r.token_source, 0) + 1
 
     return dict(
-        mean_latency=        _mean_or_zero([r.latency for r in results]),
+        mean_latency=        _mean_or_zero(latencies),
+        max_latency=         max(latencies) if latencies else 0.0,
+        p95_latency=         _percentile(latencies, 95),
         mean_search_latency= _mean_or_zero([r.search_latency for r in results]),
         mean_rerank_latency= _mean_or_zero([r.rerank_latency for r in results]),
         mean_gen_latency=    _mean_or_zero([r.gen_latency for r in results]),
@@ -289,9 +335,16 @@ def _aggregate_efficiency(results: list[QuestionResult]) -> dict:
         total_prompt_tokens=     sum(prompt_tokens),
         total_completion_tokens= sum(completion_tokens),
         total_tokens=             sum(total_tokens),
+        max_total_tokens=        max(total_tokens) if total_tokens else 0,
+        p95_total_tokens=        _percentile(total_tokens, 95),
         mean_prompt_tokens=      _mean_or_zero(prompt_tokens),
         mean_completion_tokens=  _mean_or_zero(completion_tokens),
         mean_total_tokens=       _mean_or_zero(total_tokens),
+
+        total_reasoning_tokens= sum(known_reasoning) if known_reasoning else None,
+        mean_reasoning_tokens=  (sum(known_reasoning) / len(known_reasoning)) if known_reasoning else None,
+        total_cached_tokens=    sum(known_cached) if known_cached else None,
+        mean_cached_tokens=     (sum(known_cached) / len(known_cached)) if known_cached else None,
 
         total_judge_prompt_tokens=     sum(judge_prompt),
         total_judge_completion_tokens= sum(judge_completion),
@@ -339,6 +392,7 @@ def aggregate(question_results: list[QuestionResult]) -> dict:
 
     canonical_qs = [r for r in question_results if r.canonical_hit >= 0]
     exact_chunk_qs = [r for r in question_results if r.exact_chunk_hit >= 0]
+    rank_qs = [r for r in question_results if r.used_chunk_rank >= 0]
 
     by_format: dict[str, dict] = {}
     for fmt in sorted({r.answer_type for r in question_results}):
@@ -365,6 +419,9 @@ def aggregate(question_results: list[QuestionResult]) -> dict:
                                   sum(1 for r in question_results if r.canonical_source_discriminating is False),
         exact_chunk_hit_rate=   (sum(r.exact_chunk_hit for r in exact_chunk_qs) /
                                   len(exact_chunk_qs) if exact_chunk_qs else -1.0),
+        # rank==0 (not found) contributes 0, not 1/0 -- standard MRR convention.
+        mean_reciprocal_rank=   (sum(1.0 / r.used_chunk_rank if r.used_chunk_rank > 0 else 0.0
+                                      for r in rank_qs) / len(rank_qs) if rank_qs else -1.0),
         mean_coverage_ratio=     _mean([r.coverage_ratio     for r in question_results]),
         mean_context_recall=     _mean([r.context_recall     for r in question_results]),
         mean_answer_correctness= _mean([r.answer_correctness for r in question_results]),
