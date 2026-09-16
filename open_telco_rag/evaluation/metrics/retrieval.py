@@ -113,6 +113,48 @@ def _strip_enrichment_header(text: str) -> str:
     return _METADATA_TAGGING_HEADER_RE.sub("", text, count=1)
 
 
+def chunk_rank(
+    results: list[Any],
+    expected_chunk_id: str | None,
+    expected_chunk_text: str | None = None,
+) -> int:
+    """
+    1-indexed rank of the exact source chunk within `results` (rank order,
+    index 0 = closest/first) -- the MRR-style companion to exact_chunk_hit().
+    Same matching logic exact_chunk_hit() uses, factored out so both can
+    share it without a second pass over `results`.
+
+    Returns:
+       -1  -- not applicable: no recorded chunk provenance (same condition
+              exact_chunk_hit() returns -1 for)
+        0  -- the exact chunk was not found anywhere in `results`
+       1+  -- the 1-indexed position it was found at
+
+    Two strategies, in order: (1) doc_id equality - only meaningful on the
+    same collection (doc_id bakes in the model_key); (2) text containment
+    (either direction) against expected_chunk_text, working across
+    models/chunking configs, with any metadata_tagging header stripped first.
+    """
+    if not expected_chunk_id and not expected_chunk_text:
+        return -1
+
+    if expected_chunk_id:
+        for i, r in enumerate(results, start=1):
+            if getattr(r, "doc_id", None) == expected_chunk_id:
+                return i
+
+    if expected_chunk_text:
+        needle = expected_chunk_text.strip()
+        if needle:
+            for i, r in enumerate(results, start=1):
+                raw_text = (getattr(r, "text", "") or "").strip()
+                text = _strip_enrichment_header(raw_text).strip() if raw_text else raw_text
+                if text and (needle in text or text in needle):
+                    return i
+
+    return 0
+
+
 def exact_chunk_hit(
     results: list[Any],
     expected_chunk_id: str | None,
@@ -127,29 +169,12 @@ def exact_chunk_hit(
        0  -- neither doc_id nor text matched
       -1  -- not applicable: no recorded chunk provenance
 
-    Two strategies, in order: (1) doc_id equality - only meaningful on the
-    same collection (doc_id bakes in the model_key); (2) text containment
-    (either direction) against expected_chunk_text, working across
-    models/chunking configs, with any metadata_tagging header stripped first.
+    See chunk_rank() for where in `results` it was found, not just whether.
     """
-    if not expected_chunk_id and not expected_chunk_text:
+    rank = chunk_rank(results, expected_chunk_id, expected_chunk_text)
+    if rank < 0:
         return -1
-
-    if expected_chunk_id:
-        for r in results:
-            if getattr(r, "doc_id", None) == expected_chunk_id:
-                return 1
-
-    if expected_chunk_text:
-        needle = expected_chunk_text.strip()
-        if needle:
-            for r in results:
-                raw_text = (getattr(r, "text", "") or "").strip()
-                text = _strip_enrichment_header(raw_text).strip() if raw_text else raw_text
-                if text and (needle in text or text in needle):
-                    return 1
-
-    return 0
+    return 1 if rank > 0 else 0
 
 
 def _any_metadata_or_doc_id_contains(result: Any, needle_lower: str) -> bool:

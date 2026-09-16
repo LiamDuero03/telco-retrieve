@@ -27,6 +27,8 @@ class LocalGenerator:
                      Falls back to LOCAL_LLM_API_KEY, then no Authorization header.
         max_tokens:  Maximum tokens in the response.
         temperature: Sampling temperature (0.0 = deterministic).
+        top_p:       Nucleus sampling threshold. None (default) omits it, using
+                     the server's own default.
         timeout:     Seconds to wait for a response.
 
     Example:
@@ -42,6 +44,7 @@ class LocalGenerator:
         api_key:     str | None = None,
         max_tokens:  int   = 1000,
         temperature: float = 0.0,
+        top_p:       float | None = None,
         timeout:     int   = 60,
         prompt_mode: str   = DEFAULT_PROMPT_MODE,
     ):
@@ -52,6 +55,7 @@ class LocalGenerator:
         self.api_key     = api_key or os.environ.get("LOCAL_LLM_API_KEY")
         self.max_tokens  = max_tokens
         self.temperature = temperature
+        self.top_p       = top_p
         self.timeout     = timeout
         self.prompt_mode = prompt_mode
 
@@ -83,7 +87,7 @@ class LocalGenerator:
             }
 
         context = "\n\n---\n\n".join(r.text for r in results)
-        sources = list({r.metadata.get("source", "") for r in results})
+        sources = list(dict.fromkeys(r.metadata.get("source", "") for r in results))
 
         system_prompt = resolve_system_prompt(source_type, self.prompt_mode)
         user_prompt = f"Context:\n{context}\n\nQuestion: {question}\n\nAnswer:"
@@ -102,6 +106,8 @@ class LocalGenerator:
                 {"role": "user",   "content": user_prompt},
             ],
         }
+        if self.top_p is not None:
+            payload["top_p"] = self.top_p
         if response_schema is not None:
             payload["response_format"] = {
                 "type": "json_schema",
