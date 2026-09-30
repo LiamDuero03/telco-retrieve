@@ -59,14 +59,20 @@ ds = load_dataset("GSMA/telco-retrieve-chunks")
 
 ## Installation
 
+From a clone of this repository (the package is not published on PyPI):
+
 ```bash
-pip install open-telco-rag[local-embed,pdf,docx]
+git clone https://github.com/Znbne/telco-retrieve
+cd telco-retrieve
+pip install -e ".[local-embed,pdf,docx]"
 ```
+
+If a release is published, `pip install open-telco-rag[local-embed,pdf,docx]` installs the same extras.
 
 For GPU-accelerated embedding (recommended for large corpus ingestion):
 
 ```bash
-pip install open-telco-rag[local-embed,pdf,docx]
+pip install -e ".[local-embed,pdf,docx]"
 # Then install PyTorch with ROCm or CUDA — see https://pytorch.org/get-started/locally/
 ```
 
@@ -87,6 +93,23 @@ DATALAB_API_KEY=your_key_here         # optional — for Marker PDF preprocessin
 ### 2. Download a corpus
 
 Download O-RAN specifications from [o-ran.org](https://www.o-ran.org/specifications) into `data/oran/`.
+
+**3GPP:** the CLI does not download specs; you supply the files. The Markdown conversions of the 3GPP
+specifications are in the TSpec-LLM dataset on Hugging Face (`rasoul-nikbakht/TSpec-LLM`; the id was checked
+on 2026-09-30, but verify it and read its terms before use: the dataset is gated, so log in with
+`huggingface-cli login` and accept them first). It holds a `.md` and a `.docx` for every spec, and the 3GPP
+source ingests **both** extensions, so download only the Markdown:
+
+```bash
+pip install huggingface_hub
+python -c "from huggingface_hub import snapshot_download; snapshot_download('rasoul-nikbakht/TSpec-LLM', repo_type='dataset', allow_patterns=['3GPP-clean/*.md'], local_dir='data/3gpp')"
+open-telco-rag ingest 3gpp --data data/3gpp/3GPP-clean --strategy hierarchical_markdown
+```
+
+The layout is `3GPP-clean/Rel-<N>/<NN>_series/<spec>.md`; the release, series, spec number and version come from
+those folder and file names (`28312-i11.md` is TS 28.312, Rel-18). Files whose names do not follow that pattern
+still ingest but may lack `spec_number`. All releases are millions of chunks: see "Resume" below and ingest one
+release at a time if you want the smallest possible restart unit.
 
 ### 3. Ingest
 
@@ -184,10 +207,14 @@ open-telco-rag ingest oran \
 | `--use-marker` | off | Use Datalab Marker API for PDF preprocessing |
 | `--collection` | `source_model` | Override collection name |
 | `--embed-backend` | `local` | Backend for computing vector embeddings: `local` (CPU/GPU) or `openrouter` (Cloud APIs) |
-| `--batch-size` | 64 / 500 | Parallel payload size. Defaults to 64 locally, or 500 for high-throughput OpenRouter bulk ingestion |
+| `--batch-size` | 256 / 500 | Embedding batch size: 256 locally, 500 with `--embed-backend openrouter` (the `ingest()` Python function itself defaults to 64) |
 | `--embed-max-workers` | `10` | OpenRouter embeddings only: in-flight requests per `embed()` call |
 
-**Resume**: by default an interrupted ingest continues where it stopped. The
+`--overlap` has no effect on `hierarchical_markdown`, which splits on headings and `--chunk-size` only.
+
+**Resume**: by default an interrupted ingest continues where it stopped. Progress is saved during the run, as
+soon as every chunk of a file is confirmed stored in both ChromaDB and the FTS5 index, so a run that is killed
+resumes with the files that were not fully stored (a file with any unwritten chunk is not recorded). The
 progress file in `logs/` belongs to one configuration (database path, collection,
 embedding model, chunking and enrichment settings; secrets are never recorded),
 so ingesting into a different collection or with different settings starts from
@@ -197,6 +224,16 @@ renamed to `*.bak` with a warning, and progress files from older versions
 ingest interrupted before upgrading restarts from scratch. Re-ingesting into a
 collection that already holds chunks from other settings warns that they can end
 up mixed; use `--no-resume` to rebuild it or a new `--collection`.
+
+**Failed files:** a file that cannot be parsed (a corrupt `.docx`, an empty file) is counted under `Errors:` or
+`Skipped:`, logged in `logs/ingest_*.csv`, and retried by the next run; the rest of the run continues. `ingest`
+exits with status 0 even when some files failed, and it does not check that a parsed file's text is sensible
+(a binary file named `.md` is ingested as text), so check the `Errors:` line or the CSV, and the chunk count with
+`open-telco-rag info`.
+
+**Chunk ids** are `<path relative to --data>::<model key>::<chunk index>`, with the path written using the
+operating system's separator: a collection built on Windows has backslashes in its ids. The evaluation metrics
+compare ids independently of the separator; the stored ids are not rewritten.
 
 Ingest also builds a per-collection SQLite FTS5 BM25 index alongside ChromaDB, enabling `--search-method bm25` and `--search-method hybrid` retrieval.
 
@@ -348,6 +385,10 @@ open-telco-rag ask "What does TS 28.312 define for intent?" \
 | `--collection` | `source_model` | Override collection name |
 | `--embed-backend` | `local` | Backend for computing vector embeddings (`local` or `openrouter`) |
 | `--resolve-parents` | off | Expand retrieved child chunks into full parent contexts |
+
+`search` prints one hit per source file and heading. With the default `text_baseline` strategy the stored
+`heading` is empty, so all hits from one file collapse into a single result and fewer than `--top-k` results
+are shown; ingest with `--strategy hierarchical_markdown` to store section headings.
 
 ### Reranker models
 
