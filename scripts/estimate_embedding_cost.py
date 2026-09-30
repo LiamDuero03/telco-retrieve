@@ -1,11 +1,9 @@
-"""Estimate the $ cost of (re-)embedding an already-ingested ChromaDB
-collection via OpenRouter's embeddings API, for every model in
-configs/embedding_models.json.
+"""Estimate the $ cost of (re-)embedding an already-ingested ChromaDB collection
+via OpenRouter, for every model in configs/embedding_models.json.
 
-Real chunk text -> real tiktoken counts -> per-token OpenRouter pricing.
-Models with no price in the table are listed as "no price" (local-only models
-such as the otel-* fine-tunes, or OpenRouter models missing from the snapshot
--- use --refresh-pricing to fetch live prices).
+Real chunk text -> tiktoken counts -> per-token OpenRouter pricing. Models with no
+price in the table are listed as "no price" (local-only models, or OpenRouter
+models missing from the snapshot; --refresh-pricing fetches live prices).
 
 Usage:
     python scripts/estimate_embedding_cost.py --db-path chroma_db

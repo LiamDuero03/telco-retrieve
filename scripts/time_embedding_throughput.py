@@ -1,18 +1,12 @@
 """Measure local embedding throughput on real chunk texts.
 
-Pulls already-stored chunk texts from an existing ChromaDB collection and runs
-them through the same SentenceTransformerEmbedder.embed() call ingestion uses
-(same batch size, same GPU autocast path), then extrapolates texts/sec to the
-collection's full chunk count. Useful when the raw source corpus isn't on the
-machine.
-
-Excludes: file parsing, markdown chunking, ChromaDB writes (all CPU-bound,
-typically much faster than the GPU embedding forward pass, but not measured
-here -- this gives you the embedding-stage floor, not a full ingest total).
+Runs stored chunk texts from an existing ChromaDB collection through the same
+SentenceTransformerEmbedder.embed() call ingestion uses, then extrapolates texts/sec
+to the collection's full chunk count. Only the embedding stage is timed (no file
+parsing, chunking or ChromaDB writes).
 
 Usage:
-    python scripts/time_embedding_throughput.py --db-path chroma_db \
-        --collection <collection-name> --model-key bge --sample-size 5000
+    python scripts/time_embedding_throughput.py --db-path chroma_db --collection <collection-name> --model-key bge --sample-size 5000
 """
 from __future__ import annotations
 

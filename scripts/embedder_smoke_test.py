@@ -1,17 +1,12 @@
-"""Smoke test for every LOCALLY-hosted embedder in configs/embedding_models.json
-(OpenRouter-served keys are skipped: "or-*" keys and entries with
-"backend": "openrouter" -- see open_telco_rag/embedders/openrouter_embedder.py).
+"""Smoke test for every locally hosted embedder in configs/embedding_models.json
+(OpenRouter-served keys are skipped).
 
-For each model: embeds --n-chunks sample document chunks (is_query=False)
-and --n-queries sample queries (is_query=True -- exercises query_prefix/
-query_prompt_name where configured), then reports dimension, a unit-norm
-check (descriptive only -- most sentence-transformers models are NOT
-unit-norm without normalize_embeddings=True, so False is expected, not a
-failure), throughput, peak GPU memory (None if no GPU -- skipped
-gracefully, not an error), and an extrapolated time for --extrapolate-n
-chunks.
+For each model: embeds --n-chunks sample chunks and --n-queries sample queries (so
+query prefixes are exercised), then reports dimension, a unit-norm check
+(descriptive only), throughput, peak GPU memory (None without a GPU) and an
+extrapolated time for --extrapolate-n chunks.
 
-Usage (tiny inputs -- this is a smoke test, not a benchmark):
+Usage (tiny inputs, this is a smoke test, not a benchmark):
     python scripts/embedder_smoke_test.py --n-chunks 20 --n-queries 5
     python scripts/embedder_smoke_test.py --models minilm bge-m3
 """

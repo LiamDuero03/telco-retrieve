@@ -1,34 +1,18 @@
 """Optional: add evidence spans to a question file, enabling the span metrics
 (span_hit_at_k / span_hit_in_context) in `evaluate`.
 
-Locates each question's ground-truth chunk text inside its cleaned source
-document and writes evidence_char_start/evidence_char_end/evidence_doc_id
-onto a NEW question file (refuses to overwrite the input, never drops a
-question that couldn't be matched).
+Finds each question's source_text in its cleaned source document and writes
+evidence_char_start / evidence_char_end / evidence_doc_id to a NEW question file
+(the input is never overwritten). Input: {"questions": [...]} with chunk_id and
+source_text per question.
+
+Matching: the source file comes from chunk_id's "{rel}::{model_key}::{chunk_index}"
+prefix under --data-dir, is loaded and cleaned as ingestion does, then source_text is
+located exactly, falling back to a whitespace-normalised regex. Questions that cannot
+be matched are kept unchanged (evidence_* stay None) and counted in the report.
 
 Usage:
-    python scripts/add_evidence_spans.py \
-        --questions-file configs/eval_questions/3gpp.json \
-        --data-dir data/3gpp \
-        --source-type 3gpp \
-        --output configs/eval_questions/3gpp_with_spans.json
-
-Input: a question file of the form {"questions": [...]} whose questions carry
-`chunk_id` and `source_text`.
-
-A question is matched by:
-  1. reading chunk_id's "{rel}::{model_key}::{chunk_index}" prefix to find
-     its source file under --data-dir
-  2. loading + cleaning that file exactly as ingestion does
-     (cli.main._get_source(source_type).load()/.clean())
-  3. locating source_text in the cleaned text, exact match first, then a
-     whitespace-normalised regex fallback (handles re-wrapped/re-flowed
-     whitespace between when the question was generated and now)
-
-Questions with no chunk_id/source_text, an unresolvable source file, or no
-match under either strategy are left in the output UNCHANGED (evidence_*
-fields stay None) and counted as unmatched/not-attempted in the report --
-never silently dropped.
+    python scripts/add_evidence_spans.py --questions-file configs/eval_questions/3gpp.json --data-dir data/3gpp --source-type 3gpp --output configs/eval_questions/3gpp_with_spans.json
 """
 from __future__ import annotations
 

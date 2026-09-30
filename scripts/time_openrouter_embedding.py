@@ -1,15 +1,12 @@
 """Measure OpenRouter embedding throughput on real chunk texts.
 
-Same idea as time_embedding_throughput.py (local), but for OpenRouterEmbedder:
-network-bound (HTTP batches of up to batch_size texts, concurrent workers),
-including real API latency and rate limiting.
-
-Makes REAL, PAID API calls (one per batch of --sample-size texts): keep the
-sample small. Needs OPENROUTER_API_KEY in the environment or a .env file.
+Like time_embedding_throughput.py but for OpenRouterEmbedder: network-bound, with
+real API latency and rate limiting. Makes real, PAID API calls (one per batch of
+--sample-size texts), so keep the sample small. Needs OPENROUTER_API_KEY in the
+environment or a .env file.
 
 Usage:
-    python scripts/time_openrouter_embedding.py --db-path chroma_db \
-        --collection <collection-name> --model-key or-bge-m3 --sample-size 500
+    python scripts/time_openrouter_embedding.py --db-path chroma_db --collection <collection-name> --model-key or-bge-m3 --sample-size 500
 """
 from __future__ import annotations
 
