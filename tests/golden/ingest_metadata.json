@@ -1,0 +1,370 @@
+{
+ "hierarchical_markdown/defaults": [
+  {
+   "id": "Rel-18\\28312-i11.md::minilm::0",
+   "metadata": {
+    "canonical_id": "28.312 (Rel-18)",
+    "chunk_index": 0,
+    "filename": "28312-i11.md",
+    "heading": "Section 1",
+    "release": "Rel-18",
+    "series": "28",
+    "source": "28312-i11.md",
+    "source_type": "3gpp",
+    "spec_number": "28.312",
+    "version": "i11"
+   },
+   "text_len": 529
+  },
+  {
+   "id": "Rel-18\\28312-i11.md::minilm::1",
+   "metadata": {
+    "canonical_id": "28.312 (Rel-18)",
+    "chunk_index": 1,
+    "filename": "28312-i11.md",
+    "heading": "Section 2",
+    "release": "Rel-18",
+    "series": "28",
+    "source": "28312-i11.md",
+    "source_type": "3gpp",
+    "spec_number": "28.312",
+    "version": "i11"
+   },
+   "text_len": 529
+  },
+  {
+   "id": "Rel-18\\28312-i11.md::minilm::2",
+   "metadata": {
+    "canonical_id": "28.312 (Rel-18)",
+    "chunk_index": 2,
+    "filename": "28312-i11.md",
+    "heading": "Section 3",
+    "release": "Rel-18",
+    "series": "28",
+    "source": "28312-i11.md",
+    "source_type": "3gpp",
+    "spec_number": "28.312",
+    "version": "i11"
+   },
+   "text_len": 529
+  },
+  {
+   "id": "Rel-18\\28312-i11.md::minilm::3",
+   "metadata": {
+    "canonical_id": "28.312 (Rel-18)",
+    "chunk_index": 3,
+    "filename": "28312-i11.md",
+    "heading": "Section 4",
+    "release": "Rel-18",
+    "series": "28",
+    "source": "28312-i11.md",
+    "source_type": "3gpp",
+    "spec_number": "28.312",
+    "version": "i11"
+   },
+   "text_len": 529
+  }
+ ],
+ "parent_child/defaults": [
+  {
+   "id": "Rel-18\\28312-i11.md::minilm::0",
+   "metadata": {
+    "canonical_id": "28.312 (Rel-18)",
+    "chunk_index": 0,
+    "filename": "28312-i11.md",
+    "full_parent_text": "## Section 1\n\n\nParagraph 1.1: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 11, and the SMO configures policies over O1.\n\nParagraph 1.2: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 12, and the SMO configures policies over O1.\n\nParagraph 1.3: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 13, and the SMO configures policies over O1.\n\nParagraph 1.4: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 14, and the SMO configures policies over O1.",
+    "heading": "Section 1",
+    "parent_context": "## Section 1\n\n\nParagraph 1.1: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 11, and the SMO configures policies over O1.\n\nParagraph 1.2: the Near-RT RIC exposes E2 and A1 interfa...",
+    "parent_id": "3gpp_P_0",
+    "release": "Rel-18",
+    "series": "28",
+    "source": "28312-i11.md",
+    "source_type": "3gpp",
+    "spec_number": "28.312",
+    "version": "i11"
+   },
+   "text_len": 399
+  },
+  {
+   "id": "Rel-18\\28312-i11.md::minilm::1",
+   "metadata": {
+    "canonical_id": "28.312 (Rel-18)",
+    "chunk_index": 1,
+    "filename": "28312-i11.md",
+    "full_parent_text": "## Section 1\n\n\nParagraph 1.1: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 11, and the SMO configures policies over O1.\n\nParagraph 1.2: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 12, and the SMO configures policies over O1.\n\nParagraph 1.3: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 13, and the SMO configures policies over O1.\n\nParagraph 1.4: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 14, and the SMO configures policies over O1.",
+    "heading": "Section 1",
+    "parent_context": "## Section 1\n\n\nParagraph 1.1: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 11, and the SMO configures policies over O1.\n\nParagraph 1.2: the Near-RT RIC exposes E2 and A1 interfa...",
+    "parent_id": "3gpp_P_0",
+    "release": "Rel-18",
+    "series": "28",
+    "source": "28312-i11.md",
+    "source_type": "3gpp",
+    "spec_number": "28.312",
+    "version": "i11"
+   },
+   "text_len": 127
+  },
+  {
+   "id": "Rel-18\\28312-i11.md::minilm::2",
+   "metadata": {
+    "canonical_id": "28.312 (Rel-18)",
+    "chunk_index": 2,
+    "filename": "28312-i11.md",
+    "full_parent_text": "## Section 2\n\n\nParagraph 2.1: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 21, and the SMO configures policies over O1.\n\nParagraph 2.2: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 22, and the SMO configures policies over O1.\n\nParagraph 2.3: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 23, and the SMO configures policies over O1.\n\nParagraph 2.4: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 24, and the SMO configures policies over O1.",
+    "heading": "Section 2",
+    "parent_context": "## Section 2\n\n\nParagraph 2.1: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 21, and the SMO configures policies over O1.\n\nParagraph 2.2: the Near-RT RIC exposes E2 and A1 interfa...",
+    "parent_id": "3gpp_P_1",
+    "release": "Rel-18",
+    "series": "28",
+    "source": "28312-i11.md",
+    "source_type": "3gpp",
+    "spec_number": "28.312",
+    "version": "i11"
+   },
+   "text_len": 399
+  },
+  {
+   "id": "Rel-18\\28312-i11.md::minilm::3",
+   "metadata": {
+    "canonical_id": "28.312 (Rel-18)",
+    "chunk_index": 3,
+    "filename": "28312-i11.md",
+    "full_parent_text": "## Section 2\n\n\nParagraph 2.1: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 21, and the SMO configures policies over O1.\n\nParagraph 2.2: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 22, and the SMO configures policies over O1.\n\nParagraph 2.3: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 23, and the SMO configures policies over O1.\n\nParagraph 2.4: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 24, and the SMO configures policies over O1.",
+    "heading": "Section 2",
+    "parent_context": "## Section 2\n\n\nParagraph 2.1: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 21, and the SMO configures policies over O1.\n\nParagraph 2.2: the Near-RT RIC exposes E2 and A1 interfa...",
+    "parent_id": "3gpp_P_1",
+    "release": "Rel-18",
+    "series": "28",
+    "source": "28312-i11.md",
+    "source_type": "3gpp",
+    "spec_number": "28.312",
+    "version": "i11"
+   },
+   "text_len": 127
+  },
+  {
+   "id": "Rel-18\\28312-i11.md::minilm::4",
+   "metadata": {
+    "canonical_id": "28.312 (Rel-18)",
+    "chunk_index": 4,
+    "filename": "28312-i11.md",
+    "full_parent_text": "## Section 3\n\n\nParagraph 3.1: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 31, and the SMO configures policies over O1.\n\nParagraph 3.2: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 32, and the SMO configures policies over O1.\n\nParagraph 3.3: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 33, and the SMO configures policies over O1.\n\nParagraph 3.4: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 34, and the SMO configures policies over O1.",
+    "heading": "Section 3",
+    "parent_context": "## Section 3\n\n\nParagraph 3.1: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 31, and the SMO configures policies over O1.\n\nParagraph 3.2: the Near-RT RIC exposes E2 and A1 interfa...",
+    "parent_id": "3gpp_P_2",
+    "release": "Rel-18",
+    "series": "28",
+    "source": "28312-i11.md",
+    "source_type": "3gpp",
+    "spec_number": "28.312",
+    "version": "i11"
+   },
+   "text_len": 399
+  },
+  {
+   "id": "Rel-18\\28312-i11.md::minilm::5",
+   "metadata": {
+    "canonical_id": "28.312 (Rel-18)",
+    "chunk_index": 5,
+    "filename": "28312-i11.md",
+    "full_parent_text": "## Section 3\n\n\nParagraph 3.1: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 31, and the SMO configures policies over O1.\n\nParagraph 3.2: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 32, and the SMO configures policies over O1.\n\nParagraph 3.3: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 33, and the SMO configures policies over O1.\n\nParagraph 3.4: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 34, and the SMO configures policies over O1.",
+    "heading": "Section 3",
+    "parent_context": "## Section 3\n\n\nParagraph 3.1: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 31, and the SMO configures policies over O1.\n\nParagraph 3.2: the Near-RT RIC exposes E2 and A1 interfa...",
+    "parent_id": "3gpp_P_2",
+    "release": "Rel-18",
+    "series": "28",
+    "source": "28312-i11.md",
+    "source_type": "3gpp",
+    "spec_number": "28.312",
+    "version": "i11"
+   },
+   "text_len": 127
+  },
+  {
+   "id": "Rel-18\\28312-i11.md::minilm::6",
+   "metadata": {
+    "canonical_id": "28.312 (Rel-18)",
+    "chunk_index": 6,
+    "filename": "28312-i11.md",
+    "full_parent_text": "## Section 4\n\n\nParagraph 4.1: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 41, and the SMO configures policies over O1.\n\nParagraph 4.2: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 42, and the SMO configures policies over O1.\n\nParagraph 4.3: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 43, and the SMO configures policies over O1.\n\nParagraph 4.4: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 44, and the SMO configures policies over O1.",
+    "heading": "Section 4",
+    "parent_context": "## Section 4\n\n\nParagraph 4.1: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 41, and the SMO configures policies over O1.\n\nParagraph 4.2: the Near-RT RIC exposes E2 and A1 interfa...",
+    "parent_id": "3gpp_P_3",
+    "release": "Rel-18",
+    "series": "28",
+    "source": "28312-i11.md",
+    "source_type": "3gpp",
+    "spec_number": "28.312",
+    "version": "i11"
+   },
+   "text_len": 399
+  },
+  {
+   "id": "Rel-18\\28312-i11.md::minilm::7",
+   "metadata": {
+    "canonical_id": "28.312 (Rel-18)",
+    "chunk_index": 7,
+    "filename": "28312-i11.md",
+    "full_parent_text": "## Section 4\n\n\nParagraph 4.1: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 41, and the SMO configures policies over O1.\n\nParagraph 4.2: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 42, and the SMO configures policies over O1.\n\nParagraph 4.3: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 43, and the SMO configures policies over O1.\n\nParagraph 4.4: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 44, and the SMO configures policies over O1.",
+    "heading": "Section 4",
+    "parent_context": "## Section 4\n\n\nParagraph 4.1: the Near-RT RIC exposes E2 and A1 interfaces to xApps for procedure 41, and the SMO configures policies over O1.\n\nParagraph 4.2: the Near-RT RIC exposes E2 and A1 interfa...",
+    "parent_id": "3gpp_P_3",
+    "release": "Rel-18",
+    "series": "28",
+    "source": "28312-i11.md",
+    "source_type": "3gpp",
+    "spec_number": "28.312",
+    "version": "i11"
+   },
+   "text_len": 127
+  }
+ ],
+ "sliding_window_tokens/defaults": [
+  {
+   "id": "Rel-18\\28312-i11.md::minilm::0",
+   "metadata": {
+    "canonical_id": "28.312 (Rel-18)",
+    "chunk_index": 0,
+    "filename": "28312-i11.md",
+    "heading": "",
+    "release": "Rel-18",
+    "series": "28",
+    "source": "28312-i11.md",
+    "source_type": "3gpp",
+    "spec_number": "28.312",
+    "version": "i11"
+   },
+   "text_len": 425
+  },
+  {
+   "id": "Rel-18\\28312-i11.md::minilm::1",
+   "metadata": {
+    "canonical_id": "28.312 (Rel-18)",
+    "chunk_index": 1,
+    "filename": "28312-i11.md",
+    "heading": "",
+    "release": "Rel-18",
+    "series": "28",
+    "source": "28312-i11.md",
+    "source_type": "3gpp",
+    "spec_number": "28.312",
+    "version": "i11"
+   },
+   "text_len": 440
+  },
+  {
+   "id": "Rel-18\\28312-i11.md::minilm::2",
+   "metadata": {
+    "canonical_id": "28.312 (Rel-18)",
+    "chunk_index": 2,
+    "filename": "28312-i11.md",
+    "heading": "",
+    "release": "Rel-18",
+    "series": "28",
+    "source": "28312-i11.md",
+    "source_type": "3gpp",
+    "spec_number": "28.312",
+    "version": "i11"
+   },
+   "text_len": 427
+  },
+  {
+   "id": "Rel-18\\28312-i11.md::minilm::3",
+   "metadata": {
+    "canonical_id": "28.312 (Rel-18)",
+    "chunk_index": 3,
+    "filename": "28312-i11.md",
+    "heading": "",
+    "release": "Rel-18",
+    "series": "28",
+    "source": "28312-i11.md",
+    "source_type": "3gpp",
+    "spec_number": "28.312",
+    "version": "i11"
+   },
+   "text_len": 438
+  },
+  {
+   "id": "Rel-18\\28312-i11.md::minilm::4",
+   "metadata": {
+    "canonical_id": "28.312 (Rel-18)",
+    "chunk_index": 4,
+    "filename": "28312-i11.md",
+    "heading": "",
+    "release": "Rel-18",
+    "series": "28",
+    "source": "28312-i11.md",
+    "source_type": "3gpp",
+    "spec_number": "28.312",
+    "version": "i11"
+   },
+   "text_len": 441
+  },
+  {
+   "id": "Rel-18\\28312-i11.md::minilm::5",
+   "metadata": {
+    "canonical_id": "28.312 (Rel-18)",
+    "chunk_index": 5,
+    "filename": "28312-i11.md",
+    "heading": "",
+    "release": "Rel-18",
+    "series": "28",
+    "source": "28312-i11.md",
+    "source_type": "3gpp",
+    "spec_number": "28.312",
+    "version": "i11"
+   },
+   "text_len": 233
+  }
+ ],
+ "text_baseline/defaults": [
+  {
+   "id": "Rel-18\\28312-i11.md::minilm::0",
+   "metadata": {
+    "canonical_id": "28.312 (Rel-18)",
+    "chunk_index": 0,
+    "filename": "28312-i11.md",
+    "heading": "",
+    "release": "Rel-18",
+    "series": "28",
+    "source": "28312-i11.md",
+    "source_type": "3gpp",
+    "spec_number": "28.312",
+    "version": "i11"
+   },
+   "text_len": 929
+  },
+  {
+   "id": "Rel-18\\28312-i11.md::minilm::1",
+   "metadata": {
+    "canonical_id": "28.312 (Rel-18)",
+    "chunk_index": 1,
+    "filename": "28312-i11.md",
+    "heading": "",
+    "release": "Rel-18",
+    "series": "28",
+    "source": "28312-i11.md",
+    "source_type": "3gpp",
+    "spec_number": "28.312",
+    "version": "i11"
+   },
+   "text_len": 929
+  },
+  {
+   "id": "Rel-18\\28312-i11.md::minilm::2",
+   "metadata": {
+    "canonical_id": "28.312 (Rel-18)",
+    "chunk_index": 2,
+    "filename": "28312-i11.md",
+    "heading": "",
+    "release": "Rel-18",
+    "series": "28",
+    "source": "28312-i11.md",
+    "source_type": "3gpp",
+    "spec_number": "28.312",
+    "version": "i11"
+   },
+   "text_len": 256
+  }
+ ]
+}
