@@ -43,17 +43,17 @@ class TPPSource:
         text = re.sub(r"(\+[-=+]+\+\n)(\|.*?\n)+(\+[-=+]+\+\n?)+", "", text)
         # Remove image references
         text = re.sub(r"!\[.*?\]\(.*?\)(\{.*?\})?", "", text)
-        # Remove superscript notation
-        text = re.sub(r"\^[^^]+\^", "", text)
+        # Remove pandoc superscripts (^x^): one line, no spaces, no $, so LaTeX exponents ($10^{-5}$) survive
+        text = re.sub(r"\^[^^\s$]+\^", "", text)
         # Remove width/height attributes left over from image conversion
-        text = re.sub(r'\{[^}]*width=[^}]*\}', '', text)
+        text = re.sub(r'\{[^}\n]*width=[^}\n]*\}', '', text)
         # Remove standalone media references
         text = re.sub(r"media/image\d+\.\w+", "", text)
-        # Remove 3GPP document cover table boilerplate
+        # Remove 3GPP document cover table boilerplate, never past the Scope heading
         text = re.sub(
-            r"3rd Generation Partnership Project.*?The present document",
+            r"3rd Generation Partnership Project(?:(?!^(?:#{1,6}\s*)?1\s+Scope\b).)*?The present document",
             "The present document",
-            text, flags=re.DOTALL
+            text, flags=re.DOTALL | re.MULTILINE
         )
         text = re.sub(r"\n{3,}", "\n\n", text)
         return text.strip()
