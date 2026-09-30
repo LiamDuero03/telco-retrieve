@@ -217,7 +217,7 @@ open-telco-rag ingest 3gpp --model bge --strategy hierarchical_markdown \
 - Combining token sizing with a character size (`--chunk-size`, `--overlap`,
   `parent_size`, `child_size`, or `chunk_tokens` for `sliding_window_tokens`)
   is an error rather than a silent choice. `max_tokens` must be at least
-  `target_tokens`.
+  `target_tokens`, and `overlap_tokens` must be smaller than the chunk size.
 - `parent_child`: `target_tokens` sizes the child chunks (parents default to
   4x), so `max_tokens` bounds the retrieved chunk.
 - The tokenizer is only initialized when token sizing is used.

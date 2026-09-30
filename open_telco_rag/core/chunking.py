@@ -79,6 +79,16 @@ def _count_tokens(text: str) -> int:
     return len(_get_encoding().encode(text))
 
 
+def _check_token_overlap(overlap_tokens: int, size_tokens: int) -> None:
+    """token-mode overlap must be 0 <= overlap < chunk size; a larger overlap used
+    to be clamped to size-1, i.e. a one-token stride and a ~size-fold blow-up"""
+    if overlap_tokens < 0 or overlap_tokens >= size_tokens:
+        raise ValueError(
+            f"overlap_tokens ({overlap_tokens}) must be at least 0 and smaller than the chunk "
+            f"size ({size_tokens} tokens)."
+        )
+
+
 def _token_chunk(
     text: str,
     heading: str | None,
@@ -499,6 +509,7 @@ def chunk_text_baseline(
         effective_target = target_tokens or max_tokens
         effective_max = max_tokens or target_tokens
         effective_overlap = overlap_tokens or 0
+        _check_token_overlap(effective_overlap, effective_target)
         spans = _paragraph_spans(text)
         groups = _accumulate_paragraphs_with_overlap(
             text, spans, effective_target, effective_overlap, effective_max,
@@ -619,7 +630,7 @@ def chunk_sliding_window_tokens(
     if max_tokens is not None:
         effective_chunk_tokens = min(effective_chunk_tokens, max_tokens)
     effective_overlap = 0 if overlap_tokens is _OVERLAP_TOKENS_UNSET else overlap_tokens
-    effective_overlap = min(effective_overlap, max(0, effective_chunk_tokens - 1))
+    _check_token_overlap(effective_overlap, effective_chunk_tokens)
 
     tokenizer = tiktoken.get_encoding(encoding_name)
     tokens = tokenizer.encode(text)

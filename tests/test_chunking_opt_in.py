@@ -225,3 +225,19 @@ def test_cli_overlap_tokens_requires_token_sizing(cli_ingest):
     cli_main, _ = cli_ingest
     with pytest.raises(SystemExit, match="requires"):
         cli_main._run_ingest(_cli_args(overlap_tokens=10))
+
+
+# ── token-mode overlap must be smaller than the chunk size ────────────────────
+
+@pytest.mark.parametrize("strategy", ["text_baseline", "sliding_window_tokens"])
+@pytest.mark.parametrize("overlap", [50, 80, -1])
+def test_token_overlap_not_smaller_than_the_chunk_size_is_an_error(strategy, overlap):
+    with pytest.raises(ValueError, match="overlap_tokens"):
+        chunk_document(DOC, strategy, target_tokens=50, overlap_tokens=overlap)
+
+
+@pytest.mark.parametrize("strategy", ["text_baseline", "sliding_window_tokens"])
+def test_valid_token_overlap_still_works(strategy):
+    chunks = chunk_document(DOC, strategy, target_tokens=60, overlap_tokens=10)
+    assert chunks and all(c.n_tokens <= 60 for c in chunks)
+    assert len(chunk_document(DOC, strategy, target_tokens=60, overlap_tokens=0)) <= len(chunks)
