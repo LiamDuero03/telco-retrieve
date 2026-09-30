@@ -3,7 +3,7 @@
 collect_run_record() gathers what is needed to tell later exactly what was run:
 code version, environment, resolved settings, model identities, the dataset and
 the index it was run against. Nothing secret is recorded (no keys, base URLs or
-local paths); anything that cannot be determined is None.
+local paths); anything that cannot be determined is None ("unknown" for the git fields).
 """
 from __future__ import annotations
 

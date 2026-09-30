@@ -38,8 +38,7 @@ class QuestionResult:
     # Drives which metrics apply; also used by aggregate() to group.
     answer_type: str = "open"
 
-    # difficulty label copied from EvalQuestion.difficulty; None (and omitted
-    # from serialized output) when the question has none
+    # opt-in: copied from EvalQuestion.difficulty
     difficulty: str | None = None
 
     # ── EFFICIENCY METRICS  ───────────────────────────────────────
@@ -66,9 +65,7 @@ class QuestionResult:
     judge_prompt_tokens:     int = 0
     judge_completion_tokens: int = 0
 
-    # every judge call made for this question: [{"metric", "prompt",
-    # "raw_response"}, ...] in call order. opt-in (record_judge_calls);
-    # None, and omitted from saved output, otherwise
+    # opt-in (record_judge_calls): [{"metric", "prompt", "raw_response"}, ...] in call order
     judge_calls: list[dict] | None = None
 
     # ── Deterministic scoring (mc/tf only; -1.0 = not applicable) ────────────
@@ -103,25 +100,21 @@ class QuestionResult:
     candidate_chunk_rank: int = -1
     used_chunk_rank:      int = -1
 
-    # ── span hit (opt-in): None unless the question has an evidence span; -1 =
-    # no chunk in this run carries offsets (legacy collection). Omitted from
-    # serialized output while None. Sits alongside exact_chunk_hit/chunk_rank.
+    # ── span hit (opt-in): None without an evidence span; -1 = no retrieved chunk
+    # carries offsets (legacy collection)
     span_hit_at_k:       int | None = None
     span_hit_in_context: int | None = None
 
-    # ── raw retrieval scores (opt-in, record_retrieval_scores): the store distance of every
-    # candidate / used chunk, aligned with candidate_chunk_ids / used_chunk_ids; None otherwise
+    # ── raw retrieval scores (opt-in): store distances aligned with candidate_chunk_ids / used_chunk_ids
     candidate_distances: list | None = None
     used_distances:      list | None = None
 
-    # ── budgeted context (opt-in): None unless context_token_budget was set,
-    # and left out of serialized output while None (see question_to_dict)
+    # ── budgeted context (opt-in): set only with context_token_budget
     context_tokens: int | None = None    # tokens in the chunks actually used
     n_chunks_used:  int | None = None    # chunks fill_context_budget() kept
     budget:         int | None = None    # the context_token_budget for this question
     fill_ratio:     float | None = None  # context_tokens / budget
-    # what the fill did: candidates, kept, skipped, truncated, stopped_by_policy,
-    # pool_exhausted, empty (overflow events); budgeted questions only
+    # fill outcome: candidates, kept, skipped, truncated, stopped_by_policy, pool_exhausted, empty
     budget_stats:   dict | None = None
 
     # ── Retrieval metrics: computed for every non-baseline question ──────────
@@ -197,28 +190,24 @@ class CorpusResult:
     # Stronger companion to canonical_hit_rate. -1.0 with no chunk provenance.
     exact_chunk_hit_rate:  float = -1.0
     mean_reciprocal_rank: float = -1.0   # mean of 1/used_chunk_rank; -1.0 with no provenance
-    # span hit rates (opt-in): None, and omitted from output, without evidence spans
+    # span hit rates (opt-in): only with evidence spans
     span_hit_at_k_rate:       float | None = None
     span_hit_in_context_rate: float | None = None
     mean_coverage_ratio:   float = -1.0
 
-    # ── reproducibility record (see evaluation/provenance.py): code version, environment,
-    # resolved settings, model identities, dataset hash, index settings. absent in older files
+    # ── reproducibility record (see evaluation/provenance.py); absent in older files
     run_record: dict | None = None
 
-    # ── failed questions (only present when at least one question failed): count,
-    # share of n_questions and a breakdown by exception type
+    # ── failed questions: only present when at least one question failed
     n_errors:       int | None = None
     error_rate:     float | None = None
     errors_by_type: dict | None = None
 
-    # ── run-level component stats (opt-in): only set when the reranker/embedder
-    # exposes counters (OTel reranker truncation, embedder truncation tracking,
-    # OpenRouter usage); None, and omitted from saved output, otherwise
+    # ── run-level component stats (opt-in): only when the reranker/embedder exposes counters
     reranker_stats: dict | None = None
     embedder_stats: dict | None = None
 
-    # ── budgeted context aggregates (opt-in): None, and omitted from output, without a budget
+    # ── budgeted context aggregates (opt-in)
     mean_context_tokens: float | None = None
     mean_fill_ratio:     float | None = None
 
@@ -472,10 +461,8 @@ def _retrieval_population(results: list[QuestionResult]) -> list[QuestionResult]
 def aggregate(question_results: list[QuestionResult]) -> dict:
     """Compute aggregate metrics from a list of QuestionResults.
 
-    Failed questions (error != "") are counted in n_errors / error_rate /
-    errors_by_type (present only when something failed) and left out of the
-    retrieval-metric means (mean_similarity, coverage, distinct sources).
-    Rates over a sentinel (-1 = not applicable) already skip them."""
+    Failed questions are counted in n_errors / error_rate / errors_by_type and
+    left out of the retrieval means."""
     retrieval_qs = _retrieval_population(question_results)
 
     canonical_qs = [r for r in question_results if r.canonical_hit >= 0]

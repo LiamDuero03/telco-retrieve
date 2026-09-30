@@ -422,10 +422,8 @@ def _run_retrieval_pass(
     result: QuestionResult,
     record_scores: bool = False,
 ) -> tuple[list, list]:
-    """search -> optional rerank -> optional budget fill, filling in result's
-    latency / candidate_* / used_* / budget fields. shared by the RAG and
-    retrieval_only paths so they can't diverge. returns (candidates, retrieved).
-    """
+    """search -> optional rerank -> optional budget fill, recorded on result; shared by
+    the RAG and retrieval_only paths. returns (candidates, retrieved)"""
     from open_telco_rag.core.pipeline import search
 
     # in budget mode, over-fetch candidate_pool instead of top_k; the budget
@@ -495,8 +493,8 @@ def _compute_retrieval_metrics(
     store: Any,
     sim_threshold: float,
 ) -> None:
-    """fill in every retrieval-tier metric on result; shared by the RAG path
-    (after scoring) and the retrieval_only path. never called for baseline."""
+    """fill in the retrieval-tier metrics on result; shared by the RAG and retrieval_only
+    paths, never called for baseline"""
     mean_s, min_s, max_s  = cosine_sim_stats(retrieved)
     result.mean_similarity = mean_s
     result.min_similarity  = min_s
@@ -508,8 +506,7 @@ def _compute_retrieval_metrics(
     result.exact_chunk_hit = exact_chunk_hit(retrieved, q.chunk_id, q.source_text)
     result.candidate_chunk_rank = chunk_rank(retrieved_candidates, q.chunk_id, q.source_text)
     result.used_chunk_rank = chunk_rank(retrieved, q.chunk_id, q.source_text)
-    # overlap-based companions to the exact-chunk metrics; only when the
-    # question carries an evidence span (otherwise the fields stay None)
+    # span metrics need an evidence span; the fields stay None without one
     if q.evidence_doc_id and q.evidence_char_start is not None and q.evidence_char_end is not None:
         result.span_hit_at_k = span_hit_at_k(
             retrieved_candidates, q.evidence_char_start, q.evidence_char_end, q.evidence_doc_id,
@@ -699,7 +696,6 @@ def evaluate_question(
         result.judge_calls = []
 
     def _judge(metric: str):
-        # off by default: the judge callable is passed through untouched
         if not record_judge_calls:
             return llm_call
         return _recording_llm_call(llm_call, metric, result.judge_calls)

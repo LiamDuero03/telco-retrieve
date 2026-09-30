@@ -205,18 +205,10 @@ def _span_overlap_hit(
     evidence_char_end: int | None,
     evidence_doc_id: str | None,
 ) -> int:
-    """Shared logic for span_hit_at_k/span_hit_in_context: does any result
-    from evidence_doc_id whose stored char_start/char_end are valid overlap
-    [evidence_char_start, evidence_char_end) by any amount?
+    """does any result from evidence_doc_id overlap the evidence span by any amount?
 
-    Returns:
-       1  - some chunk from evidence_doc_id overlaps the evidence span
-       0  - no chunk overlaps it (offsets ARE available in this retrieval,
-            so the check was meaningful and came back negative)
-      -1  - not applicable: no evidence span on the question, OR none of
-            `results` carries valid char_start/char_end at all (a legacy
-            collection ingested before core/chunking.py's token-sizing
-            path -- see Chunk.char_start/char_end)
+    1 = a chunk overlaps, 0 = offsets exist but none overlap, -1 = not applicable
+    (no evidence span, or no result carries offsets, e.g. a legacy collection)
     """
     if evidence_char_start is None or evidence_char_end is None or not evidence_doc_id:
         return -1
@@ -241,16 +233,8 @@ def span_hit_at_k(
     evidence_char_end: int | None,
     evidence_doc_id: str | None,
 ) -> int:
-    """
-    Binary check, chunker-agnostic alternative to exact_chunk_hit: does any
-    RETRIEVED chunk's [char_start, char_end) span overlap the question's
-    evidence span (see EvalQuestion.evidence_char_start/end/doc_id) by any
-    amount -- not necessarily an exact chunk-boundary match, so it's
-    meaningful across chunkers/chunk sizes that don't share the ground-truth
-    chunk boundaries text_baseline/chunk_id-based matching assumes.
-
-    See _span_overlap_hit() for the -1/0/1 sentinel convention.
-    """
+    """chunker-agnostic alternative to exact_chunk_hit: does a retrieved chunk overlap
+    the evidence span? see _span_overlap_hit for the -1/0/1 convention"""
     return _span_overlap_hit(results, evidence_char_start, evidence_char_end, evidence_doc_id)
 
 
@@ -260,15 +244,8 @@ def span_hit_in_context(
     evidence_char_end: int | None,
     evidence_doc_id: str | None,
 ) -> int:
-    """
-    Same overlap check as span_hit_at_k, but over `context` -- the chunks
-    actually PLACED in the generator's context after budgeted assembly (see
-    core.retrieval.fill_context_budget), not the full retrieved candidate
-    set. A question can be a span_hit_at_k hit while missing span_hit_in_context
-    (the evidence chunk was retrieved but didn't make it into the budget).
-
-    See _span_overlap_hit() for the -1/0/1 sentinel convention.
-    """
+    """span_hit_at_k over the chunks that made it into the generator's context after
+    budgeted assembly, so a retrieved evidence chunk can still miss here"""
     return _span_overlap_hit(context, evidence_char_start, evidence_char_end, evidence_doc_id)
 
 
