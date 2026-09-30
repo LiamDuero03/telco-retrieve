@@ -495,7 +495,7 @@ def ingest(
                         completed.update(newly)
                         _write_progress(progress_file, fingerprint, settings, completed)
                     except Exception:  # noqa: BLE001
-                        pass                    # the end-of-run write reports a failing progress file
+                        return                  # the end-of-run write reports a failing progress file
 
             def _flush_writes(n: int) -> None:
                 """Dispatch the first n embedded rows to background writes,
