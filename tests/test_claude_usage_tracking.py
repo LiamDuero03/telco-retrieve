@@ -14,6 +14,9 @@ from open_telco_rag.evaluation._claude import _make_local_call, _make_openrouter
 
 
 class _FakeResponse:
+    status_code = 200  # read by the OpenRouter retry helper
+    headers: dict = {}
+
     def __init__(self, content, usage=None):
         self._content = content
         self._usage = usage or {}
@@ -27,8 +30,8 @@ class _FakeResponse:
 
 def test_local_call_accumulates_usage_across_multiple_calls(monkeypatch):
     monkeypatch.setattr(
-        requests, "post",
-        lambda *a, **kw: _FakeResponse("ok", usage={"prompt_tokens": 50, "completion_tokens": 10}),
+        requests.Session, "post",
+        lambda self, *a, **kw: _FakeResponse("ok", usage={"prompt_tokens": 50, "completion_tokens": 10}),
     )
 
     call = _make_local_call("openai/gpt-oss-120b", base_url="http://localhost:8000/v1")
@@ -47,7 +50,7 @@ def test_local_call_accumulates_usage_across_multiple_calls(monkeypatch):
 
 def test_local_call_missing_usage_block_does_not_crash_and_stays_zero(monkeypatch):
     """Server omitting "usage" (e.g. older vLLM) must not crash — just contribute nothing."""
-    monkeypatch.setattr(requests, "post", lambda *a, **kw: _FakeResponse("ok", usage=None))
+    monkeypatch.setattr(requests.Session, "post", lambda self, *a, **kw: _FakeResponse("ok", usage=None))
 
     call = _make_local_call("openai/gpt-oss-120b", base_url="http://localhost:8000/v1")
     call("prompt", 64)
@@ -60,8 +63,8 @@ def test_two_local_call_instances_track_usage_independently(monkeypatch):
     """Each factory call returns its own tracked callable; usage must not leak
     between instances (e.g. two judge configs in the same process)."""
     monkeypatch.setattr(
-        requests, "post",
-        lambda *a, **kw: _FakeResponse("ok", usage={"prompt_tokens": 5, "completion_tokens": 1}),
+        requests.Session, "post",
+        lambda self, *a, **kw: _FakeResponse("ok", usage={"prompt_tokens": 5, "completion_tokens": 1}),
     )
 
     call_a = _make_local_call("model-a", base_url="http://localhost:8000/v1")
@@ -77,8 +80,8 @@ def test_two_local_call_instances_track_usage_independently(monkeypatch):
 def test_openrouter_call_accumulates_usage(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "fake-key-for-test")
     monkeypatch.setattr(
-        requests, "post",
-        lambda *a, **kw: _FakeResponse("ok", usage={"prompt_tokens": 30, "completion_tokens": 8}),
+        requests.Session, "post",
+        lambda self, *a, **kw: _FakeResponse("ok", usage={"prompt_tokens": 30, "completion_tokens": 8}),
     )
 
     call = _make_openrouter_call("some/model")
