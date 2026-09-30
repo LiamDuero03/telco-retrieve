@@ -93,6 +93,40 @@ def _local_token_count(text: str) -> int:
         # Fallback approximation if tiktoken fails
         return int(len(str(text).split()) * 1.3)
 
+def _is_number(x: Any) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool)
+
+
+def _reranker_stats(reranker: Any) -> dict | None:
+    """truncation counters of the run's reranker (OTel), or None if it has none"""
+    scored = getattr(reranker, "scored_count", None)
+    if not _is_number(scored) or not scored:
+        return None
+    return {
+        "truncation_rate": reranker.truncation_rate,
+        "truncated": reranker.truncated_count,
+        "scored": scored,
+        "query_max_chars": reranker.query_max_chars,
+        "doc_max_chars": reranker.doc_max_chars,
+    }
+
+
+def _embedder_stats(embedder: Any) -> dict | None:
+    """truncation counters (when tracking is on) and OpenRouter usage, if present"""
+    stats: dict = {}
+    scored = getattr(embedder, "scored_count", None)
+    if _is_number(scored) and scored:
+        stats.update(truncation_rate=embedder.truncation_rate,
+                     truncated=embedder.truncated_count, scored=scored)
+    tokens = getattr(embedder, "total_prompt_tokens", None)
+    cost = getattr(embedder, "total_cost_usd", None)
+    if _is_number(tokens) and tokens:
+        stats["prompt_tokens"] = tokens
+    if _is_number(cost) and cost:
+        stats["cost_usd"] = cost
+    return stats or None
+
+
 def _snapshot_llm_usage(llm_call: Callable[[str, int], str]) -> tuple[int, int]:
     """(cumulative prompt_tokens, completion_tokens) recorded on llm_call by
     _claude.py's wrappers. (0, 0) for a callable that doesn't track usage.
@@ -920,6 +954,9 @@ def evaluate_corpus(
         rag_generator_top_p=generation_top_p,
         **aggregate(rag_results),
     )
+
+    rag_result.reranker_stats = _reranker_stats(reranker)
+    rag_result.embedder_stats = _embedder_stats(embedder)
 
     print_summary(rag_result)
 

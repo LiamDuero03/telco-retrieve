@@ -189,6 +189,12 @@ class CorpusResult:
     span_hit_in_context_rate: float | None = None
     mean_coverage_ratio:   float = -1.0
 
+    # ── run-level component stats (opt-in): only set when the reranker/embedder
+    # exposes counters (OTel reranker truncation, embedder truncation tracking,
+    # OpenRouter usage); None, and omitted from saved output, otherwise
+    reranker_stats: dict | None = None
+    embedder_stats: dict | None = None
+
     # ── budgeted context aggregates (opt-in): None, and omitted from output, without a budget
     mean_context_tokens: float | None = None
     mean_fill_ratio:     float | None = None
@@ -485,6 +491,7 @@ def aggregate(question_results: list[QuestionResult]) -> dict:
 _OPT_IN_QUESTION_FIELDS = ("context_tokens", "n_chunks_used", "budget", "fill_ratio",
                            "span_hit_at_k", "span_hit_in_context", "difficulty")
 _OPT_IN_CORPUS_FIELDS = ("mean_context_tokens", "mean_fill_ratio",
+                         "reranker_stats", "embedder_stats",
                          "span_hit_at_k_rate", "span_hit_in_context_rate")
 
 
