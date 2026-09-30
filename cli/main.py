@@ -820,6 +820,7 @@ def _run_evaluate(args) -> None:
             rag_base_url      = rag_base_url,
             rag_api_key       = rag_api_key,
             inject_metadata   = args.inject_metadata,
+            include_keywords  = getattr(args, "include_keywords", False),
             search_method=getattr(args, "search_method", "dense"),
             resolve_parents   = getattr(args, "resolve_parents", False),
             **budget_kwargs,
