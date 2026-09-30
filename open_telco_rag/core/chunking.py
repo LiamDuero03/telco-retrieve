@@ -81,8 +81,7 @@ def _count_tokens(text: str) -> int:
 
 
 def _check_token_overlap(overlap_tokens: int, size_tokens: int) -> None:
-    """token-mode overlap must be 0 <= overlap < chunk size; a larger overlap used
-    to be clamped to size-1, i.e. a one-token stride and a ~size-fold blow-up"""
+    """token-mode overlap must be in [0, size): a larger one would degrade to a one-token stride"""
     if overlap_tokens < 0 or overlap_tokens >= size_tokens:
         raise ValueError(
             f"overlap_tokens ({overlap_tokens}) must be at least 0 and smaller than the chunk "
@@ -108,10 +107,8 @@ def _token_chunk(
 
 
 def _paragraph_spans(text: str) -> list[tuple[int, int]]:
-    """Exact (start, end) offsets of each blank-line-separated paragraph in
-    `text`, trimmed of surrounding whitespace. Mirrors the legacy
-    `text.split("\\n\\n")` semantics but keeps offsets into the original
-    string instead of losing them to strip()/join()."""
+    """offsets of blank-line-separated paragraphs, trimmed of whitespace; same split as the legacy
+    paragraph split but keeps the offsets"""
     seps = [m.span() for m in re.finditer(r"\n[ \t]*\n[ \t\n]*", text)]
     bounds = []
     prev_end = 0
@@ -136,9 +133,8 @@ _SENTENCE_RE = re.compile(r"[^.!?\n]*[.!?]+(?:\s+|$)|[^.!?\n]+$")
 
 
 def _sentence_spans(text: str) -> list[tuple[int, int]]:
-    """Exact (start, end) offsets of each sentence in `text` (best-effort,
-    punctuation-based -- used only as the second-tier fallback when a whole
-    paragraph exceeds max_tokens)."""
+    """offsets of sentences (punctuation-based, best effort); only the fallback when a paragraph
+    exceeds max_tokens"""
     spans = []
     for m in _SENTENCE_RE.finditer(text):
         seg = m.group(0)
@@ -154,12 +150,9 @@ def _sentence_spans(text: str) -> list[tuple[int, int]]:
 
 
 def _hard_token_split(text: str, start: int, end: int, max_tokens: int) -> list[tuple[int, int]]:
-    """Guaranteed split of text[start:end] into pieces of <= max_tokens
-    tokens, via cumulative decode length (not re-searching text -- a lone
-    token's bytes aren't guaranteed valid UTF-8 on their own, but any
-    cumulative prefix of the document's own token stream decodes exactly,
-    since the full text is valid UTF-8 and tiktoken never drops bytes).
-    Last-resort fallback: always terminates, never raises."""
+    """split text[start:end] into pieces of <= max_tokens tokens; last resort, never raises.
+    offsets come from cumulative decode length: a lone token need not be valid UTF-8, but any
+    prefix of the document's own token stream decodes exactly"""
     segment = text[start:end]
     tokens = _get_encoding().encode(segment)
     if not tokens:
@@ -182,10 +175,8 @@ def _accumulate_bounded(
     max_tokens: int,
     deeper_split: Callable[[str, int, int, int], list[tuple[int, int]]],
 ) -> list[tuple[int, int]]:
-    """Greedily group consecutive unit spans (paragraphs or sentences) so no
-    group exceeds max_tokens tokens. A single unit that alone exceeds
-    max_tokens is handed to `deeper_split` (sentence splitter, or a hard
-    token cut) instead of being silently left oversized."""
+    """greedily group consecutive unit spans up to max_tokens; a unit that alone exceeds it goes
+    to `deeper_split` instead of being left oversized"""
     out: list[tuple[int, int]] = []
     i = 0
     n = len(unit_spans)
@@ -215,10 +206,7 @@ def _accumulate_bounded(
 
 
 def _bounded_split(text: str, start: int, end: int, max_tokens: int) -> list[tuple[int, int]]:
-    """Split text[start:end] into pieces of <= max_tokens tokens each,
-    preferring paragraph boundaries, then sentence boundaries, then a
-    guaranteed hard token cut. Used both as a standalone "cap this oversized
-    span" call and as the `deeper_split` callback for _accumulate_bounded."""
+    """split into pieces of <= max_tokens: paragraph boundaries, then sentences, then a hard token cut"""
     if _count_tokens(text[start:end]) <= max_tokens:
         return [(start, end)]
 
@@ -256,12 +244,9 @@ def _accumulate_paragraphs_with_overlap(
     overlap_tokens: int,
     max_tokens: int,
 ) -> list[tuple[int, int]]:
-    """Group paragraph spans up to target_tokens per group, each subsequent
-    group re-including trailing paragraphs from the previous one worth up to
-    overlap_tokens (whole-paragraph granularity -- sub-paragraph overlap
-    isn't attempted, since it would break the exact-slice offset guarantee).
-    A lone paragraph exceeding max_tokens is capped via _bounded_split.
-    """
+    """group paragraph spans up to target_tokens; each next group re-includes trailing paragraphs
+    worth up to overlap_tokens (whole paragraphs only, so offsets stay exact slices); a lone
+    paragraph over max_tokens goes to _bounded_split"""
     n = len(spans)
     if n == 0:
         return []
@@ -293,9 +278,8 @@ def _accumulate_paragraphs_with_overlap(
         if j >= n:
             break
 
-        # Overlap: walk back from the last included paragraph (j-1) while the
-        # cumulative token cost stays within overlap_tokens, re-including
-        # those paragraphs as the start of the next group.
+        # overlap: walk back from the last included paragraph while the cumulative
+        # tokens stay within overlap_tokens
         if overlap_tokens > 0:
             back = j - 1
             cum = 0
@@ -306,8 +290,7 @@ def _accumulate_paragraphs_with_overlap(
                 cum += seg_tokens
                 back -= 1
             next_i = back + 1
-            # Guard against zero forward progress (overlap consuming the
-            # entire next group).
+            # guard against no forward progress
             i = next_i if next_i > group_start_idx else j
         else:
             i = j
@@ -323,17 +306,11 @@ def chunk_hierarchical_markdown(
     max_tokens: int | None = None,
     **kwargs: Any,
 ) -> list[Chunk]:
-    """Strategy 1: splits on Markdown headings (# to #####), tracking a
-    breadcrumb trail across nested sub-sections.
+    """Strategy 1: splits on Markdown headings (# to #####), tracking a breadcrumb trail.
 
-    Legacy path (target_tokens and max_tokens both None): character-sized,
-    byte-identical to the original implementation, chunk.char_start/char_end
-    left at their -1 default.
-
-    Token path (either given): sections are split on headings, undersized
-    adjacent sections merged up to target_tokens, oversized ones split at
-    paragraph/sentence boundaries (falling back to a hard token cut) so none
-    exceeds max_tokens. Chunk text is an exact slice of `text`.
+    Legacy path (target_tokens and max_tokens both None): character-sized, offsets left at -1.
+    Token path (either given): undersized sections merged up to target_tokens, oversized ones
+    split so none exceeds max_tokens; chunk text is an exact slice of `text`.
     """
     if not text or not text.strip():
         return []
@@ -410,8 +387,8 @@ def chunk_hierarchical_markdown(
 
 
 def _hierarchical_sections(text: str) -> list[dict]:
-    """Exact (start, end, heading) triples for each heading-delimited
-    section of `text`, same breadcrumb logic as the legacy character path."""
+    """(start, end, heading) for each heading-delimited section, same breadcrumb logic as the
+    legacy character path"""
     heading_re = re.compile(r"^(#{1,5})\s+(.*)$", re.MULTILINE)
     matches = list(heading_re.finditer(text))
 
@@ -493,15 +470,10 @@ def chunk_text_baseline(
 ) -> list[Chunk]:
     """Baseline paragraph-based chunker.
 
-    Legacy path (target_tokens and max_tokens both None): character overlap
-    snapped to the nearest sentence boundary, byte-identical to the original
-    implementation, char_start/char_end left at -1.
-
-    Token path (either given): paragraphs accumulated up to target_tokens
-    tokens per chunk (default max_tokens = target_tokens when only one is
-    given), consecutive chunks overlapping by up to overlap_tokens tokens
-    (whole-paragraph granularity; default 0 when not given). Chunk text is
-    an exact slice of `text`.
+    Legacy path (target_tokens and max_tokens both None): character overlap snapped to a
+    sentence boundary, offsets left at -1.
+    Token path (either given): paragraphs accumulated up to target_tokens per chunk (max_tokens
+    defaults to target_tokens), overlapping by up to overlap_tokens (default 0); exact slices.
     """
     if not text or not text.strip():
         return []
@@ -557,9 +529,7 @@ def chunk_text_baseline(
 
     return chunks
 
-# Distinguishes "caller didn't pass overlap_tokens" from "caller passed 0" --
-# the legacy path's real default is 50, the token path's is 0; a plain int
-# default can't tell those two "not given" cases apart.
+# tells "overlap_tokens not passed" from "passed 0": the legacy default is 50, the token path's is 0
 _OVERLAP_TOKENS_UNSET = object()
 
 
@@ -574,18 +544,11 @@ def chunk_sliding_window_tokens(
 ) -> list[Chunk]:
     """Strategy 2: fixed-size token windows with sliding overlap.
 
-    overlap_tokens has a sentinel default (hidden from the signature): 50 on
-    the legacy path, 0 on the token path. pass it explicitly to override.
-
-    Legacy path (target_tokens and max_tokens both None): byte-identical to
-    the original implementation (decoded text stripped, char_start/char_end
-    left at -1).
-
-    Token path (either given): target_tokens overrides chunk_tokens when
-    given; max_tokens caps chunk_tokens when smaller. Offsets computed via
-    cumulative decode length (exact, since any prefix of this document's own
-    token stream decodes losslessly) and chunk text is left unstripped so it
-    stays an exact slice of `text`.
+    overlap_tokens defaults to 50 on the legacy path and 0 on the token path (see
+    _OVERLAP_TOKENS_UNSET); pass it explicitly to override.
+    Legacy path (target_tokens and max_tokens both None): decoded text stripped, offsets -1.
+    Token path (either given): target_tokens overrides chunk_tokens, max_tokens caps it; text is
+    left unstripped so it stays an exact slice of `text`.
     """
     if not text or not text.strip():
         return []
@@ -665,20 +628,13 @@ def chunk_parent_child(
     max_tokens: int | None = None,
     **kwargs: Any,
 ) -> list[Chunk]:
-    """Strategy 3: two-tier retrieval - large parent segments broken down
-    into small, targeted child vectors.
+    """Strategy 3: two-tier retrieval - large parent segments broken down into small child vectors.
 
-    Legacy path (target_tokens and max_tokens both None): byte-identical to
-    the original implementation, char_start/char_end left at -1.
-
-    Token path (target_tokens and/or max_tokens given): target_tokens is the
-    CHILD size (max_tokens stands in for it when only max_tokens is given).
-    Parents are produced by the hierarchical-markdown token path
-    (parent_target_tokens, defaulting to 4x the child target -- the legacy
-    parent_size/child_size ratio); children accumulate paragraphs up to the
-    child target each (no overlap, matching the legacy children), capped at
-    max_tokens (defaulting to the child target). Both parent and child chunk text
-    are exact slices of `text`.
+    Legacy path (target_tokens and max_tokens both None): offsets left at -1.
+    Token path: target_tokens is the CHILD size (max_tokens stands in when only that is given);
+    parents come from the hierarchical-markdown token path at parent_target_tokens (default 4x
+    the child target, the legacy parent/child ratio); children have no overlap and are capped
+    at max_tokens. Parent and child text are exact slices of `text`.
     """
     if target_tokens is None and max_tokens is None:
         parent_chunks = chunk_hierarchical_markdown(text, chunk_size=parent_size, source_type=source_type)
@@ -770,9 +726,8 @@ def chunk_parent_child(
 
 
 def _lumber_sections(text: str) -> list[tuple[int, int]]:
-    """Exact (start, end) offsets of each level-1/2-heading-delimited
-    section of `text`, same boundary semantics as chunk_lumber_chunker's
-    legacy section_pattern.split() loop."""
+    """offsets of each level-1/2-heading section, same boundaries as the legacy section_pattern
+    split"""
     section_re = re.compile(r"^##?\s+.*$", re.MULTILINE)
     matches = list(section_re.finditer(text))
     if not matches:
@@ -892,17 +847,12 @@ def chunk_lumber_chunker(
     max_tokens: int | None = None,
     **kwargs: Any,  # absorbs unused CLI chunk_size/overlap
 ) -> list[Chunk]:
-    """Strategy 4: LumberChunker adapted for 3GPP specs. Splits by major
-    Markdown headers, then runs the paper's rolling-window shift-detection
-    per section, concurrently.
+    """Strategy 4: LumberChunker adapted for 3GPP specs. Splits by major Markdown headers, then
+    runs the paper's rolling-window shift-detection per section, concurrently.
 
-    Legacy path (target_tokens and max_tokens both None): byte-identical to
-    the original implementation, char_start/char_end left at -1.
-
-    Token path (either given): same shift-detection algorithm, but every
-    emitted chunk is an exact slice of `text` and none exceeds max_tokens
-    (max_tokens defaults to target_tokens when only that is given; theta,
-    the LLM's view window, is unchanged -- see _chunk_lumber_chunker_tokens).
+    Legacy path (target_tokens and max_tokens both None): offsets left at -1.
+    Token path (either given): same algorithm, every chunk an exact slice of `text` and none over
+    max_tokens (defaults to target_tokens); theta, the LLM's view window, is unchanged.
     """
     if not text or not text.strip():
         return []
@@ -1103,13 +1053,8 @@ def chunk_document(
     # pop: enrichment isn't a chunker param and sliding_window has no **kwargs.
     enrichment = kwargs.pop("enrichment", "none")
 
-    # Only the legacy chunk_tokens/overlap_tokens path gets the
-    # metadata_tagging safety-margin injection below -- a caller using the
-    # new target_tokens/max_tokens keys must not have them overridden or
-    # have an unrelated legacy overlap_tokens default (50) silently injected
-    # alongside (that previously forced near-total overlap on the token path,
-    # since target_tokens/max_tokens take priority for size but overlap_tokens
-    # doesn't distinguish "explicitly 50" from "injected default 50").
+    # only the legacy chunk_tokens/overlap_tokens path gets the metadata_tagging safety margin
+    # below; injecting its default overlap_tokens (50) into the token path would force near-total overlap
     if (strategy == ChunkingStrategy.SLIDING_WINDOW_TOKENS
             and "target_tokens" not in kwargs and "max_tokens" not in kwargs):
         # Accept generic (chunk_size) or specific (chunk_tokens) names.
