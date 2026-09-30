@@ -446,6 +446,35 @@ for `tf`, and separate faithfulness/relevancy/context-recall/correctness
 figures for `open`, rather than one flat number across everything. Also
 saved in the leaderboard row (`by_format` column) and the JSON output file.
 
+#### Using your own LLM endpoint
+
+Any OpenAI-compatible server (vLLM, Ollama, a hosted gateway, ...) can serve
+the LLM stages. Point the CLI at it with the existing options; nothing is
+hardcoded to a particular host:
+
+```bash
+export LOCAL_LLM_BASE_URL=http://my-host:8000/v1     # or pass --llm-base-url
+export LOCAL_LLM_API_KEY=...                         # optional; omit for unauthenticated servers
+
+# answer generation for `ask`
+open-telco-rag ask "What does the AMF do?" --source-type 3gpp \
+  --generator local --generator-model my-model
+
+# evaluation: one endpoint for the judge, another (or the same) for answers
+open-telco-rag evaluate 3gpp --model bge \
+  --generator local --generator-model my-judge-model --llm-base-url http://judge-host:8001/v1 \
+  --rag-generator local --rag-generator-model my-model --rag-llm-base-url http://rag-host:8000/v1
+
+# LLM-based chunking / enrichment during ingest
+open-telco-rag ingest 3gpp --strategy lumber_chunker \
+  --llm-backend local --llm-base-url http://my-host:8000/v1 --chunking-model my-model
+```
+
+`--llm-base-url` / `--rag-llm-base-url` fall back to `LOCAL_LLM_BASE_URL`, then
+to `http://localhost:8000/v1`. Use `--generator claude` or `openrouter` for the
+hosted providers instead (their keys come from `ANTHROPIC_API_KEY` /
+`OPENROUTER_API_KEY`).
+
 #### Optional: budgeted context
 
 By default the generator receives the top `--top-k` chunks (or
@@ -496,6 +525,22 @@ carry an evidence span (`evidence_doc_id`, `evidence_char_start`,
 - `0` or `1`: a real result.
 
 The `span_hit_*_rate` totals are the mean over questions with a real value.
+
+**Evidence-span fields in question files.** A question file is
+`{"questions": [...]}`. To enable the span metrics, each question needs three
+optional fields, next to the usual `question`, `corpus`, `answer_type`, ...:
+
+| Field | Meaning |
+|-------|---------|
+| `evidence_doc_id` | The source document, as the relative file path used at ingest (the part of a chunk id before the first `::`). |
+| `evidence_char_start` | Start offset (inclusive) of the evidence in the cleaned text of that document. |
+| `evidence_char_end` | End offset (exclusive). |
+
+"Cleaned text" is what ingestion sees after the source's `load()` and `clean()`.
+`scripts/add_evidence_spans.py` computes the three fields for a question file
+whose questions carry `chunk_id` and `source_text` (see the script's `--help`);
+questions it cannot match are kept unchanged, without spans. Files without these
+fields work as before and simply produce no span metrics.
 
 Generation metrics: `accuracy` (mc/tf exact match; abstentions count as 0 but
 are tracked separately), `faithfulness`, `answer_relevancy`, `context_recall`
@@ -675,6 +720,7 @@ Small tools in `scripts/` (run from the repository root, after `pip install -e .
 
 | Script | Purpose |
 |--------|---------|
+| `add_evidence_spans.py` | Optional: add evidence spans to a question file so the span metrics can be computed. |
 | `embedder_smoke_test.py` | Embed a few sample texts with every locally hosted embedder and report dimension, throughput and truncation. |
 | `estimate_embedding_cost.py` | Estimate what re-embedding a collection would cost through OpenRouter (prices are a dated snapshot; `--refresh-pricing` fetches live ones). |
 | `time_embedding_throughput.py` | Measure local embedding throughput on real chunk texts from an existing collection. |
