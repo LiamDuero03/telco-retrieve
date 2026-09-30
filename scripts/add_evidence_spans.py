@@ -112,7 +112,7 @@ def main() -> None:
                     raw = source.load(file_path)
                     doc_cache[rel] = source.clean(raw) if raw else ""
                     doc_status[rel] = "ok"
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001
                     print(f"  [ERROR] loading {file_path}: {e}")
                     doc_cache[rel] = None
                     doc_status[rel] = "load_error"

@@ -103,9 +103,8 @@ class _FakeEmbedder:
 
 
 class _FakeStore:
-    metadata = {"hnsw:space": "cosine"}
-
     def __init__(self):
+        self.metadata = {"hnsw:space": "cosine"}
         from open_telco_rag.types import SearchResult
 
         emb = _FakeEmbedder()

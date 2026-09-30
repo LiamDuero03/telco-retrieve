@@ -7,9 +7,9 @@ from __future__ import annotations
 import tiktoken
 
 from open_telco_rag.core.retrieval import (
+    _resolve_parent_chunks,
     execute_retrieval,
     fill_context_budget,
-    _resolve_parent_chunks,
 )
 from open_telco_rag.types import SearchResult
 

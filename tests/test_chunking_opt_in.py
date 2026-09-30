@@ -16,7 +16,7 @@ from types import SimpleNamespace
 import pytest
 import tiktoken
 
-import open_telco_rag.core.chunking as chunking
+from open_telco_rag.core import chunking
 from open_telco_rag.core.chunking import ChunkingStrategy, chunk_document
 from open_telco_rag.types import Chunk
 
@@ -78,12 +78,8 @@ def test_default_paths_never_initialize_the_tokenizer(strategy, monkeypatch):
 
 def test_importing_chunking_module_does_not_initialize_the_tokenizer():
     # fresh interpreter so an already-imported module can't mask it
-    code = ";".join([
-        "import tiktoken",
-        "tiktoken.get_encoding = lambda *a, **k: 1 / 0",
-        "import open_telco_rag.core.chunking",
-    ])
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    code = "import tiktoken;tiktoken.get_encoding = lambda *a, **k: 1 / 0;import open_telco_rag.core.chunking"
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr
 
 
@@ -168,10 +164,10 @@ def test_legacy_sliding_window_arguments_still_work():
 # ── (d) CLI ───────────────────────────────────────────────────────────────────
 
 def _cli_args(**over):
-    base = dict(source_type="oran", use_marker=False, model="minilm", strategy="text_baseline",
-                enrichment="none", data=None, db_path="db", no_resume=True, collection=None,
-                chunk_size=None, overlap=None, target_tokens=None, max_tokens=None,
-                overlap_tokens=None)
+    base = {"source_type": "oran", "use_marker": False, "model": "minilm", "strategy": "text_baseline",
+                "enrichment": "none", "data": None, "db_path": "db", "no_resume": True, "collection": None,
+                "chunk_size": None, "overlap": None, "target_tokens": None, "max_tokens": None,
+                "overlap_tokens": None}
     base.update(over)
     return argparse.Namespace(**base)
 
@@ -179,7 +175,7 @@ def _cli_args(**over):
 @pytest.fixture
 def cli_ingest(monkeypatch):
     import cli.main as cli_main
-    import open_telco_rag.core.pipeline as pipeline
+    from open_telco_rag.core import pipeline
 
     captured = {}
 

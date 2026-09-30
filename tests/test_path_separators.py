@@ -6,7 +6,11 @@ from __future__ import annotations
 import pytest
 
 from open_telco_rag.evaluation.metrics.retrieval import (
-    chunk_rank, distinct_sources_retrieved, exact_chunk_hit, span_hit_at_k, span_hit_in_context,
+    chunk_rank,
+    distinct_sources_retrieved,
+    exact_chunk_hit,
+    span_hit_at_k,
+    span_hit_in_context,
 )
 from open_telco_rag.types import SearchResult
 

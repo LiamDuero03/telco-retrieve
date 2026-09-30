@@ -171,4 +171,4 @@ def test_recorded_calls_are_saved_when_enabled(monkeypatch):
     from open_telco_rag.evaluation.results import question_to_dict
 
     d = question_to_dict(_run_open(monkeypatch, record_judge_calls=True))
-    assert [c["metric"] for c in d["judge_calls"]][0] == "faithfulness"
+    assert next(c["metric"] for c in d["judge_calls"]) == "faithfulness"

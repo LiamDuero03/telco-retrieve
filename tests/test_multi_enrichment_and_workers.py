@@ -12,7 +12,7 @@ import open_telco_rag.core.pipeline as pipeline_module
 from open_telco_rag.core.pipeline import ingest_multi_enrichment
 from open_telco_rag.sources.tgpp import TPPSource
 from open_telco_rag.stores.chroma import ChromaStore
-from tests.test_retrieval_methods import BagOfWordsEmbedder, DOCS
+from tests.test_retrieval_methods import DOCS, BagOfWordsEmbedder
 
 SPAN_KEYS = {"char_start", "char_end", "n_tokens"}
 
@@ -44,10 +44,10 @@ def test_default_multi_enrichment_stores_no_offsets(tmp_path):
 # ── --embed-max-workers ───────────────────────────────────────────────────────
 
 def _ingest_args(**over):
-    base = dict(source_type="oran", use_marker=False, model="minilm", strategy="text_baseline",
-                enrichment="none", data=None, db_path="db", no_resume=True, collection=None,
-                chunk_size=None, overlap=None, target_tokens=None, max_tokens=None,
-                overlap_tokens=None, embed_backend="openrouter")
+    base = {"source_type": "oran", "use_marker": False, "model": "minilm", "strategy": "text_baseline",
+                "enrichment": "none", "data": None, "db_path": "db", "no_resume": True, "collection": None,
+                "chunk_size": None, "overlap": None, "target_tokens": None, "max_tokens": None,
+                "overlap_tokens": None, "embed_backend": "openrouter"}
     base.update(over)
     return argparse.Namespace(**base)
 

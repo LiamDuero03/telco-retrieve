@@ -4,18 +4,17 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 
 import pytest
 
-import open_telco_rag.core.pipeline as pipeline
+from open_telco_rag.core import pipeline
 from open_telco_rag.core.chunking import ChunkingStrategy
 from open_telco_rag.core.pipeline import ingest
 from open_telco_rag.sources.tgpp import TPPSource
 from open_telco_rag.stores.chroma import ChromaStore
 from tests.test_retrieval_methods import DOCS, BagOfWordsEmbedder
 
-CHUNK = dict(strategy="text_baseline", chunk_size=300, overlap=0, min_length=10)
+CHUNK = {"strategy": "text_baseline", "chunk_size": 300, "overlap": 0, "min_length": 10}
 
 
 @pytest.fixture
@@ -60,9 +59,9 @@ def test_a_new_database_is_ingested_not_skipped(tmp_path, data):
     assert stats.skipped_files == 0 and store.count() > 0
 
 
-@pytest.mark.parametrize("change", [dict(chunk_size=500), dict(strategy="hierarchical_markdown"),
-                                    dict(min_length=20), dict(enrichment="metadata_tagging"),
-                                    dict(target_tokens=40)])
+@pytest.mark.parametrize("change", [{"chunk_size": 500}, {"strategy": "hierarchical_markdown"},
+                                    {"min_length": 20}, {"enrichment": "metadata_tagging"},
+                                    {"target_tokens": 40}])
 def test_a_different_chunking_configuration_is_not_resumed(tmp_path, data, change):
     _ingest(tmp_path, data, collection="coll_a")
     kw = {**CHUNK, **change}
@@ -166,8 +165,8 @@ def test_kwarg_order_enums_and_batching_do_not_change_the_fingerprint():
 
 def test_settings_that_change_the_stored_chunks_change_the_fingerprint():
     base = _fp(strategy="text_baseline", chunk_size=300)[0]
-    for change in (dict(target_tokens=50), dict(max_tokens=60), dict(enrichment="metadata_tagging"),
-                   dict(enrichment_model="m"), dict(overlap_tokens=5), dict(chunk_size=300, overlap=10)):
+    for change in ({"target_tokens": 50}, {"max_tokens": 60}, {"enrichment": "metadata_tagging"},
+                   {"enrichment_model": "m"}, {"overlap_tokens": 5}, {"chunk_size": 300, "overlap": 10}):
         assert _fp(**{"strategy": "text_baseline", "chunk_size": 300, **change})[0] != base, change
 
 

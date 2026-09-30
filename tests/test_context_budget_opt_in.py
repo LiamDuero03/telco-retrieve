@@ -18,12 +18,17 @@ import pytest
 import tiktoken
 
 import open_telco_rag.core.pipeline as pipeline_module
-import open_telco_rag.core.retrieval as retrieval
+from open_telco_rag.core import retrieval
 from open_telco_rag.core.retrieval import execute_retrieval, resolve_budget_args
 from open_telco_rag.evaluation.evaluate import evaluate_corpus, evaluate_question
 from open_telco_rag.evaluation.questions import EvalQuestion
 from open_telco_rag.evaluation.results import (
-    CorpusResult, QuestionResult, aggregate, question_to_dict, result_to_dict, save_results,
+    CorpusResult,
+    QuestionResult,
+    aggregate,
+    question_to_dict,
+    result_to_dict,
+    save_results,
 )
 from open_telco_rag.types import SearchResult
 
@@ -69,12 +74,8 @@ def test_default_retrieval_never_initializes_the_tokenizer(monkeypatch):
 
 
 def test_importing_retrieval_does_not_initialize_the_tokenizer():
-    code = ";".join([
-        "import tiktoken",
-        "tiktoken.get_encoding = lambda *a, **k: 1 / 0",
-        "import open_telco_rag.core.retrieval",
-    ])
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    code = "import tiktoken;tiktoken.get_encoding = lambda *a, **k: 1 / 0;import open_telco_rag.core.retrieval"
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr
 
 
@@ -168,8 +169,8 @@ def _qr(**kw):
 
 
 def _corpus_result(**over):
-    base = dict(corpus="3gpp", model="m", top_k=5, n_questions=1,
-                question_results=[_qr(question="q", corpus="3gpp")])
+    base = {"corpus": "3gpp", "model": "m", "top_k": 5, "n_questions": 1,
+                "question_results": [_qr(question="q", corpus="3gpp")]}
     base.update(over)
     return CorpusResult(**base)
 
@@ -193,9 +194,9 @@ def test_old_result_files_still_load():
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def _eval_args(**over):
-    base = dict(model="minilm", generator="claude", generator_model=None, no_save=True,
-                output="results", context_token_budget=None, candidate_pool=None,
-                budget_overflow=None)
+    base = {"model": "minilm", "generator": "claude", "generator_model": None, "no_save": True,
+                "output": "results", "context_token_budget": None, "candidate_pool": None,
+                "budget_overflow": None}
     base.update(over)
     return argparse.Namespace(**base)
 
@@ -209,7 +210,7 @@ def test_cli_rejects_pool_without_budget_before_any_work():
 
 def test_cli_evaluate_help_lists_the_optional_flags():
     result = subprocess.run([sys.executable, "-m", "cli.main", "evaluate", "--help"],
-                            capture_output=True, text=True)
+                            capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr
     for flag in ("--context-token-budget", "--candidate-pool", "--budget-overflow"):
         assert flag in result.stdout
@@ -224,6 +225,7 @@ def _big_candidates(n=3, words=200):
 @pytest.mark.parametrize("overflow", ["stop", "skip"])
 def test_empty_context_from_a_too_small_budget_is_warned_about(overflow, caplog):
     import logging
+
     from open_telco_rag.core.retrieval import fill_context_budget
 
     with caplog.at_level(logging.WARNING, logger="open_telco_rag.core.retrieval"):
@@ -235,6 +237,7 @@ def test_empty_context_from_a_too_small_budget_is_warned_about(overflow, caplog)
 
 def test_truncate_and_normal_fills_do_not_warn(caplog):
     import logging
+
     from open_telco_rag.core.retrieval import fill_context_budget
 
     with caplog.at_level(logging.WARNING, logger="open_telco_rag.core.retrieval"):
@@ -246,6 +249,7 @@ def test_truncate_and_normal_fills_do_not_warn(caplog):
 
 def test_a_pool_that_runs_out_still_gets_the_pool_warning(caplog):
     import logging
+
     from open_telco_rag.core.retrieval import fill_context_budget
 
     with caplog.at_level(logging.WARNING, logger="open_telco_rag.core.retrieval"):

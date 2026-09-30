@@ -136,7 +136,7 @@ def test_main_reports_counts_without_crashing_on_a_missing_source_file(tmp_path,
 
 def test_help_runs_without_network():
     result = subprocess.run([sys.executable, str(SCRIPT), "--help"], capture_output=True, text=True,
-                            timeout=120)
+                            timeout=120, check=False)
     assert result.returncode == 0, result.stderr
     assert "usage:" in result.stdout and "--questions-file" in result.stdout
 

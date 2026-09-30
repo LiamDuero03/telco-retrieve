@@ -7,7 +7,8 @@ import json
 import logging
 import re
 from enum import Enum
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 import tiktoken
 
 from open_telco_rag.types import Chunk
@@ -986,7 +987,7 @@ def chunk_lumber_chunker(
 
                 raise ValueError("Invalid or out-of-bounds ID returned.")
 
-            except Exception:
+            except Exception:  # noqa: BLE001 - any LLM failure falls back to a fixed-size block
                 # LLM failed or returned garbage: fall back to a fixed-size block.
                 fallback_limit = min(p_idx + 3, N)
                 chunk_text = "\n\n".join(paragraphs[p_idx:fallback_limit])

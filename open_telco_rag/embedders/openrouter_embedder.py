@@ -81,8 +81,8 @@ class OpenRouterEmbedder:
             return texts
         return [f"{prefix}{t}" for t in texts]
 
-    def embed(self, texts: List[str], is_query: bool = False,
-              apply_prefix: bool = True) -> List[List[float]]:
+    def embed(self, texts: list[str], is_query: bool = False,
+              apply_prefix: bool = True) -> list[list[float]]:
         import concurrent.futures
 
         if apply_prefix:

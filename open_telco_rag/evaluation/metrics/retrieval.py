@@ -82,7 +82,7 @@ _DISCRIMINATING_FRACTION_THRESHOLD = 0.5
 # stable within a run. keyed by the store object (weakly), not id(store):
 # CPython reuses ids after garbage collection, so an id-keyed cache handed a
 # dead store's answer to a different store
-_discriminating_cache: "weakref.WeakKeyDictionary[Any, dict[str, bool]]" = weakref.WeakKeyDictionary()
+_discriminating_cache: weakref.WeakKeyDictionary[Any, dict[str, bool]] = weakref.WeakKeyDictionary()
 
 
 def is_discriminating_source(expected: str, store: Any) -> bool:

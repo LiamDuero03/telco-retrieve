@@ -11,6 +11,8 @@ char_end stay at their -1 default and chunk text is unaffected.
 """
 from __future__ import annotations
 
+import itertools
+
 import tiktoken
 
 from open_telco_rag.core.chunking import (
@@ -125,7 +127,7 @@ def test_sliding_window_tokens_via_chunk_document_does_not_inherit_legacy_overla
     _assert_max_tokens(chunks, 25)
     _assert_exact_slices(SAMPLE_DOC, chunks)
     # No overlap was requested -> consecutive chunks must not re-cover text.
-    for a, b in zip(chunks, chunks[1:]):
+    for a, b in itertools.pairwise(chunks):
         assert b.char_start >= a.char_end
 
 

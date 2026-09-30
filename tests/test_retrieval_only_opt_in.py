@@ -36,7 +36,7 @@ def _volatile(d):
 
 def test_default_and_explicit_false_are_identical(monkeypatch):
     _patch_pipeline(monkeypatch, [])
-    kw = dict(store=object(), embedder=object(), rag_generator_name="local", rag_model_name="m")
+    kw = {"store": object(), "embedder": object(), "rag_generator_name": "local", "rag_model_name": "m"}
     omitted = question_to_dict(evaluate_question(_question(), **kw))
     explicit = question_to_dict(evaluate_question(_question(), retrieval_only=False, **kw))
     assert _volatile(omitted) == _volatile(explicit)
@@ -130,7 +130,7 @@ def test_cli_record_judge_responses_and_search_method_defaults(cli_evaluate):
 
 @pytest.mark.parametrize("extra", [[], ["--rag-generator", "claude", "--generator", "local"]])
 def test_claude_without_a_key_exits_before_any_work(cli_evaluate, monkeypatch, extra):
-    cli_main, _ = cli_evaluate[0], cli_evaluate[1]
+    _cli_main, _ = cli_evaluate[0], cli_evaluate[1]
     seen, tmp = cli_evaluate
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     with pytest.raises(SystemExit, match="ANTHROPIC_API_KEY"):

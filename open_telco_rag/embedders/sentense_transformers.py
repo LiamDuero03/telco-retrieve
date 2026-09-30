@@ -124,7 +124,7 @@ class SentenceTransformerEmbedder:
             return
         try:
             lengths = [len(tokenizer.encode(t, add_special_tokens=True)) for t in texts]
-        except Exception:
+        except Exception:  # noqa: BLE001 - best-effort length check, never raises
             return
 
         n_over = sum(1 for n in lengths if n > max_len)

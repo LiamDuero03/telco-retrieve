@@ -24,7 +24,7 @@ def _load(name: str):
 @pytest.mark.parametrize("name", ALL)
 def test_help_runs_without_network_or_a_database(name):
     result = subprocess.run([sys.executable, str(SCRIPTS / f"{name}.py"), "--help"],
-                            capture_output=True, text=True, timeout=120)
+                            capture_output=True, text=True, timeout=120, check=False)
     assert result.returncode == 0, result.stderr
     assert "usage:" in result.stdout
 

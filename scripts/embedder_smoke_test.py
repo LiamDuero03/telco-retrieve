@@ -92,7 +92,7 @@ def run_one(model_key: str, n_chunks: int, n_queries: int, extrapolate_n: int) -
         report["peak_gpu_memory_mb"] = (
             torch.cuda.max_memory_allocated() / (1024 ** 2) if has_cuda else None
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         report["error"] = str(e)
 
     return report

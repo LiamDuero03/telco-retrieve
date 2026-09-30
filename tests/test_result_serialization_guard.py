@@ -21,8 +21,7 @@ OPT_IN_KEYS = {"context_tokens", "n_chunks_used", "budget", "fill_ratio",
 
 def _sources():
     for base in ("open_telco_rag", "cli"):
-        for path in (ROOT / base).rglob("*.py"):
-            yield path
+        yield from (ROOT / base).rglob("*.py")
 
 
 def test_only_results_module_uses_raw_asdict():

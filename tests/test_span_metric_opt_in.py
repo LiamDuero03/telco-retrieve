@@ -16,7 +16,11 @@ from open_telco_rag.core.pipeline import _process_file_worker
 from open_telco_rag.evaluation.evaluate import evaluate_question
 from open_telco_rag.evaluation.questions import EvalQuestion
 from open_telco_rag.evaluation.results import (
-    CorpusResult, aggregate, print_summary, question_to_dict, result_to_dict,
+    CorpusResult,
+    aggregate,
+    print_summary,
+    question_to_dict,
+    result_to_dict,
 )
 from open_telco_rag.types import SearchResult
 
@@ -38,8 +42,8 @@ def _chunks(with_offsets=True):
 
 
 def _question(**over):
-    base = dict(question="Which interface?", keywords=[], corpus="3gpp", answer_type="mc",
-                options={"A": "N1", "B": "E2"}, reference_answer="B")
+    base = {"question": "Which interface?", "keywords": [], "corpus": "3gpp", "answer_type": "mc",
+                "options": {"A": "N1", "B": "E2"}, "reference_answer": "B"}
     base.update(over)
     return EvalQuestion(**base)
 
@@ -52,7 +56,7 @@ def _run(monkeypatch, question, chunks):
                              rag_generator_name="local", rag_model_name="local-model")
 
 
-SPAN = dict(evidence_doc_id="doc.md", evidence_char_start=120, evidence_char_end=180)
+SPAN = {"evidence_doc_id": "doc.md", "evidence_char_start": 120, "evidence_char_end": 180}
 
 
 def test_question_without_span_leaves_span_fields_unset(monkeypatch):

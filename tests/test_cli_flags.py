@@ -110,9 +110,9 @@ def test_distance_metric_defaults_to_l2_and_reaches_the_store_from_the_ingest_co
     monkeypatch.setattr(cli_main, "_get_store", lambda *a, **k: captured.update(k) or SimpleNamespace(collection_name="c"))
     monkeypatch.setattr(pipeline_module, "ingest", lambda **kw: SimpleNamespace(
         files_processed=0, chunks_stored=0, skipped_files=0, error_files=0))
-    base = dict(source_type="oran", use_marker=False, model="minilm", strategy="text_baseline", enrichment="none",
-                data=None, db_path="db", no_resume=True, collection=None, chunk_size=None, overlap=None,
-                target_tokens=None, max_tokens=None, overlap_tokens=None)
+    base = {"source_type": "oran", "use_marker": False, "model": "minilm", "strategy": "text_baseline", "enrichment": "none",
+                "data": None, "db_path": "db", "no_resume": True, "collection": None, "chunk_size": None, "overlap": None,
+                "target_tokens": None, "max_tokens": None, "overlap_tokens": None}
     cli_main._run_ingest(argparse.Namespace(**base))
     assert captured["distance_metric"] == "l2"
     cli_main._run_ingest(argparse.Namespace(**base, distance_metric="cosine"))

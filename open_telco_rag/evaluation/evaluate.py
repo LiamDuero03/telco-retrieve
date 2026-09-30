@@ -418,7 +418,7 @@ def _run_retrieval_pass(
     context_token_budget: int | None,
     candidate_pool: int | None,
     budget_overflow: str | None,
-    result: "QuestionResult",
+    result: QuestionResult,
 ) -> tuple[list, list]:
     """search -> optional rerank -> optional budget fill, filling in result's
     latency / candidate_* / used_* / budget fields. shared by the RAG and
@@ -481,7 +481,7 @@ def _run_retrieval_pass(
 
 
 def _compute_retrieval_metrics(
-    result: "QuestionResult",
+    result: QuestionResult,
     retrieved_candidates: list,
     retrieved: list,
     q: EvalQuestion,

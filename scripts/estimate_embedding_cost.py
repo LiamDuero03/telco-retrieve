@@ -46,7 +46,7 @@ def _count_tokens(text: str) -> int:
     try:
         enc = tiktoken.get_encoding("cl100k_base")
         return len(enc.encode(text))
-    except Exception:
+    except Exception:  # noqa: BLE001
         return int(len(text.split()) * 1.3)
 
 
@@ -96,7 +96,7 @@ def main() -> None:
         try:
             pricing = _fetch_live_pricing()
             print(f"  Using LIVE OpenRouter pricing ({len(pricing)} embedding models found).")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"  [warn] live pricing fetch failed ({e}); falling back to the 2026-09-29 snapshot.")
             pricing = PRICING_SNAPSHOT_2026_09_29
     else:
