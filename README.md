@@ -187,6 +187,17 @@ open-telco-rag ingest oran \
 | `--batch-size` | 64 / 500 | Parallel payload size. Defaults to 64 locally, or 500 for high-throughput OpenRouter bulk ingestion |
 | `--embed-max-workers` | `10` | OpenRouter embeddings only: in-flight requests per `embed()` call |
 
+**Resume**: by default an interrupted ingest continues where it stopped. The
+progress file in `logs/` belongs to one configuration (database path, collection,
+embedding model, chunking and enrichment settings; secrets are never recorded),
+so ingesting into a different collection or with different settings starts from
+scratch instead of skipping files. An unreadable or foreign progress file is
+renamed to `*.bak` with a warning, and progress files from older versions
+(which did not record their configuration) are set aside the same way, so an
+ingest interrupted before upgrading restarts from scratch. Re-ingesting into a
+collection that already holds chunks from other settings warns that they can end
+up mixed; use `--no-resume` to rebuild it or a new `--collection`.
+
 Ingest also builds a per-collection SQLite FTS5 BM25 index alongside ChromaDB, enabling `--search-method bm25` and `--search-method hybrid` retrieval.
 
 **Write reliability**: `ChromaStore` queries its Chroma installation's real max batch size live at construction (`ChromaStore.max_batch_size`, from `chromadb`'s own `get_max_batch_size()` — not a hardcoded constant, since this depends on the local SQLite build). Every internal write is capped at that value regardless of `--batch-size`, so a large `--batch-size` on a bulk/high-throughput run can no longer produce a Chroma `"Batch size of N is greater than max batch size of M"` crash partway through — previously possible on large runs once accumulated writes exceeded Chroma's real limit, sometimes only surfacing after the progress bar had already reported 100%. Reported `chunks_stored` counts also only ever reflect confirmed-successful writes, not chunks merely attempted, so a partial failure produces an accurate partial count instead of continuing to count chunks that were never actually persisted.
@@ -247,6 +258,12 @@ export OPENROUTER_API_KEY=...            # your key; never commit it
 open-telco-rag ingest 3gpp --model qwen3-embedding-8b --embed-backend openrouter
 open-telco-rag evaluate 3gpp --model qwen3-embedding-8b --embed-backend openrouter
 ```
+
+**Known issue: `otel-300m`.** Loading `farbodtavakkoli/OTel-Embedding-300M` fails
+with current sentence-transformers releases (checked on 5.5.0 and 5.7.0: `Dense.__init__()
+missing 'in_features' and 'out_features'`) because of the model's saved layer
+configuration. It fails the same way with plain `SentenceTransformer(...)`, so it
+is not specific to this project; the other local models load normally.
 
 Prefixes are configured per registry entry (`query_prefix`,
 `document_prefix`, or `query_prompt_name`/`document_prompt_name`); entries

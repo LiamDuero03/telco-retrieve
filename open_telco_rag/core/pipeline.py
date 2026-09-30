@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import copy
 import csv
+import hashlib
 import json
 import os
+import re
 import sys
 import threading
 import time
 import sqlite3
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed, wait
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -41,6 +44,116 @@ from cli.main import _get_source
 def _span_metadata(chunk) -> dict:
     """char offsets + token count stored for token-sized chunks (span metric)"""
     return {"char_start": chunk.char_start, "char_end": chunk.char_end, "n_tokens": chunk.n_tokens}
+
+
+# ── ingest resume bookkeeping ─────────────────────────────────────────────────
+# the progress file records which files were fully ingested. it used to be keyed
+# by model only, so a second collection / database / chunking config found every
+# file "done" and stored nothing. it is now tied to a fingerprint of the
+# non-secret settings that decide what gets stored.
+
+_SECRET_KEY = re.compile(r"key|secret|token(?!s)|password|authorization|credential", re.IGNORECASE)
+_NON_CONTENT_KWARGS = {"batch_size", "write_batch_size", "resume", "log_dir", "on_progress"}
+
+
+def _norm_path(path: Any) -> str:
+    """absolute, separator- and (on Windows) case-normalized path string"""
+    return os.path.normcase(os.path.abspath(str(path))).replace("\\", "/")
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, Enum):
+        return _json_safe(value.value)
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return None  # clients / callables / objects: not settings, not recorded
+
+
+def _ingest_settings(store: Any, embedder: Any, min_length: int, chunk_kwargs: dict) -> dict:
+    """non-secret settings that determine which chunks a run stores"""
+    chunking = {}
+    for key, value in sorted(chunk_kwargs.items()):
+        if key in _NON_CONTENT_KWARGS or _SECRET_KEY.search(key):
+            continue
+        safe = _json_safe(value)
+        if safe is not None:
+            chunking[key] = safe
+    return {
+        "db_path": _norm_path(getattr(store, "path", "chroma_db")),
+        "collection": getattr(store, "collection_name", "documents"),
+        "model_key": embedder.model_key,
+        "min_length": min_length,
+        "chunking": chunking,
+    }
+
+
+def _fingerprint(settings: dict) -> str:
+    return hashlib.sha256(json.dumps(settings, sort_keys=True).encode("utf8")).hexdigest()
+
+
+def _set_aside(path: Path) -> Path:
+    bak = path.with_name(path.name + ".bak")
+    path.replace(bak)  # renamed, never deleted
+    return bak
+
+
+def _count_chunks(store: Any) -> int:
+    try:
+        return int(store.count())
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def _load_progress(progress_file: Path, legacy_file: Path, fingerprint: str, store: Any) -> set[str]:
+    """files already ingested under exactly these settings; empty (with a warning
+    and the old file renamed to .bak) when the file is unreadable or foreign"""
+    if legacy_file.exists():
+        bak = _set_aside(legacy_file)
+        print(f"\n[WARN] Found an old-format resume file ({legacy_file.name}). It does not record which "
+              f"collection or settings it belongs to, so it cannot be trusted: this run restarts from "
+              f"scratch. The old file was renamed to {bak.name}.")
+    if not progress_file.exists():
+        n_existing = _count_chunks(store)
+        if n_existing:
+            print(f"\n[WARN] No resume record matches these settings, but the target collection already "
+                  f"holds {n_existing} chunks (the settings, database or log directory changed since it "
+                  f"was ingested). Every file is ingested again over them, so chunks from different "
+                  f"settings can end up mixed; use --no-resume to rebuild the collection or a new "
+                  f"--collection.")
+        return set()
+
+    reason = None
+    completed: set[str] = set()
+    try:
+        data = json.loads(progress_file.read_text(encoding="utf8"))
+        if not isinstance(data, dict) or "completed" not in data:
+            reason = "it is in an old or unrecognized format"
+        elif data.get("fingerprint") != fingerprint:
+            reason = "it was written for a different collection, database or chunking/enrichment configuration"
+        else:
+            completed = set(data["completed"])
+    except (ValueError, OSError) as e:
+        reason = f"it could not be read ({type(e).__name__})"
+
+    if reason is None:
+        return completed
+
+    bak = _set_aside(progress_file)
+    msg = (f"\n[WARN] Ignoring resume file {progress_file.name}: {reason}. Starting fresh; "
+           f"the old file was renamed to {bak.name}.")
+    n_existing = _count_chunks(store)
+    if n_existing:
+        msg += (f" Note: the target collection already holds {n_existing} chunks, and files are "
+                f"re-ingested over them, so chunks from different settings can end up mixed; use "
+                f"--no-resume to rebuild the collection or a new --collection.")
+    print(msg)
+    return set()
+
+
+def _write_progress(progress_file: Path, fingerprint: str, settings: dict, completed: set[str]) -> None:
+    progress_file.write_text(json.dumps(
+        {"version": 2, "fingerprint": fingerprint, "settings": settings, "completed": sorted(completed)}
+    ), encoding="utf8")
 
 
 def _process_file_worker(args: tuple) -> dict:
@@ -224,10 +337,13 @@ def ingest(
 
     use_marker = getattr(source, '_use_marker', False)
 
-    progress_file = log_dir / f".progress_{embedder.model_key}.json"
+    settings    = _ingest_settings(store, embedder, min_length, chunk_kwargs)
+    fingerprint = _fingerprint(settings)
+    progress_file = log_dir / f".progress_{embedder.model_key}_{fingerprint[:12]}.json"
+    legacy_file   = log_dir / f".progress_{embedder.model_key}.json"
     completed: set[str] = set()
-    if resume and progress_file.exists():
-        completed = set(json.loads(progress_file.read_text()))
+    if resume:
+        completed = _load_progress(progress_file, legacy_file, fingerprint, store)
 
     extensions = source.supported_extensions()
     files = [
@@ -391,7 +507,7 @@ def ingest(
 
         if resume:
             completed.update(files_processed_this_run)
-            progress_file.write_text(json.dumps(sorted(completed)))
+            _write_progress(progress_file, fingerprint, settings, completed)
     except Exception as e:
         print(f"\n[WARN] Post-write bookkeeping (CSV log / resume progress file) failed: "
               f"{e} — every chunk was still successfully stored; only the log/resume "
