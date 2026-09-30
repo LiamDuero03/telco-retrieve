@@ -414,6 +414,7 @@ def ingest(
     all_metas: list[dict] = []
     files_to_log = []
     files_processed_this_run = []
+    file_ends: list[tuple[str, int]] = []       # (file, index in all_* after its last chunk)
 
     with ProcessPoolExecutor(max_workers=max_workers) as executor, \
          tqdm(total=len(tasks), desc="Parsing Files", unit="file", colour="CYAN") as file_bar:
@@ -429,6 +430,7 @@ def ingest(
                 all_texts.extend(res["chunks"])
                 all_ids.extend(res["ids"])
                 all_metas.extend(res["metadatas"])
+                file_ends.append((res["rel"], len(all_texts)))
 
                 stats.total_chunking_time_sec += (res["chunking_time_ms"] / 1000)
                 files_to_log.append((
@@ -461,6 +463,11 @@ def ingest(
     write_texts: list[str] = []
     write_metas: list[dict] = []
     db_futures = []
+    # resume checkpoints: a file counts as done once every chunk of it is confirmed stored
+    dispatched = 0                              # rows handed to background writes so far
+    flush_marks: list[tuple[int, list]] = []    # (rows dispatched, the futures writing them)
+    confirmed = 0                               # rows whose writes all succeeded
+    next_file = 0
     # Serialise same-store writes; see _locked_add().
     store_lock = threading.Lock()
     fts_lock = threading.Lock()
@@ -472,9 +479,29 @@ def ingest(
         with ThreadPoolExecutor(max_workers=8) as db_writer, \
              tqdm(total=total_chunks, desc="Embedding & Storing", unit="chunk", colour="GREEN") as chunk_bar:
 
+            def _checkpoint() -> None:
+                """write the files whose chunks are all confirmed stored to the progress
+                file, so a killed run resumes from here; bookkeeping, never fails an ingest"""
+                nonlocal confirmed, next_file
+                while flush_marks and all(f.done() and not f.cancelled() and f.exception() is None
+                                          for f in flush_marks[0][1]):
+                    confirmed = flush_marks.pop(0)[0]
+                newly = []
+                while next_file < len(file_ends) and file_ends[next_file][1] <= confirmed:
+                    newly.append(file_ends[next_file][0])
+                    next_file += 1
+                if newly and resume:
+                    try:
+                        completed.update(newly)
+                        _write_progress(progress_file, fingerprint, settings, completed)
+                    except Exception:  # noqa: BLE001
+                        pass                    # the end-of-run write reports a failing progress file
+
             def _flush_writes(n: int) -> None:
                 """Dispatch the first n embedded rows to background writes,
                 sub-batched at max_write_batch."""
+                nonlocal dispatched
+                first_future = len(db_futures)
                 ids    = write_ids[:n]
                 embeds = write_embeds[:n]
                 texts  = write_texts[:n]
@@ -493,6 +520,8 @@ def ingest(
                     db_futures.append(db_writer.submit(
                         _locked_add, fts_lock, fts_store.add, ids[start:end], texts[start:end],
                     ))
+                dispatched += n
+                flush_marks.append((dispatched, db_futures[first_future:]))
 
             for start in range(0, total_chunks, batch_size):
                 end = min(start + batch_size, total_chunks)
@@ -512,6 +541,7 @@ def ingest(
 
                 while len(write_ids) >= write_batch_size:
                     _flush_writes(write_batch_size)
+                _checkpoint()
 
             if write_ids:
                 _flush_writes(len(write_ids))
