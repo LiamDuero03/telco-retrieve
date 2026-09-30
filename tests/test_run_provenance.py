@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -12,7 +12,10 @@ import open_telco_rag.core.pipeline as pipeline_module
 from open_telco_rag.core.pipeline import ingest
 from open_telco_rag.evaluation.evaluate import evaluate_corpus
 from open_telco_rag.evaluation.provenance import (
-    SCHEMA_VERSION, collect_run_record, hash_questions, read_index_settings,
+    SCHEMA_VERSION,
+    collect_run_record,
+    hash_questions,
+    read_index_settings,
 )
 from open_telco_rag.evaluation.questions import EvalQuestion
 from open_telco_rag.evaluation.results import CorpusResult, QuestionResult
@@ -38,9 +41,9 @@ class _Store:
 
 
 def _record(**over):
-    kw = dict(params={"top_k": 5}, embedder=SimpleNamespace(model_key="minilm", _model_name="x/y", _dimensions=3),
-              reranker=None, store=_Store(), questions=_questions(), questions_name="q.json",
-              started_at=datetime.now())
+    kw = {"params": {"top_k": 5}, "embedder": SimpleNamespace(model_key="minilm", _model_name="x/y", _dimensions=3),
+              "reranker": None, "store": _Store(), "questions": _questions(), "questions_name": "q.json",
+              "started_at": datetime.now(timezone.utc)}
     kw.update(over)
     return collect_run_record(**kw)
 
@@ -110,7 +113,7 @@ def test_old_result_files_without_a_record_still_load(monkeypatch, tmp_path):
 
 
 def test_an_api_key_passed_to_the_evaluation_never_reaches_the_output(monkeypatch, tmp_path, capsys):
-    result, saved = _evaluate(monkeypatch, tmp_path, rag_api_key=SECRET)
+    _result, saved = _evaluate(monkeypatch, tmp_path, rag_api_key=SECRET)
     out = capsys.readouterr()
     assert SECRET not in json.dumps(saved) and SECRET not in out.out + out.err
 
@@ -136,7 +139,7 @@ def test_the_same_inputs_give_identical_results(monkeypatch, tmp_path):
 
 @pytest.mark.parametrize("concurrency", [1, 4])
 def test_results_keep_the_question_order_under_concurrency(monkeypatch, tmp_path, concurrency):
-    result, saved = _evaluate(monkeypatch, tmp_path, concurrency=concurrency, n=12)
+    _result, saved = _evaluate(monkeypatch, tmp_path, concurrency=concurrency, n=12)
     assert [q["question"] for q in saved["question_results"]] == [f"Which interface {i}?" for i in range(12)]
     _, serial = _evaluate(monkeypatch, tmp_path, name="serial", concurrency=1, n=12)
     assert _stable(saved["question_results"]) == _stable(serial["question_results"])
@@ -177,7 +180,7 @@ def test_a_collection_ingested_under_two_configurations_says_so(tmp_path):
 def test_the_run_record_names_the_index_settings(tmp_path):
     store = _ingest(tmp_path)
     record = collect_run_record(params={}, embedder=BagOfWordsEmbedder(), reranker=None, store=store,
-                                questions=_questions(1), questions_name="q.json", started_at=datetime.now())
+                                questions=_questions(1), questions_name="q.json", started_at=datetime.now(timezone.utc))
     assert record["index"]["ingest_settings"]["settings"]["chunking"]["strategy"] == "text_baseline"
     assert record["index"]["distance_space"] == "cosine" and record["index"]["chunks"] > 0
     assert str(tmp_path) not in json.dumps(record)

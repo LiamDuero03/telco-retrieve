@@ -19,8 +19,8 @@ def _cands(sizes):
 def test_fill_stats_describe_each_policy():
     stats = {}
     fill_context_budget(_cands([30, 30, 30]), 50, "stop", stats=stats)
-    assert stats == dict(candidates=3, kept=1, skipped=0, truncated=False, stopped_by_policy=True,
-                         pool_exhausted=False, empty=False)
+    assert stats == {"candidates": 3, "kept": 1, "skipped": 0, "truncated": False, "stopped_by_policy": True,
+                         "pool_exhausted": False, "empty": False}
     fill_context_budget(_cands([30, 30, 10]), 50, "skip", stats=stats)
     assert stats["kept"] == 2 and stats["skipped"] == 1 and stats["stopped_by_policy"] is False
     fill_context_budget(_cands([30, 30]), 50, "truncate", stats=stats)
@@ -64,6 +64,6 @@ def test_distances_are_recorded_only_on_request_and_align_with_the_ids(monkeypat
 def test_a_budgeted_question_records_the_overflow_events(monkeypatch):
     d = _run(monkeypatch, context_token_budget=50, candidate_pool=3, budget_overflow="skip")
     # skip left one chunk out and still had room (42/50 tokens) once the pool ran out
-    assert d["budget_stats"] == dict(candidates=3, kept=2, skipped=1, truncated=False,
-                                     stopped_by_policy=False, pool_exhausted=True, empty=False)
+    assert d["budget_stats"] == {"candidates": 3, "kept": 2, "skipped": 1, "truncated": False,
+                                     "stopped_by_policy": False, "pool_exhausted": True, "empty": False}
     assert "candidate_distances" not in d

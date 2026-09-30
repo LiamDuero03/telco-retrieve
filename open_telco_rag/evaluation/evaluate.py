@@ -10,7 +10,7 @@ import logging
 import re
 import time
 import tiktoken
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -985,7 +985,7 @@ def evaluate_corpus(
     # across threads (chromadb supports concurrent readers).
     rag_results: list[Any] = [None] * len(qs)
     rag_wall_start = time.perf_counter()
-    run_started_at = datetime.now()
+    run_started_at = datetime.now(timezone.utc)
     # tqdm.write() via emit() so output coexists with an active bar.
     pbar = tqdm(total=len(qs), desc=f"{corpus}/{model} RAG", unit="q") if progress_bar else None
     emit = pbar.write if pbar else print

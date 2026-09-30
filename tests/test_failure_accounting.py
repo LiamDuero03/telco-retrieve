@@ -11,7 +11,11 @@ import pytest
 import cli.main as cli_main
 import open_telco_rag.evaluation.evaluate as evaluate_module
 from open_telco_rag.evaluation.results import (
-    CorpusResult, QuestionResult, aggregate, print_summary, result_to_dict,
+    CorpusResult,
+    QuestionResult,
+    aggregate,
+    print_summary,
+    result_to_dict,
 )
 
 
