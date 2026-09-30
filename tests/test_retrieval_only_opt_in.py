@@ -124,3 +124,29 @@ def test_cli_record_judge_responses_and_search_method_defaults(cli_evaluate):
     _run(["--record-judge-responses", "--search-method", "hybrid"], tmp)
     assert seen["corpus_kwargs"]["record_judge_calls"] is True
     assert seen["corpus_kwargs"]["search_method"] == "hybrid"
+
+
+# ── missing Claude key fails fast instead of erroring every question ─────────
+
+@pytest.mark.parametrize("extra", [[], ["--rag-generator", "claude", "--generator", "local"]])
+def test_claude_without_a_key_exits_before_any_work(cli_evaluate, monkeypatch, extra):
+    cli_main, _ = cli_evaluate[0], cli_evaluate[1]
+    seen, tmp = cli_evaluate
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    with pytest.raises(SystemExit, match="ANTHROPIC_API_KEY"):
+        _run(["--generator", "claude"] if not extra else extra, tmp)
+    assert seen["corpus_kwargs"] is None and seen["llm_built"] == 0
+
+
+def test_claude_with_a_key_or_retrieval_only_or_another_generator_is_unaffected(cli_evaluate, monkeypatch):
+    seen, tmp = cli_evaluate
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    _run(["--generator", "local", "--rag-generator", "local"], tmp)          # no claude involved
+    assert seen["corpus_kwargs"] is not None
+    seen["corpus_kwargs"] = None
+    _run(["--generator", "claude", "--retrieval-only"], tmp)                 # no LLM is used
+    assert seen["corpus_kwargs"]["retrieval_only"] is True
+    seen["corpus_kwargs"] = None
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    _run(["--generator", "claude"], tmp)
+    assert seen["corpus_kwargs"] is not None

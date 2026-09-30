@@ -739,6 +739,12 @@ def _run_evaluate(args) -> None:
     rag_base_url = getattr(args, "rag_llm_base_url", None) or getattr(args, "llm_base_url", None)
     rag_api_key  = getattr(args, "rag_llm_api_key", None)  or getattr(args, "llm_api_key", None)
 
+    # fail before any work if a Claude generator is selected without a key; the
+    # per-question calls would otherwise all fail and the run would still exit 0
+    if not no_llm and "claude" in (args.generator, rag_generator_name)             and not os.environ.get("ANTHROPIC_API_KEY"):
+        sys.exit("error: --generator/--rag-generator claude needs ANTHROPIC_API_KEY "
+                 "(set it in the environment or a .env file).")
+
     if no_llm:
         # nothing calls an LLM in retrieval-only mode, so don't build clients
         def _no_llm_call(prompt, max_tokens):
