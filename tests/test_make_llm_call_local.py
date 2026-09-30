@@ -21,13 +21,13 @@ def test_local_llm_call_posts_to_the_given_base_url(monkeypatch):
     monkeypatch.delenv("LOCAL_LLM_API_KEY", raising=False)
     captured = {}
 
-    def _fake_post(url, headers=None, json=None, timeout=None):
+    def _fake_post(self, url, headers=None, json=None, timeout=None):
         captured["url"] = url
         captured["headers"] = headers
         captured["json"] = json
         return _FakeResponse("local model response")
 
-    monkeypatch.setattr("requests.post", _fake_post)
+    monkeypatch.setattr("requests.Session.post", _fake_post)
 
     llm_call = make_llm_call("local", model="Qwen/Qwen3-32B", base_url="http://localhost:8001/v1")
     result = llm_call("some prompt", 256)
@@ -42,11 +42,11 @@ def test_local_llm_call_posts_to_the_given_base_url(monkeypatch):
 def test_local_llm_call_sends_authorization_header_when_api_key_given(monkeypatch):
     captured = {}
 
-    def _fake_post(url, headers=None, json=None, timeout=None):
+    def _fake_post(self, url, headers=None, json=None, timeout=None):
         captured["headers"] = headers
         return _FakeResponse("ok")
 
-    monkeypatch.setattr("requests.post", _fake_post)
+    monkeypatch.setattr("requests.Session.post", _fake_post)
 
     llm_call = make_llm_call(
         "local", model="local-model", base_url="http://localhost:8000/v1", api_key="secret-key",
@@ -61,12 +61,12 @@ def test_local_llm_call_falls_back_to_env_vars(monkeypatch):
     monkeypatch.setenv("LOCAL_LLM_API_KEY", "env-key")
     captured = {}
 
-    def _fake_post(url, headers=None, json=None, timeout=None):
+    def _fake_post(self, url, headers=None, json=None, timeout=None):
         captured["url"] = url
         captured["headers"] = headers
         return _FakeResponse("ok")
 
-    monkeypatch.setattr("requests.post", _fake_post)
+    monkeypatch.setattr("requests.Session.post", _fake_post)
 
     llm_call = make_llm_call("local", model="local-model")
     llm_call("prompt")
