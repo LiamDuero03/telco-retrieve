@@ -43,5 +43,36 @@
         "model_name": "baai/bge-m3",
         "dimensions": 1024,
         "description": "OpenRouter: BAAI BGE-M3"
+    },
+    "e5-prefixed": {
+        "model_name": "intfloat/e5-large-v2",
+        "dimensions": 1024,
+        "description": "Opt-in variant of e5 that applies e5's documented 'query: ' / 'passage: ' prefixes. Separate key, so it never mixes with indexes built with plain 'e5'",
+        "query_prefix": "query: ",
+        "document_prefix": "passage: "
+    },
+    "bge-prefixed": {
+        "model_name": "BAAI/bge-large-en-v1.5",
+        "dimensions": 1024,
+        "description": "Opt-in variant of bge that applies BGE's documented query instruction. Separate key, so it never mixes with indexes built with plain 'bge'",
+        "query_prefix": "Represent this sentence for searching relevant passages: "
+    },
+    "bge-m3": {
+        "model_name": "BAAI/bge-m3",
+        "dimensions": 1024,
+        "description": "BAAI BGE-M3 (local sentence-transformers) — no query/document prefix required (verified 2026-09-21: HF model card confirms M3 dropped the instruction requirement earlier BGE versions had)"
+    },
+    "qwen3-embedding-0.6b": {
+        "model_name": "Qwen/Qwen3-Embedding-0.6B",
+        "dimensions": 1024,
+        "description": "Qwen3 embedding series, 0.6B params — instruction-aware, strong general-purpose retrieval (verified 2026-09-21 via HF model card)",
+        "query_prefix": "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: "
+    },
+    "embeddinggemma-300m": {
+        "model_name": "google/embeddinggemma-300m",
+        "dimensions": 768,
+        "description": "Google EmbeddingGemma, 300M params — Matryoshka-truncatable to 512/256/128 dims, prompt-name-based query/document distinction (verified 2026-09-21 via HF model card + Google AI docs)",
+        "query_prompt_name": "Retrieval-query",
+        "document_prompt_name": "Retrieval-document"
     }
 }

@@ -53,7 +53,12 @@ class OpenRouterEmbedder:
     def dimensions(self) -> int:
         return self._dimensions
 
-    def embed(self, texts: List[str]) -> List[List[float]]:
+    def embed(self, texts: List[str], is_query: bool = False) -> List[List[float]]:
+        # is_query: accepted for Embedder protocol parity with
+        # SentenceTransformerEmbedder; currently a no-op here since no
+        # OpenRouter-hosted entry in embedding_models.json needs a query/
+        # document prefix (or-3-small, or-bge-m3 -- BGE-M3 needs none per
+        # its own model card).
         import concurrent.futures
         
         all_embeddings_dict = {}

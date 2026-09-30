@@ -1,6 +1,7 @@
 """Search implementation: dense/bm25/hybrid retrieval, reranking, and
 parent-chunk resolution for hierarchical parent-child chunking."""
 from __future__ import annotations
+import inspect
 import logging
 import math
 from typing import Any
@@ -36,6 +37,19 @@ def _truncate_to_tokens(text: str, max_tokens: int) -> str:
         return ""
     enc = _get_encoding()
     return enc.decode(enc.encode(text)[:max_tokens])
+
+
+def _embed_query(embedder: Any, query: str) -> list[float]:
+    """Embed a query; passes is_query=True only if the embedder's embed() takes
+    it, so custom embedders with the plain embed(texts) signature keep working."""
+    try:
+        params = inspect.signature(embedder.embed).parameters
+    except (TypeError, ValueError):
+        params = {}
+    accepts = "is_query" in params or any(p.kind is p.VAR_KEYWORD for p in params.values())
+    if accepts:
+        return embedder.embed([query], is_query=True)[0]
+    return embedder.embed([query])[0]
 
 
 def resolve_budget_args(
@@ -216,7 +230,7 @@ def execute_retrieval(
 
     # Dense vector pass
     if search_method in ["dense", "hybrid"]:
-        vector = embedder.embed([query])[0]
+        vector = _embed_query(embedder, query)
         dense_results = store.search(vector, n_results=candidate_k)
         
         if 0.0 < threshold < 1.0:

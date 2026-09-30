@@ -34,6 +34,17 @@ class SentenceTransformerEmbedder:
         self._model_name  = available[model_key]["model_name"]
         self._dimensions  = available[model_key]["dimensions"]
         self._description = available[model_key].get("description", "")
+        # Plain string prefixes (e.g. e5's "query: "/"passage: ", Qwen3-
+        # Embedding's instruction-style query prefix) applied only when set
+        # -- every entry without these keys embeds exactly as before.
+        self._query_prefix    = available[model_key].get("query_prefix")
+        self._document_prefix = available[model_key].get("document_prefix")
+        # SBERT prompt_name mechanism (e.g. EmbeddingGemma's named prompts,
+        # resolved from the model's OWN config, not a literal string here)
+        # -- mutually independent of the plain-prefix keys above; a model
+        # entry uses one mechanism or the other, never both.
+        self._query_prompt_name    = available[model_key].get("query_prompt_name")
+        self._document_prompt_name = available[model_key].get("document_prompt_name")
         self._model       = None
         self._first_embed_done = False
         # opt-in: with track_truncation=True every embed() also tokenizes the
@@ -126,10 +137,23 @@ class SentenceTransformerEmbedder:
                 self._model_name, n_over, len(texts), max_len,
             )
 
-    def embed(self, texts: list[str]) -> list[list[float]]:
+    def _apply_prefix(self, texts: list[str], is_query: bool) -> list[str]:
+        prefix = self._query_prefix if is_query else self._document_prefix
+        if not prefix:
+            return texts
+        return [f"{prefix}{t}" for t in texts]
+
+    def embed(self, texts: list[str], is_query: bool = False) -> list[list[float]]:
         import torch
         self._load()
+
+        # Length-checked/embedded AFTER the prefix is applied -- the prefix's
+        # own tokens count against max_seq_length too (matters most for
+        # Qwen3-Embedding's fairly long instruction-style query prefix).
+        texts = self._apply_prefix(texts, is_query)
         self._record_length_check(texts)
+        prompt_name = self._query_prompt_name if is_query else self._document_prompt_name
+        encode_kwargs = {"prompt_name": prompt_name} if prompt_name else {}
 
         optimal_batch_size = 256 if torch.cuda.is_available() else 32
 
@@ -148,14 +172,16 @@ class SentenceTransformerEmbedder:
                     texts,
                     batch_size=optimal_batch_size,
                     show_progress_bar=False,
-                    convert_to_numpy=True
+                    convert_to_numpy=True,
+                    **encode_kwargs,
                 )
         else:
             embeddings = self._model.encode(
                 texts,
                 batch_size=optimal_batch_size,
                 show_progress_bar=False,
-                convert_to_numpy=True
+                convert_to_numpy=True,
+                **encode_kwargs,
             )
 
         if is_first_embed:
