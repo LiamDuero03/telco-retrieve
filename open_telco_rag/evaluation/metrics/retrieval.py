@@ -49,6 +49,13 @@ def coverage_ratio(results: list[Any], threshold: float) -> float:
     return sum(1 for s in sims if s >= threshold) / len(sims)
 
 
+def _norm_path(s: str) -> str:
+    """ids are "{relative path}::..."; the relative path uses the OS separator
+    of the machine that ingested (backslashes on Windows), while question files
+    usually come from another OS. compare with forward slashes"""
+    return s.replace("\\", "/")
+
+
 def _document_id(result: Any) -> str:
     """Best-effort document identifier. Uses doc_id (path before "::"), not
     metadata["source"], which collapses to a generic filename across a corpus.
@@ -56,7 +63,7 @@ def _document_id(result: Any) -> str:
     doc_id = getattr(result, "doc_id", None)
     if doc_id:
         # doc_id is "{rel}::{model_key}::{chunk_index}".
-        return doc_id.split("::", 1)[0]
+        return _norm_path(doc_id.split("::", 1)[0])
     metadata = getattr(result, "metadata", None) or {}
     return metadata.get("source", "")
 
@@ -147,7 +154,8 @@ def chunk_rank(
 
     if expected_chunk_id:
         for i, r in enumerate(results, start=1):
-            if getattr(r, "doc_id", None) == expected_chunk_id:
+            rid = getattr(r, "doc_id", None)
+            if rid is not None and _norm_path(rid) == _norm_path(expected_chunk_id):
                 return i
 
     if expected_chunk_text:
@@ -221,7 +229,7 @@ def _span_overlap_hit(
         metadata = r.metadata or {}
         char_start = metadata["char_start"]
         char_end = metadata["char_end"]
-        if _document_id(r) == evidence_doc_id and char_start < evidence_char_end and evidence_char_start < char_end:
+        if _document_id(r) == _norm_path(evidence_doc_id) and char_start < evidence_char_end and evidence_char_start < char_end:
             return 1
 
     return 0 if any_offsets_available else -1
