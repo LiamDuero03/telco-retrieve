@@ -7,6 +7,7 @@ local paths); anything that cannot be determined is None.
 """
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import platform
@@ -55,7 +56,8 @@ def environment() -> dict:
 
 def hash_questions(questions: list[Any]) -> str:
     """sha256 of the questions as evaluated (order-sensitive, canonical JSON)"""
-    rows = [dict(vars(q)) if hasattr(q, "__dict__") else q for q in questions]
+    rows = [{f.name: getattr(q, f.name) for f in dataclasses.fields(q)} if dataclasses.is_dataclass(q) else q
+            for q in questions]
     return hashlib.sha256(json.dumps(rows, sort_keys=True, default=str).encode("utf8")).hexdigest()
 
 
