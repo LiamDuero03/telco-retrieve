@@ -121,8 +121,11 @@ def read_index_settings(db_path: str | Path | None, collection: str | None) -> d
         return None
     if not isinstance(data, dict) or "latest" not in data:
         return None
-    return {"fingerprint": data["latest"].get("fingerprint"), "settings": data["latest"].get("settings"),
+    info = {"fingerprint": data["latest"].get("fingerprint"), "settings": data["latest"].get("settings"),
             "configurations_seen": len(data.get("history", []))}
+    if data["latest"].get("code"):     # sidecars written before this field existed have none
+        info["code"] = data["latest"]["code"]
+    return info
 
 
 def collect_run_record(

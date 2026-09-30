@@ -156,7 +156,7 @@ def _record_index_settings(store: Any, fingerprint: str, settings: dict) -> None
     to the database (travels with it, e.g. through push-hf), so evaluation results
     can state the chunking they ran against. keeps a history: a collection that
     was ingested under more than one configuration says so. never fails an ingest"""
-    from open_telco_rag.evaluation.provenance import index_settings_file
+    from open_telco_rag.evaluation.provenance import code_version, index_settings_file
 
     try:
         path = index_settings_file(store.path, store.collection_name)
@@ -167,7 +167,8 @@ def _record_index_settings(store: Any, fingerprint: str, settings: dict) -> None
             history = []
         # the fingerprint covers the (local) db path; the recorded settings do not
         entry = {"fingerprint": fingerprint, "settings": {k: v for k, v in settings.items() if k != "db_path"},
-                 "updated_at": datetime.now().astimezone().isoformat(timespec="seconds")}
+                 "updated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                 "code": code_version()}
         if history and history[-1].get("fingerprint") == fingerprint:
             history[-1] = entry
         else:
