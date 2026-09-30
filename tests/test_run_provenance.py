@@ -229,9 +229,11 @@ def test_code_version_is_unknown_when_git_cannot_run(tmp_path, monkeypatch, fail
     assert provenance.code_version()["git_commit"] == "unknown"
 
 
-def test_code_version_reports_a_real_checkout(monkeypatch):
+def test_code_version_reports_a_real_checkout():
     from open_telco_rag.evaluation import provenance
 
+    if not (provenance._PACKAGE_DIR / ".git").exists():
+        pytest.skip("not running from a git checkout (e.g. a source archive)")
     code = provenance.code_version()
     assert code["git_commit"] != "unknown" and len(code["git_commit"]) == 40
     assert isinstance(code["git_dirty"], bool)
