@@ -72,7 +72,15 @@ test_marker_quality.py
 hw_compatibility/
 download_3gpp.py
 
-scripts/
+# personal utility scripts stay ignored; the promoted helper tools are tracked
+scripts/*
+!scripts/embedder_smoke_test.py
+!scripts/estimate_embedding_cost.py
+!scripts/time_embedding_throughput.py
+!scripts/time_openrouter_embedding.py
+
+# logs anywhere, not just logs/
+*.log
 
 configs/eval_questions/
 # Utility and test scripts
