@@ -392,6 +392,124 @@ def _match_deterministic_answer(answer: str, reference_answer: Any, answer_type:
     return _match_deterministic_answer_prose(answer, reference_answer, answer_type)
 
 
+def _run_retrieval_pass(
+    q: EvalQuestion,
+    store: Any,
+    embedder: Any,
+    search_query: str,
+    active_question: str,
+    top_k: int,
+    reranker: Any,
+    rerank_top_k: int,
+    search_method: str,
+    resolve_parents: bool,
+    context_token_budget: int | None,
+    candidate_pool: int | None,
+    budget_overflow: str | None,
+    result: "QuestionResult",
+) -> tuple[list, list]:
+    """search -> optional rerank -> optional budget fill, filling in result's
+    latency / candidate_* / used_* / budget fields. shared by the RAG and
+    retrieval_only paths so they can't diverge. returns (candidates, retrieved).
+    """
+    from open_telco_rag.core.pipeline import search
+
+    # in budget mode, over-fetch candidate_pool instead of top_k; the budget
+    # fill decides how many are actually used
+    budgeted = context_token_budget is not None
+    fetch_k = candidate_pool if budgeted else top_k
+    search_start = time.perf_counter()
+    retrieved_candidates = search(
+        search_query,
+        store=store,
+        embedder=embedder,
+        top_k=fetch_k,
+        reranker=None,
+        rerank_top_k=fetch_k,
+        search_method=search_method,
+        resolve_parents=resolve_parents
+    )
+    result.search_latency = time.perf_counter() - search_start
+
+    result.candidate_chunk_ids = [getattr(r, "doc_id", None) for r in retrieved_candidates]
+    result.candidate_chunk_texts = [getattr(r, "text", "") for r in retrieved_candidates]
+
+    result.rerank_latency = 0.0
+    result.rerank_tokens = 0
+
+    rerank_n = candidate_pool if budgeted else rerank_top_k
+    if reranker:
+        rerank_start = time.perf_counter()
+
+        rerank_payload = search_query + " ".join([c.text for c in retrieved_candidates])
+        result.rerank_tokens = _local_token_count(rerank_payload)
+
+        try:
+            retrieved = reranker.rerank(active_question, retrieved_candidates, top_k=rerank_n)
+        except AttributeError:
+            # Reranker wrapper may use a different method name.
+            retrieved = retrieved_candidates[:rerank_n]
+
+        result.rerank_latency = time.perf_counter() - rerank_start
+    else:
+        retrieved = retrieved_candidates[:rerank_n]
+
+    if budgeted:
+        retrieved = fill_context_budget(retrieved, context_token_budget, budget_overflow)
+        result.context_tokens = sum(_local_token_count(r.text) for r in retrieved)
+        result.n_chunks_used = len(retrieved)
+        result.budget = context_token_budget
+        result.fill_ratio = result.context_tokens / context_token_budget
+
+    # chunks handed to the generator (post budget fill when a budget is set)
+    result.used_chunk_ids = [getattr(r, "doc_id", None) for r in retrieved]
+    result.used_chunk_texts = [getattr(r, "text", "") for r in retrieved]
+
+    return retrieved_candidates, retrieved
+
+
+def _compute_retrieval_metrics(
+    result: "QuestionResult",
+    retrieved_candidates: list,
+    retrieved: list,
+    q: EvalQuestion,
+    store: Any,
+    sim_threshold: float,
+) -> None:
+    """fill in every retrieval-tier metric on result; shared by the RAG path
+    (after scoring) and the retrieval_only path. never called for baseline."""
+    mean_s, min_s, max_s  = cosine_sim_stats(retrieved)
+    result.mean_similarity = mean_s
+    result.min_similarity  = min_s
+    result.max_similarity  = max_s
+    result.distinct_sources_retrieved = distinct_sources_retrieved(retrieved)
+    result.canonical_hit   = canonical_source_hit(
+        retrieved, q.canonical_source, store=store, expected_release=q.release,
+    )
+    result.exact_chunk_hit = exact_chunk_hit(retrieved, q.chunk_id, q.source_text)
+    result.candidate_chunk_rank = chunk_rank(retrieved_candidates, q.chunk_id, q.source_text)
+    result.used_chunk_rank = chunk_rank(retrieved, q.chunk_id, q.source_text)
+    # overlap-based companions to the exact-chunk metrics; only when the
+    # question carries an evidence span (otherwise the fields stay None)
+    if q.evidence_doc_id and q.evidence_char_start is not None and q.evidence_char_end is not None:
+        result.span_hit_at_k = span_hit_at_k(
+            retrieved_candidates, q.evidence_char_start, q.evidence_char_end, q.evidence_doc_id,
+        )
+        result.span_hit_in_context = span_hit_in_context(
+            retrieved, q.evidence_char_start, q.evidence_char_end, q.evidence_doc_id,
+        )
+    result.coverage_ratio  = coverage_ratio(retrieved, sim_threshold)
+
+    # Separate from canonical_hit: None = no ground truth, False =
+    # rejected as too generic.
+    if q.canonical_source is None:
+        result.canonical_source_discriminating = None
+    else:
+        result.canonical_source_discriminating = is_discriminating_source(
+            q.canonical_source, store
+        )
+
+
 # ── Self-consistency (n_generations>1 in evaluate_question()) ───────────────
 # Retrieval runs once; generation repeats N times at a non-zero temperature.
 # For mc/tf: extract what each generation committed to, majority-vote on
@@ -472,6 +590,7 @@ def evaluate_question(
     llm_call:      Callable[[str, int], str] = claude_call,
     rag_llm_call:  Callable[[str, int], str] | None = None,
     baseline:      bool  = False,
+    retrieval_only: bool = False,
     reranker:      Any   = None,
     rerank_top_k:  int   = 5,
     debug:         bool  = False,
@@ -495,6 +614,12 @@ def evaluate_question(
 ) -> QuestionResult:
     """Run all applicable metrics for one question.
 
+    retrieval_only=True: runs retrieval (respecting reranker/budget) and every
+    retrieval-tier metric, then returns WITHOUT calling a generator or judge:
+    no answer, no token/cost tracking, no scoring (answer stays "", the
+    generation-only fields keep their defaults). Mutually exclusive with
+    baseline (ValueError). Off by default; existing callers are unaffected.
+
     n_generations>1: self-consistency. Retrieval runs once; generation
     repeats N times against the same context, then combined - majority vote
     on the raw predicted value for mc/tf, averaged judge-metric scores for
@@ -517,7 +642,10 @@ def evaluate_question(
     context_token_budget, candidate_pool, budget_overflow = resolve_budget_args(
         context_token_budget, candidate_pool, budget_overflow)
     from open_telco_rag.core.pipeline import search, generate
-    
+
+    if baseline and retrieval_only:
+        raise ValueError("baseline and retrieval_only are mutually exclusive")
+
     active_question = q.question
     if inject_metadata and q.canonical_source:
         active_question = f"According to {q.corpus.upper()} document {q.canonical_source}, {q.question}"
@@ -551,58 +679,22 @@ def evaluate_question(
             gens = [gen]  # baseline never repeats
             result.gen_latency = time.perf_counter() - gen_start
             result.search_latency = 0.0
-        else:
-            # Search pass, without reranker. In budget mode, over-fetch
-            # candidate_pool candidates instead of top_k -- the budget fill
-            # below decides how many are actually used, independent of top_k.
-            budgeted = context_token_budget is not None
-            fetch_k = candidate_pool if budgeted else top_k
-            search_start = time.perf_counter()
-            retrieved_candidates = search(
-                search_query,
-                store=store,
-                embedder=embedder,
-                top_k=fetch_k,
-                reranker=None,
-                rerank_top_k=fetch_k,
-                search_method=search_method,
-                resolve_parents=resolve_parents
+        elif retrieval_only:
+            retrieved_candidates, retrieved = _run_retrieval_pass(
+                q, store, embedder, search_query, active_question, top_k, reranker, rerank_top_k,
+                search_method, resolve_parents, context_token_budget, candidate_pool, budget_overflow,
+                result,
             )
-            result.search_latency = time.perf_counter() - search_start
-
-            result.candidate_chunk_ids = [getattr(r, "doc_id", None) for r in retrieved_candidates]
-            result.candidate_chunk_texts = [getattr(r, "text", "") for r in retrieved_candidates]
-
-            result.rerank_latency = 0.0
-            result.rerank_tokens = 0
-
-            rerank_n = candidate_pool if budgeted else rerank_top_k
-            if reranker:
-                rerank_start = time.perf_counter()
-
-                rerank_payload = search_query + " ".join([c.text for c in retrieved_candidates])
-                result.rerank_tokens = _local_token_count(rerank_payload)
-
-                try:
-                    retrieved = reranker.rerank(active_question, retrieved_candidates, top_k=rerank_n)
-                except AttributeError:
-                    # Reranker wrapper may use a different method name.
-                    retrieved = retrieved_candidates[:rerank_n]
-
-                result.rerank_latency = time.perf_counter() - rerank_start
-            else:
-                retrieved = retrieved_candidates[:rerank_n]
-
-            if budgeted:
-                retrieved = fill_context_budget(retrieved, context_token_budget, budget_overflow)
-                result.context_tokens = sum(_local_token_count(r.text) for r in retrieved)
-                result.n_chunks_used = len(retrieved)
-                result.budget = context_token_budget
-                result.fill_ratio = result.context_tokens / context_token_budget
-
-            # chunks handed to the generator (post budget fill when a budget is set)
-            result.used_chunk_ids = [getattr(r, "doc_id", None) for r in retrieved]
-            result.used_chunk_texts = [getattr(r, "text", "") for r in retrieved]
+            result.latency = time.perf_counter() - start_time
+            result.chunks_used = len(retrieved)
+            _compute_retrieval_metrics(result, retrieved_candidates, retrieved, q, store, sim_threshold)
+            return result
+        else:
+            retrieved_candidates, retrieved = _run_retrieval_pass(
+                q, store, embedder, search_query, active_question, top_k, reranker, rerank_top_k,
+                search_method, resolve_parents, context_token_budget, candidate_pool, budget_overflow,
+                result,
+            )
 
             gen_start = time.perf_counter()
             generator = _build_generator(
@@ -750,36 +842,7 @@ def evaluate_question(
             result.judge_completion_tokens = judge_after[1] - judge_before[1]
 
         if not baseline:
-            mean_s, min_s, max_s  = cosine_sim_stats(retrieved)
-            result.mean_similarity = mean_s
-            result.min_similarity  = min_s
-            result.max_similarity  = max_s
-            result.distinct_sources_retrieved = distinct_sources_retrieved(retrieved)
-            result.canonical_hit   = canonical_source_hit(
-                retrieved, q.canonical_source, store=store, expected_release=q.release,
-            )
-            result.exact_chunk_hit = exact_chunk_hit(retrieved, q.chunk_id, q.source_text)
-            result.candidate_chunk_rank = chunk_rank(retrieved_candidates, q.chunk_id, q.source_text)
-            result.used_chunk_rank = chunk_rank(retrieved, q.chunk_id, q.source_text)
-            # overlap-based companions to the exact-chunk metrics; only when the
-            # question carries an evidence span (otherwise the fields stay None)
-            if q.evidence_doc_id and q.evidence_char_start is not None and q.evidence_char_end is not None:
-                result.span_hit_at_k = span_hit_at_k(
-                    retrieved_candidates, q.evidence_char_start, q.evidence_char_end, q.evidence_doc_id,
-                )
-                result.span_hit_in_context = span_hit_in_context(
-                    retrieved, q.evidence_char_start, q.evidence_char_end, q.evidence_doc_id,
-                )
-            result.coverage_ratio  = coverage_ratio(retrieved, sim_threshold)
-
-            # Separate from canonical_hit: None = no ground truth, False =
-            # rejected as too generic.
-            if q.canonical_source is None:
-                result.canonical_source_discriminating = None
-            else:
-                result.canonical_source_discriminating = is_discriminating_source(
-                    q.canonical_source, store
-                )
+            _compute_retrieval_metrics(result, retrieved_candidates, retrieved, q, store, sim_threshold)
 
     except Exception as e:
         result.error = str(e)
@@ -824,6 +887,7 @@ def evaluate_corpus(
     context_token_budget: int | None = None,
     candidate_pool: int | None = None,
     budget_overflow: str | None = None,
+    retrieval_only: bool = False,
 ) -> tuple[CorpusResult, CorpusResult | None]:
     """Run the full evaluation suite for one corpus.
 
@@ -831,6 +895,10 @@ def evaluate_corpus(
     context_token_budget/candidate_pool/budget_overflow: passed through to
     evaluate_question()'s RAG pass only (baseline never retrieves); optional,
     unset = plain top_k path.
+
+    retrieval_only: passed to evaluate_question()'s RAG pass only (baseline is
+    unaffected either way). Off by default. include_baseline=True with
+    retrieval_only=True still runs a real baseline generation pass.
 
     Returns (rag_result, baseline_result); baseline_result is None if
     include_baseline=False.
@@ -884,7 +952,7 @@ def evaluate_corpus(
             print(f"  [RAG {idx + 1}/{len(qs)}] {display_q[:65]}...")
         qr = evaluate_question(q, store, embedder, top_k, sim_threshold,
                                llm_call=llm_call, rag_llm_call=rag_llm_call,
-                               baseline=False, reranker=reranker,
+                               baseline=False, retrieval_only=retrieval_only, reranker=reranker,
                                rerank_top_k=rerank_top_k, debug=debug,
                                rag_model_name=resolved_rag_model,
                                rag_generator_name=rag_generator_name,
@@ -915,6 +983,11 @@ def evaluate_corpus(
             rag_results[idx] = qr
             if qr.error:
                 emit(f"    [ERROR] {qr.error}")
+            elif retrieval_only:
+                # no generation happens, so print retrieval metrics and keep
+                # the -1.0 accuracy sentinel out of the running accuracy
+                if not progress_bar:
+                    print(f"    sim={qr.mean_similarity:.3f}  n_chunks_used={qr.n_chunks_used}")
             elif qr.answer_type in ("mc", "tf"):
                 if not progress_bar:
                     print(f"    accuracy={qr.accuracy:.2f}  sim={qr.mean_similarity:.3f}")

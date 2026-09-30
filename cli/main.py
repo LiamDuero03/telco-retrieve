@@ -276,6 +276,10 @@ def main(argv: list[str] | None = None) -> None:
                         help="Enable reranking during evaluation retrieval")
     p_eval.add_argument("--rerank-top-k",   type=int, default=5,
                         help="Chunks to keep after reranking (default: 5)")
+    p_eval.add_argument("--retrieval-only", action="store_true",
+                        help="Optional: run retrieval and the retrieval metrics only -- no answer "
+                             "generation, no judge/LLM calls, no API keys needed. Does not update "
+                             "the leaderboard. With --include-baseline the baseline pass still runs.")
     p_eval.add_argument("--context-token-budget", type=int, default=None,
                         help="Optional: fill the generator's context up to this many tokens (cl100k_base) "
                              "instead of a fixed --top-k/--rerank-top-k chunk count.")
@@ -721,21 +725,31 @@ def _run_evaluate(args) -> None:
     embedder = _get_embedder(args.model, backend=embed_backend)
     output_dir = None if args.no_save else Path(args.output)
 
-    llm_call = make_llm_call(
-        args.generator, args.generator_model,
-        base_url=getattr(args, "llm_base_url", None),
-        api_key=getattr(args, "llm_api_key", None),
-    )
+    retrieval_only = getattr(args, "retrieval_only", False)
+    no_llm = retrieval_only and not args.include_baseline
 
     # RAG base_url/api_key fall back to the metrics ones unless given their own.
     rag_generator_name  = args.rag_generator       or args.generator
     rag_generator_model = args.rag_generator_model or args.generator_model
     rag_base_url = getattr(args, "rag_llm_base_url", None) or getattr(args, "llm_base_url", None)
     rag_api_key  = getattr(args, "rag_llm_api_key", None)  or getattr(args, "llm_api_key", None)
-    rag_llm_call = make_llm_call(rag_generator_name, rag_generator_model, base_url=rag_base_url, api_key=rag_api_key)
 
-    print(f"  Metrics LLM  : {args.generator} / {args.generator_model or 'default'}")
-    print(f"  RAG gen LLM  : {rag_generator_name} / {rag_generator_model or 'default'}")
+    if no_llm:
+        # nothing calls an LLM in retrieval-only mode, so don't build clients
+        def _no_llm_call(prompt, max_tokens):
+            raise RuntimeError("LLM call attempted in --retrieval-only mode")
+        llm_call = rag_llm_call = _no_llm_call
+        print("  Mode         : retrieval only (no generation, no LLM calls)")
+    else:
+        llm_call = make_llm_call(
+            args.generator, args.generator_model,
+            base_url=getattr(args, "llm_base_url", None),
+            api_key=getattr(args, "llm_api_key", None),
+        )
+        rag_llm_call = make_llm_call(rag_generator_name, rag_generator_model, base_url=rag_base_url, api_key=rag_api_key)
+
+        print(f"  Metrics LLM  : {args.generator} / {args.generator_model or 'default'}")
+        print(f"  RAG gen LLM  : {rag_generator_name} / {rag_generator_model or 'default'}")
 
     custom_questions = None
     if args.questions_file:
@@ -798,9 +812,12 @@ def _run_evaluate(args) -> None:
             search_method=getattr(args, "search_method", "dense"),
             resolve_parents   = getattr(args, "resolve_parents", False),
             **budget_kwargs,
+            **({"retrieval_only": True} if retrieval_only else {}),
         )
 
-        if not args.no_leaderboard:
+        if retrieval_only and not args.no_leaderboard:
+            print("\n  Leaderboard not updated (retrieval-only runs have no generation metrics).")
+        elif not args.no_leaderboard:
             _update_leaderboard(
                 leaderboard_path = Path(args.leaderboard),
                 result           = result,
