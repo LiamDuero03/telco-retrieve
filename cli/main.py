@@ -756,7 +756,8 @@ def _run_evaluate(args) -> None:
 
     # fail before any work if a Claude generator is selected without a key; the
     # per-question calls would otherwise all fail and the run would still exit 0
-    if not no_llm and "claude" in (args.generator, rag_generator_name)             and not os.environ.get("ANTHROPIC_API_KEY"):
+    if (not no_llm and "claude" in (args.generator, rag_generator_name)
+            and not os.environ.get("ANTHROPIC_API_KEY")):
         sys.exit("error: --generator/--rag-generator claude needs ANTHROPIC_API_KEY "
                  "(set it in the environment or a .env file).")
 

@@ -47,10 +47,8 @@ def _span_metadata(chunk) -> dict:
 
 
 # ── ingest resume bookkeeping ─────────────────────────────────────────────────
-# the progress file records which files were fully ingested. it used to be keyed
-# by model only, so a second collection / database / chunking config found every
-# file "done" and stored nothing. it is now tied to a fingerprint of the
-# non-secret settings that decide what gets stored.
+# the progress file lists fully ingested files and is tied to a fingerprint of the
+# non-secret settings that decide what gets stored
 
 _SECRET_KEY = re.compile(r"key|secret|token(?!s)|password|authorization|credential", re.IGNORECASE)
 _NON_CONTENT_KWARGS = {"batch_size", "write_batch_size", "resume", "log_dir", "on_progress"}
@@ -928,11 +926,8 @@ def search(
     candidate_pool:  int | None = None,
     budget_overflow: str | None = None,
 ) -> list[SearchResult]:
-    """Embed a query and retrieve nearest neighbours.
-
-    context_token_budget/candidate_pool/budget_overflow: optional, see
-    core.retrieval.execute_retrieval(); unset = plain top_k behaviour.
-    """
+    """Embed a query and retrieve nearest neighbours; the budget arguments are
+    described on core.retrieval.execute_retrieval"""
     from open_telco_rag.core.retrieval import execute_retrieval
 
     return execute_retrieval(
