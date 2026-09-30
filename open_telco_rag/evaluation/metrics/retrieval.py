@@ -184,6 +184,86 @@ def exact_chunk_hit(
     return 1 if rank > 0 else 0
 
 
+def _has_valid_offsets(result: Any) -> bool:
+    metadata = getattr(result, "metadata", None) or {}
+    char_start = metadata.get("char_start", -1)
+    char_end = metadata.get("char_end", -1)
+    return char_start is not None and char_end is not None and char_start >= 0 and char_end >= 0
+
+
+def _span_overlap_hit(
+    results: list[Any],
+    evidence_char_start: int | None,
+    evidence_char_end: int | None,
+    evidence_doc_id: str | None,
+) -> int:
+    """Shared logic for span_hit_at_k/span_hit_in_context: does any result
+    from evidence_doc_id whose stored char_start/char_end are valid overlap
+    [evidence_char_start, evidence_char_end) by any amount?
+
+    Returns:
+       1  - some chunk from evidence_doc_id overlaps the evidence span
+       0  - no chunk overlaps it (offsets ARE available in this retrieval,
+            so the check was meaningful and came back negative)
+      -1  - not applicable: no evidence span on the question, OR none of
+            `results` carries valid char_start/char_end at all (a legacy
+            collection ingested before core/chunking.py's token-sizing
+            path -- see Chunk.char_start/char_end)
+    """
+    if evidence_char_start is None or evidence_char_end is None or not evidence_doc_id:
+        return -1
+
+    any_offsets_available = False
+    for r in results:
+        if not _has_valid_offsets(r):
+            continue
+        any_offsets_available = True
+        metadata = r.metadata or {}
+        char_start = metadata["char_start"]
+        char_end = metadata["char_end"]
+        if _document_id(r) == evidence_doc_id and char_start < evidence_char_end and evidence_char_start < char_end:
+            return 1
+
+    return 0 if any_offsets_available else -1
+
+
+def span_hit_at_k(
+    results: list[Any],
+    evidence_char_start: int | None,
+    evidence_char_end: int | None,
+    evidence_doc_id: str | None,
+) -> int:
+    """
+    Binary check, chunker-agnostic alternative to exact_chunk_hit: does any
+    RETRIEVED chunk's [char_start, char_end) span overlap the question's
+    evidence span (see EvalQuestion.evidence_char_start/end/doc_id) by any
+    amount -- not necessarily an exact chunk-boundary match, so it's
+    meaningful across chunkers/chunk sizes that don't share the ground-truth
+    chunk boundaries text_baseline/chunk_id-based matching assumes.
+
+    See _span_overlap_hit() for the -1/0/1 sentinel convention.
+    """
+    return _span_overlap_hit(results, evidence_char_start, evidence_char_end, evidence_doc_id)
+
+
+def span_hit_in_context(
+    context: list[Any],
+    evidence_char_start: int | None,
+    evidence_char_end: int | None,
+    evidence_doc_id: str | None,
+) -> int:
+    """
+    Same overlap check as span_hit_at_k, but over `context` -- the chunks
+    actually PLACED in the generator's context after budgeted assembly (see
+    core.retrieval.fill_context_budget), not the full retrieved candidate
+    set. A question can be a span_hit_at_k hit while missing span_hit_in_context
+    (the evidence chunk was retrieved but didn't make it into the budget).
+
+    See _span_overlap_hit() for the -1/0/1 sentinel convention.
+    """
+    return _span_overlap_hit(context, evidence_char_start, evidence_char_end, evidence_doc_id)
+
+
 def _any_metadata_or_doc_id_contains(result: Any, needle_lower: str) -> bool:
     for v in result.metadata.values():
         if isinstance(v, str) and needle_lower in v.lower():

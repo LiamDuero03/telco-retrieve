@@ -24,6 +24,7 @@ from __future__ import annotations
 from open_telco_rag.evaluation.metrics.retrieval import (
     _document_id, canonical_source_hit, coverage_ratio, cosine_sim_stats,
     distinct_sources_retrieved, exact_chunk_hit, is_discriminating_source,
+    span_hit_at_k, span_hit_in_context,
 )
 from open_telco_rag.types import SearchResult
 
@@ -339,6 +340,104 @@ def test_coverage_ratio_uses_the_same_rounded_precision_as_cosine_sim_stats():
     assert mean_sim == max_sim == 1.0
 
     assert coverage_ratio(results, threshold=1.0) == 1.0
+
+
+# ── span_hit_at_k / span_hit_in_context ──────────────────────────────────────
+# Chunker-agnostic companions to exact_chunk_hit: overlap-based against
+# char_start/char_end metadata, not an exact chunk-boundary match.
+
+def _offset_chunk(doc_id: str, char_start: int, char_end: int, distance: float = 0.2) -> SearchResult:
+    return SearchResult(
+        text="chunk text", distance=distance,
+        metadata={"char_start": char_start, "char_end": char_end}, doc_id=doc_id,
+    )
+
+
+def test_span_hit_not_applicable_with_no_evidence_span():
+    results = [_offset_chunk("doc1::minilm::0", 0, 100)]
+    assert span_hit_at_k(results, None, None, None) == -1
+    assert span_hit_in_context(results, None, None, None) == -1
+
+
+def test_span_hit_not_applicable_when_no_chunk_carries_offsets():
+    """Legacy collection: every chunk still has the char_start/char_end
+    default of -1 (never populated by an offset-tracking chunking run)."""
+    legacy_results = [SearchResult(text="x", distance=0.2, metadata={"char_start": -1, "char_end": -1}, doc_id="doc1::minilm::0")]
+    assert span_hit_at_k(legacy_results, 10, 50, "doc1") == -1
+
+
+def test_span_hit_missing_metadata_keys_also_counts_as_no_offsets():
+    no_meta_results = [SearchResult(text="x", distance=0.2, metadata={}, doc_id="doc1::minilm::0")]
+    assert span_hit_at_k(no_meta_results, 10, 50, "doc1") == -1
+
+
+def test_span_hit_true_when_a_chunk_from_the_evidence_doc_overlaps():
+    results = [_offset_chunk("doc1", 40, 120)]
+    assert span_hit_at_k(results, evidence_char_start=100, evidence_char_end=150, evidence_doc_id="doc1") == 1
+
+
+def test_span_hit_false_when_chunks_have_offsets_but_none_overlap():
+    results = [_offset_chunk("doc1", 0, 50), _offset_chunk("doc1", 200, 250)]
+    assert span_hit_at_k(results, evidence_char_start=100, evidence_char_end=150, evidence_doc_id="doc1") == 0
+
+
+def test_span_hit_false_when_overlap_exists_but_wrong_document():
+    results = [_offset_chunk("other_doc", 100, 150)]
+    assert span_hit_at_k(results, evidence_char_start=100, evidence_char_end=150, evidence_doc_id="doc1") == 0
+
+
+def test_span_hit_in_context_can_miss_while_span_hit_at_k_hits():
+    """A question can be retrieved (span_hit_at_k=1) but not make it into
+    the budgeted context (span_hit_in_context=0) -- two different lists."""
+    candidates = [_offset_chunk("doc1", 100, 150), _offset_chunk("doc1", 9000, 9050)]
+    context = [candidates[1]]  # budget fill dropped the actually-relevant chunk
+
+    assert span_hit_at_k(candidates, 100, 150, "doc1") == 1
+    assert span_hit_in_context(context, 100, 150, "doc1") == 0
+
+
+# ── Integration: real chunk_document() offsets + span_hit_at_k ─────────────
+
+def test_span_hit_at_k_with_real_chunk_offsets_from_chunk_document():
+    """End-to-end: a document chunked via the target_tokens token path
+    (core.chunking) produces real char_start/char_end; a known evidence
+    span drawn directly from that document's text should overlap exactly
+    the chunk(s) that actually contain it."""
+    from open_telco_rag.core.chunking import chunk_document
+
+    doc = (
+        "# Introduction\n\n"
+        "This document describes the E2 interface used by the Near-RT RIC. " * 6 + "\n\n"
+        "## Architecture\n\n"
+        "The architecture separates control plane and user plane concerns. " * 6 + "\n\n"
+        "A final short paragraph closes the document out."
+    )
+    chunks = chunk_document(doc, strategy="hierarchical_markdown", target_tokens=40, max_tokens=60)
+    assert len(chunks) >= 2
+
+    # Evidence span drawn from inside a known chunk's own text.
+    target_chunk = chunks[1]
+    mid = (target_chunk.char_start + target_chunk.char_end) // 2
+    evidence_start, evidence_end = mid, min(mid + 10, target_chunk.char_end)
+    assert doc[evidence_start:evidence_end] == target_chunk.text[
+        evidence_start - target_chunk.char_start: evidence_end - target_chunk.char_start
+    ]
+
+    results = [
+        SearchResult(
+            text=c.text, distance=0.3, doc_id=f"doc::minilm::{i}",
+            metadata={"char_start": c.char_start, "char_end": c.char_end},
+        )
+        for i, c in enumerate(chunks)
+    ]
+
+    hit = span_hit_at_k(results, evidence_start, evidence_end, "doc")
+    assert hit == 1
+
+    # And a span far outside every chunk's range (shouldn't happen given
+    # chunks cover the whole doc, but confirms the miss path over real data).
+    miss = span_hit_at_k(results, len(doc) + 100, len(doc) + 200, "doc")
+    assert miss == 0
 
 
 # ── the discriminating-source cache must not outlive its store ────────────────

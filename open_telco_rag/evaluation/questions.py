@@ -32,6 +32,16 @@ class EvalQuestion:
     source_text:      str | None = None
     # Release the source chunk was ingested from (e.g. "Rel-18"); None where N/A.
     release:          str | None = None
+    # Character offsets of this question's evidence span into the CLEANED
+    # source document (same source.load()/clean() ingestion uses), and the
+    # doc_id (relative file path) they're relative to. None until populated
+    # by liam/analysis_tools/add_evidence_spans.py -- chunker-agnostic
+    # ground truth for span_hit_at_k/span_hit_in_context (see
+    # evaluation/metrics/retrieval.py), independent of any one chunker's
+    # boundaries the way chunk_id/source_text (from text_baseline) aren't.
+    evidence_char_start: int | None = None
+    evidence_char_end:   int | None = None
+    evidence_doc_id:     str | None = None
 
     @classmethod
     def from_dict(cls, d: dict) -> "EvalQuestion":
@@ -46,6 +56,9 @@ class EvalQuestion:
             chunk_id         = d.get("chunk_id"),
             source_text      = d.get("source_text"),
             release          = d.get("release"),
+            evidence_char_start = d.get("evidence_char_start"),
+            evidence_char_end   = d.get("evidence_char_end"),
+            evidence_doc_id     = d.get("evidence_doc_id"),
         )
 
 

@@ -39,6 +39,7 @@ from open_telco_rag.evaluation.metrics.generation import (
 from open_telco_rag.evaluation.metrics.retrieval import (
     cosine_sim_stats, distinct_sources_retrieved, canonical_source_hit,
     exact_chunk_hit, chunk_rank, coverage_ratio, is_discriminating_source,
+    span_hit_at_k, span_hit_in_context,
 )
 from open_telco_rag.core.retrieval import fill_context_budget, resolve_budget_args
 from open_telco_rag.evaluation.metrics.ground_truth import (
@@ -725,6 +726,15 @@ def evaluate_question(
             result.exact_chunk_hit = exact_chunk_hit(retrieved, q.chunk_id, q.source_text)
             result.candidate_chunk_rank = chunk_rank(retrieved_candidates, q.chunk_id, q.source_text)
             result.used_chunk_rank = chunk_rank(retrieved, q.chunk_id, q.source_text)
+            # overlap-based companions to the exact-chunk metrics; only when the
+            # question carries an evidence span (otherwise the fields stay None)
+            if q.evidence_doc_id and q.evidence_char_start is not None and q.evidence_char_end is not None:
+                result.span_hit_at_k = span_hit_at_k(
+                    retrieved_candidates, q.evidence_char_start, q.evidence_char_end, q.evidence_doc_id,
+                )
+                result.span_hit_in_context = span_hit_in_context(
+                    retrieved, q.evidence_char_start, q.evidence_char_end, q.evidence_doc_id,
+                )
             result.coverage_ratio  = coverage_ratio(retrieved, sim_threshold)
 
             # Separate from canonical_hit: None = no ground truth, False =

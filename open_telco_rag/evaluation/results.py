@@ -94,6 +94,12 @@ class QuestionResult:
     candidate_chunk_rank: int = -1
     used_chunk_rank:      int = -1
 
+    # ── span hit (opt-in): None unless the question has an evidence span; -1 =
+    # no chunk in this run carries offsets (legacy collection). Omitted from
+    # serialized output while None. Sits alongside exact_chunk_hit/chunk_rank.
+    span_hit_at_k:       int | None = None
+    span_hit_in_context: int | None = None
+
     # ── budgeted context (opt-in): None unless context_token_budget was set,
     # and left out of serialized output while None (see question_to_dict)
     context_tokens: int | None = None    # tokens in the chunks actually used
@@ -174,6 +180,9 @@ class CorpusResult:
     # Stronger companion to canonical_hit_rate. -1.0 with no chunk provenance.
     exact_chunk_hit_rate:  float = -1.0
     mean_reciprocal_rank: float = -1.0   # mean of 1/used_chunk_rank; -1.0 with no provenance
+    # span hit rates (opt-in): None, and omitted from output, without evidence spans
+    span_hit_at_k_rate:       float | None = None
+    span_hit_in_context_rate: float | None = None
     mean_coverage_ratio:   float = -1.0
 
     # ── budgeted context aggregates (opt-in): None, and omitted from output, without a budget
@@ -273,6 +282,8 @@ def _aggregate_one_format(results: list[QuestionResult]) -> dict:
     """
     canonical = [r for r in results if r.canonical_hit >= 0]
     exact_chunk = [r for r in results if r.exact_chunk_hit >= 0]
+    span_ak = [r for r in results if r.span_hit_at_k is not None and r.span_hit_at_k >= 0]
+    span_ic = [r for r in results if r.span_hit_in_context is not None and r.span_hit_in_context >= 0]
     entry = {
         "n":                    len(results),
         "mean_similarity":      _mean([r.mean_similarity for r in results]),
@@ -286,6 +297,12 @@ def _aggregate_one_format(results: list[QuestionResult]) -> dict:
                                   if exact_chunk else -1.0),
         "mean_coverage_ratio":  _mean([r.coverage_ratio for r in results]),
     }
+    # opt-in keys: only when some question in this group has an evidence span
+    if any(r.span_hit_at_k is not None for r in results):
+        entry["span_hit_at_k_rate"] = (sum(r.span_hit_at_k for r in span_ak) / len(span_ak)
+                                       if span_ak else -1.0)
+        entry["span_hit_in_context_rate"] = (sum(r.span_hit_in_context for r in span_ic) / len(span_ic)
+                                             if span_ic else -1.0)
     fmt = results[0].answer_type if results else "open"
     if fmt in ("mc", "tf"):
         entry["accuracy"] = _mean([r.accuracy for r in results])
@@ -405,6 +422,10 @@ def aggregate(question_results: list[QuestionResult]) -> dict:
     exact_chunk_qs = [r for r in question_results if r.exact_chunk_hit >= 0]
     rank_qs = [r for r in question_results if r.used_chunk_rank >= 0]
     budgeted_qs = [r for r in question_results if r.budget is not None]
+    span_ak_qs = [r for r in question_results if r.span_hit_at_k is not None and r.span_hit_at_k >= 0]
+    span_ic_qs = [r for r in question_results
+                  if r.span_hit_in_context is not None and r.span_hit_in_context >= 0]
+    has_spans = any(r.span_hit_at_k is not None for r in question_results)
 
     by_format: dict[str, dict] = {}
     for fmt in sorted({r.answer_type for r in question_results}):
@@ -440,6 +461,13 @@ def aggregate(question_results: list[QuestionResult]) -> dict:
         weighted_score_pct=      _weighted_score_pct(question_results),
         by_format=by_format,
         **_aggregate_efficiency(question_results),
+        # opt-in keys: only present when the run has evidence spans
+        **({
+            "span_hit_at_k_rate": (sum(r.span_hit_at_k for r in span_ak_qs) /
+                                   len(span_ak_qs) if span_ak_qs else -1.0),
+            "span_hit_in_context_rate": (sum(r.span_hit_in_context for r in span_ic_qs) /
+                                         len(span_ic_qs) if span_ic_qs else -1.0),
+        } if has_spans else {}),
         # opt-in keys: only present when at least one question used a budget
         **({
             "mean_context_tokens": _mean_or_zero([float(r.context_tokens) for r in budgeted_qs]),
@@ -450,8 +478,10 @@ def aggregate(question_results: list[QuestionResult]) -> dict:
 
 # opt-in fields: dropped from serialized output while None, so default runs
 # serialize exactly as before
-_OPT_IN_QUESTION_FIELDS = ("context_tokens", "n_chunks_used", "budget", "fill_ratio")
-_OPT_IN_CORPUS_FIELDS = ("mean_context_tokens", "mean_fill_ratio")
+_OPT_IN_QUESTION_FIELDS = ("context_tokens", "n_chunks_used", "budget", "fill_ratio",
+                           "span_hit_at_k", "span_hit_in_context")
+_OPT_IN_CORPUS_FIELDS = ("mean_context_tokens", "mean_fill_ratio",
+                         "span_hit_at_k_rate", "span_hit_in_context_rate")
 
 
 def question_to_dict(result: QuestionResult) -> dict:
@@ -512,6 +542,11 @@ def print_summary(result: CorpusResult) -> None:
         ("Context recall (open)", result.mean_context_recall,     "Retrieval+GT"),
         ("Answer correctness (open)", result.mean_answer_correctness, "Generation+GT"),
     ]
+    if result.span_hit_at_k_rate is not None:
+        rows[12:12] = [
+            ("Span hit@k rate",       result.span_hit_at_k_rate,      "Retrieval"),
+            ("Span hit-in-context rate", result.span_hit_in_context_rate, "Retrieval"),
+        ]
     for label, value, kind in rows:
         if value < 0:
             print(f"  {label:<32} {'N/A':>8}  {kind}")

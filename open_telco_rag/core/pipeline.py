@@ -38,6 +38,11 @@ from cli.main import _get_source
 
 
 # ── Multi-core worker ────────────────────────────────────────────────────────
+def _span_metadata(chunk) -> dict:
+    """char offsets + token count stored for token-sized chunks (span metric)"""
+    return {"char_start": chunk.char_start, "char_end": chunk.char_end, "n_tokens": chunk.n_tokens}
+
+
 def _process_file_worker(args: tuple) -> dict:
     """Runs in a CPU process pool; imports are module-scoped so spawned
     Windows workers can resolve `cli`."""
@@ -143,6 +148,10 @@ def _process_file_worker(args: tuple) -> dict:
                 "chunk_index": j,
                 "source_type": c.source_type
             }
+            # offsets only exist for token-sized chunks (target_tokens/
+            # max_tokens); default ingests store exactly what they always did
+            if c.char_start >= 0:
+                base_meta.update(_span_metadata(c))
             if hasattr(c, 'metadata') and c.metadata:
                 base_meta.update(c.metadata)
 
@@ -701,6 +710,8 @@ def ingest_multi_enrichment(
                             "chunk_index": j,
                             "source_type": c.source_type,
                         }
+                        if c.char_start >= 0:
+                            base_meta.update(_span_metadata(c))
                         if hasattr(c, "metadata") and c.metadata:
                             base_meta.update(c.metadata)
                         texts.append(c.text)
