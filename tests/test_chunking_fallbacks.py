@@ -62,3 +62,24 @@ def test_text_shorter_than_one_chunk_gives_a_single_chunk():
     for strategy in STRATEGIES + ["sliding_window_tokens"]:
         chunks = chunk_document(text, strategy, target_tokens=200)
         assert len(chunks) == 1 and chunks[0].text.strip() == text
+
+
+# ── legacy sliding window with overlap >= size drops text: unchanged, but now loud ──
+
+def test_legacy_sliding_window_with_overlap_at_least_size_warns_and_keeps_its_old_output(caplog):
+    import logging
+
+    text = " ".join(f"Sentence {i} about procedure {i} of the AMF." for i in range(300))
+    with caplog.at_level(logging.WARNING, logger="open_telco_rag.core.chunking"):
+        chunks = chunk_document(text, "sliding_window_tokens", chunk_tokens=50, overlap_tokens=80)
+    assert len(chunks) == 1                       # same output as before the warning existed
+    assert any("dropped" in r.getMessage() and "overlap" in r.getMessage() for r in caplog.records)
+
+
+def test_a_valid_legacy_sliding_window_does_not_warn(caplog):
+    import logging
+
+    text = " ".join(f"Sentence {i} about procedure {i} of the AMF." for i in range(300))
+    with caplog.at_level(logging.WARNING, logger="open_telco_rag.core.chunking"):
+        chunks = chunk_document(text, "sliding_window_tokens", chunk_tokens=50, overlap_tokens=10)
+    assert len(chunks) > 5 and not caplog.records

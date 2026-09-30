@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import concurrent.futures
 import json
+import logging
 import re
 from enum import Enum
 from typing import Any, Callable
 import tiktoken
 
 from open_telco_rag.types import Chunk
+
+logger = logging.getLogger(__name__)
 
 
 class ChunkingStrategy(str, Enum):
@@ -579,6 +582,14 @@ def chunk_sliding_window_tokens(
         legacy_overlap = 50 if overlap_tokens is _OVERLAP_TOKENS_UNSET else overlap_tokens
         tokenizer = tiktoken.get_encoding(encoding_name)
         tokens = tokenizer.encode(text)
+        if chunk_tokens <= legacy_overlap and len(tokens) > chunk_tokens:
+            # unchanged legacy behavior: the window cannot advance, so only the
+            # first window is produced and the rest of the document is dropped
+            logger.warning(
+                "sliding_window_tokens: overlap_tokens (%d) >= chunk_tokens (%d), so only the first "
+                "%d of %d tokens of this document are chunked; the rest is dropped. Use an overlap "
+                "smaller than the chunk size.", legacy_overlap, chunk_tokens, chunk_tokens, len(tokens),
+            )
 
         chunks: list[Chunk] = []
         start_idx = 0
