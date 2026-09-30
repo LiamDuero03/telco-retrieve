@@ -12,6 +12,7 @@ from typing import Any, Callable
 
 import numpy as np
 
+from open_telco_rag.embedders.calls import embed_plain
 from open_telco_rag.evaluation._claude import claude_call, parse_json
 from open_telco_rag.evaluation.metrics.generation import _debug_log
 
@@ -130,7 +131,7 @@ Reference answer:
         f1 = 0.0
 
     try:
-        embeddings = embedder.embed([answer, reference])
+        embeddings = embed_plain(embedder, [answer, reference])
         a_emb = np.array(embeddings[0])
         r_emb = np.array(embeddings[1])
         sem   = float(np.dot(a_emb, r_emb) /

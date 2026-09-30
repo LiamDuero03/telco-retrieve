@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 class SentenceTransformerEmbedder:
@@ -15,6 +18,7 @@ class SentenceTransformerEmbedder:
         self,
         model_key:    str = "minilm",
         models_file: str | Path = Path(__file__).parent.parent.parent / "configs" / "embedding_models.json",
+        track_truncation: bool = False,
     ):
         models_file = Path(models_file)
         if not models_file.exists():
@@ -30,8 +34,29 @@ class SentenceTransformerEmbedder:
         self._model_name  = available[model_key]["model_name"]
         self._dimensions  = available[model_key]["dimensions"]
         self._description = available[model_key].get("description", "")
+        # plain string prefixes, applied only when set
+        self._query_prefix    = available[model_key].get("query_prefix")
+        self._document_prefix = available[model_key].get("document_prefix")
+        # sbert prompt_name resolved from the model's own config; an entry uses
+        # either this or the plain prefixes, never both
+        self._query_prompt_name    = available[model_key].get("query_prompt_name")
+        self._document_prompt_name = available[model_key].get("document_prompt_name")
         self._model       = None
         self._first_embed_done = False
+        # off by default: counting truncation tokenizes every batch a second time
+        self.track_truncation = track_truncation
+        self.truncated_count = 0
+        self.scored_count    = 0
+
+    @property
+    def max_seq_length(self) -> int | None:
+        """None until the first embed() loads the model"""
+        return getattr(self._model, "max_seq_length", None) if self._model is not None else None
+
+    @property
+    def truncation_rate(self) -> float:
+        """share of checked texts longer than max_seq_length; 0.0 before any check"""
+        return (self.truncated_count / self.scored_count) if self.scored_count else 0.0
 
     @property
     def model_key(self) -> str:
@@ -75,9 +100,48 @@ class SentenceTransformerEmbedder:
             print(f"Embedding model ready on {self._model.device} "
                   f"in {time.perf_counter() - load_start:.1f}s")
 
-    def embed(self, texts: list[str]) -> list[list[float]]:
+    def _record_length_check(self, texts: list[str]) -> None:
+        """count texts the model will silently truncate and warn once per call;
+        never raises (not every backend exposes tokenizer.encode)"""
+        if not self.track_truncation:
+            return
+        max_len = getattr(self._model, "max_seq_length", None)
+        tokenizer = getattr(self._model, "tokenizer", None)
+        if max_len is None or tokenizer is None:
+            return
+        try:
+            lengths = [len(tokenizer.encode(t, add_special_tokens=True)) for t in texts]
+        except Exception:  # noqa: BLE001 - best-effort length check, never raises
+            return
+
+        n_over = sum(1 for n in lengths if n > max_len)
+        self.truncated_count += n_over
+        self.scored_count += len(texts)
+        if n_over:
+            logger.warning(
+                "%s: %d/%d text(s) in this batch exceed max_seq_length=%d and "
+                "will be silently truncated by the model.",
+                self._model_name, n_over, len(texts), max_len,
+            )
+
+    def _apply_prefix(self, texts: list[str], is_query: bool) -> list[str]:
+        prefix = self._query_prefix if is_query else self._document_prefix
+        if not prefix:
+            return texts
+        return [f"{prefix}{t}" for t in texts]
+
+    def embed(self, texts: list[str], is_query: bool = False,
+              apply_prefix: bool = True) -> list[list[float]]:
         import torch
         self._load()
+
+        # the prefix counts against max_seq_length, so check length after applying it;
+        # apply_prefix=False (text-vs-text metrics) means no prefix or prompt at all
+        if apply_prefix:
+            texts = self._apply_prefix(texts, is_query)
+        self._record_length_check(texts)
+        prompt_name = (self._query_prompt_name if is_query else self._document_prompt_name) if apply_prefix else None
+        encode_kwargs = {"prompt_name": prompt_name} if prompt_name else {}
 
         optimal_batch_size = 256 if torch.cuda.is_available() else 32
 
@@ -96,14 +160,16 @@ class SentenceTransformerEmbedder:
                     texts,
                     batch_size=optimal_batch_size,
                     show_progress_bar=False,
-                    convert_to_numpy=True
+                    convert_to_numpy=True,
+                    **encode_kwargs,
                 )
         else:
             embeddings = self._model.encode(
                 texts,
                 batch_size=optimal_batch_size,
                 show_progress_bar=False,
-                convert_to_numpy=True
+                convert_to_numpy=True,
+                **encode_kwargs,
             )
 
         if is_first_embed:

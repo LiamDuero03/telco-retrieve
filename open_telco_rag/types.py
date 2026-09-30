@@ -72,6 +72,12 @@ class Chunk:
     chunk_index: int
     source_type: str = ""        # e.g. "oran", "3gpp", "camara"
 
+    # set only by the token-sizing paths; unannotated on purpose so they are not
+    # dataclass fields and asdict/eq/repr stay the same for default chunks
+    char_start = -1
+    char_end = -1
+    n_tokens = 0
+
 
 @dataclass
 class SearchResult:

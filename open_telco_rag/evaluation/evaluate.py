@@ -10,7 +10,7 @@ import logging
 import re
 import time
 import tiktoken
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -39,7 +39,10 @@ from open_telco_rag.evaluation.metrics.generation import (
 from open_telco_rag.evaluation.metrics.retrieval import (
     cosine_sim_stats, distinct_sources_retrieved, canonical_source_hit,
     exact_chunk_hit, chunk_rank, coverage_ratio, is_discriminating_source,
+    span_hit_at_k, span_hit_in_context,
 )
+from open_telco_rag.core.retrieval import fill_context_budget, resolve_budget_args
+from open_telco_rag.evaluation.provenance import collect_run_record
 from open_telco_rag.evaluation.metrics.ground_truth import (
     context_recall, answer_correctness,
 )
@@ -91,6 +94,40 @@ def _local_token_count(text: str) -> int:
         # Fallback approximation if tiktoken fails
         return int(len(str(text).split()) * 1.3)
 
+def _is_number(x: Any) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool)
+
+
+def _reranker_stats(reranker: Any) -> dict | None:
+    """truncation counters of the run's reranker (OTel), or None if it has none"""
+    scored = getattr(reranker, "scored_count", None)
+    if not _is_number(scored) or not scored:
+        return None
+    return {
+        "truncation_rate": reranker.truncation_rate,
+        "truncated": reranker.truncated_count,
+        "scored": scored,
+        "query_max_chars": reranker.query_max_chars,
+        "doc_max_chars": reranker.doc_max_chars,
+    }
+
+
+def _embedder_stats(embedder: Any) -> dict | None:
+    """truncation counters (when tracking is on) and OpenRouter usage, if present"""
+    stats: dict = {}
+    scored = getattr(embedder, "scored_count", None)
+    if _is_number(scored) and scored:
+        stats.update(truncation_rate=embedder.truncation_rate,
+                     truncated=embedder.truncated_count, scored=scored)
+    tokens = getattr(embedder, "total_prompt_tokens", None)
+    cost = getattr(embedder, "total_cost_usd", None)
+    if _is_number(tokens) and tokens:
+        stats["prompt_tokens"] = tokens
+    if _is_number(cost) and cost:
+        stats["cost_usd"] = cost
+    return stats or None
+
+
 def _snapshot_llm_usage(llm_call: Callable[[str, int], str]) -> tuple[int, int]:
     """(cumulative prompt_tokens, completion_tokens) recorded on llm_call by
     _claude.py's wrappers. (0, 0) for a callable that doesn't track usage.
@@ -99,6 +136,18 @@ def _snapshot_llm_usage(llm_call: Callable[[str, int], str]) -> tuple[int, int]:
         getattr(llm_call, "total_prompt_tokens", 0),
         getattr(llm_call, "total_completion_tokens", 0),
     )
+
+
+def _recording_llm_call(
+    llm_call: Callable[[str, int], str], metric: str, sink: list[dict],
+) -> Callable[[str, int], str]:
+    """wraps llm_call so each (metric, prompt, raw response) is appended to sink;
+    the real call (and its usage tracking) is delegated unchanged"""
+    def _wrapped(prompt: str, max_tokens: int) -> str:
+        raw = llm_call(prompt, max_tokens)
+        sink.append({"metric": metric, "prompt": prompt, "raw_response": raw})
+        return raw
+    return _wrapped
 
 
 def _build_baseline_generator(llm_call: Callable[[str, int], str], max_tokens: int = 1000):
@@ -356,6 +405,127 @@ def _match_deterministic_answer(answer: str, reference_answer: Any, answer_type:
     return _match_deterministic_answer_prose(answer, reference_answer, answer_type)
 
 
+def _run_retrieval_pass(
+    q: EvalQuestion,
+    store: Any,
+    embedder: Any,
+    search_query: str,
+    active_question: str,
+    top_k: int,
+    reranker: Any,
+    rerank_top_k: int,
+    search_method: str,
+    resolve_parents: bool,
+    context_token_budget: int | None,
+    candidate_pool: int | None,
+    budget_overflow: str | None,
+    result: QuestionResult,
+    record_scores: bool = False,
+) -> tuple[list, list]:
+    """search -> optional rerank -> optional budget fill, recorded on result; shared by
+    the RAG and retrieval_only paths. returns (candidates, retrieved)"""
+    from open_telco_rag.core.pipeline import search
+
+    # in budget mode, over-fetch candidate_pool instead of top_k; the budget
+    # fill decides how many are actually used
+    budgeted = context_token_budget is not None
+    fetch_k = candidate_pool if budgeted else top_k
+    search_start = time.perf_counter()
+    retrieved_candidates = search(
+        search_query,
+        store=store,
+        embedder=embedder,
+        top_k=fetch_k,
+        reranker=None,
+        rerank_top_k=fetch_k,
+        search_method=search_method,
+        resolve_parents=resolve_parents
+    )
+    result.search_latency = time.perf_counter() - search_start
+
+    result.candidate_chunk_ids = [getattr(r, "doc_id", None) for r in retrieved_candidates]
+    result.candidate_chunk_texts = [getattr(r, "text", "") for r in retrieved_candidates]
+
+    result.rerank_latency = 0.0
+    result.rerank_tokens = 0
+
+    rerank_n = candidate_pool if budgeted else rerank_top_k
+    if reranker:
+        rerank_start = time.perf_counter()
+
+        rerank_payload = search_query + " ".join([c.text for c in retrieved_candidates])
+        result.rerank_tokens = _local_token_count(rerank_payload)
+
+        try:
+            retrieved = reranker.rerank(active_question, retrieved_candidates, top_k=rerank_n)
+        except AttributeError:
+            # Reranker wrapper may use a different method name.
+            retrieved = retrieved_candidates[:rerank_n]
+
+        result.rerank_latency = time.perf_counter() - rerank_start
+    else:
+        retrieved = retrieved_candidates[:rerank_n]
+
+    if budgeted:
+        fill_stats: dict = {}
+        retrieved = fill_context_budget(retrieved, context_token_budget, budget_overflow, stats=fill_stats)
+        result.budget_stats = fill_stats
+        result.context_tokens = sum(_local_token_count(r.text) for r in retrieved)
+        result.n_chunks_used = len(retrieved)
+        result.budget = context_token_budget
+        result.fill_ratio = result.context_tokens / context_token_budget
+
+    # chunks handed to the generator (post budget fill when a budget is set)
+    result.used_chunk_ids = [getattr(r, "doc_id", None) for r in retrieved]
+    result.used_chunk_texts = [getattr(r, "text", "") for r in retrieved]
+    if record_scores:
+        result.candidate_distances = [getattr(r, "distance", None) for r in retrieved_candidates]
+        result.used_distances = [getattr(r, "distance", None) for r in retrieved]
+
+    return retrieved_candidates, retrieved
+
+
+def _compute_retrieval_metrics(
+    result: QuestionResult,
+    retrieved_candidates: list,
+    retrieved: list,
+    q: EvalQuestion,
+    store: Any,
+    sim_threshold: float,
+) -> None:
+    """fill in the retrieval-tier metrics on result; shared by the RAG and retrieval_only
+    paths, never called for baseline"""
+    mean_s, min_s, max_s  = cosine_sim_stats(retrieved)
+    result.mean_similarity = mean_s
+    result.min_similarity  = min_s
+    result.max_similarity  = max_s
+    result.distinct_sources_retrieved = distinct_sources_retrieved(retrieved)
+    result.canonical_hit   = canonical_source_hit(
+        retrieved, q.canonical_source, store=store, expected_release=q.release,
+    )
+    result.exact_chunk_hit = exact_chunk_hit(retrieved, q.chunk_id, q.source_text)
+    result.candidate_chunk_rank = chunk_rank(retrieved_candidates, q.chunk_id, q.source_text)
+    result.used_chunk_rank = chunk_rank(retrieved, q.chunk_id, q.source_text)
+    # span metrics need an evidence span; the fields stay None without one
+    if q.evidence_doc_id and q.evidence_char_start is not None and q.evidence_char_end is not None:
+        result.span_hit_at_k = span_hit_at_k(
+            retrieved_candidates, q.evidence_char_start, q.evidence_char_end, q.evidence_doc_id,
+        )
+        result.span_hit_in_context = span_hit_in_context(
+            retrieved, q.evidence_char_start, q.evidence_char_end, q.evidence_doc_id,
+        )
+    result.coverage_ratio  = coverage_ratio(retrieved, sim_threshold)
+
+    # Separate from canonical_hit: None = no ground truth, False =
+    # rejected as too generic.
+    if q.canonical_source is None:
+        result.canonical_source_discriminating = None
+    else:
+        result.canonical_source_discriminating = is_discriminating_source(
+            q.canonical_source, store
+        )
+
+
 # ── Self-consistency (n_generations>1 in evaluate_question()) ───────────────
 # Retrieval runs once; generation repeats N times at a non-zero temperature.
 # For mc/tf: extract what each generation committed to, majority-vote on
@@ -436,6 +606,7 @@ def evaluate_question(
     llm_call:      Callable[[str, int], str] = claude_call,
     rag_llm_call:  Callable[[str, int], str] | None = None,
     baseline:      bool  = False,
+    retrieval_only: bool = False,
     reranker:      Any   = None,
     rerank_top_k:  int   = 5,
     debug:         bool  = False,
@@ -453,8 +624,27 @@ def evaluate_question(
     generation_top_p: float | None = None,
     rag_max_tokens: int = 1000,
     prompt_mode: str = DEFAULT_PROMPT_MODE,
+    context_token_budget: int | None = None,
+    candidate_pool: int | None = None,
+    budget_overflow: str | None = None,
+    record_judge_calls: bool = False,
+    record_retrieval_scores: bool = False,
 ) -> QuestionResult:
     """Run all applicable metrics for one question.
+
+    record_retrieval_scores=True: also store the store distance of every candidate
+    and used chunk (candidate_distances / used_distances). Off by default.
+
+    record_judge_calls=True: also store every judge prompt/raw response for
+    this question in result.judge_calls (open/fill_blank only; mc/tf never
+    call a judge). Off by default -- the field stays None and is omitted from
+    saved output, since prompts include the retrieved chunk text.
+
+    retrieval_only=True: runs retrieval (respecting reranker/budget) and every
+    retrieval-tier metric, then returns WITHOUT calling a generator or judge:
+    no answer, no token/cost tracking, no scoring (answer stays "", the
+    generation-only fields keep their defaults). Mutually exclusive with
+    baseline (ValueError). Off by default; existing callers are unaffected.
 
     n_generations>1: self-consistency. Retrieval runs once; generation
     repeats N times against the same context, then combined - majority vote
@@ -465,9 +655,23 @@ def evaluate_question(
     anything (else the repeats are byte-identical). None leaves it at 0.0.
     rag_max_tokens: raise for reasoning-capable OpenRouter models.
     prompt_mode: RAG branch only.
+
+    context_token_budget=None (default): top_k/rerank_top_k control retrieval
+    as before; candidate_pool/budget_overflow are only valid with a budget
+    (ValueError otherwise, defaults 30 / "stop").
+    Set: over-fetches candidate_pool candidates instead of top_k, reranks
+    (or truncates) to candidate_pool instead of rerank_top_k, then fills
+    the budget in rank order (see core.retrieval.fill_context_budget);
+    top_k/rerank_top_k are ignored. Populates
+    result.context_tokens/n_chunks_used/budget/fill_ratio.
     """
-    from open_telco_rag.core.pipeline import search, generate
-    
+    context_token_budget, candidate_pool, budget_overflow = resolve_budget_args(
+        context_token_budget, candidate_pool, budget_overflow)
+    from open_telco_rag.core.pipeline import generate
+
+    if baseline and retrieval_only:
+        raise ValueError("baseline and retrieval_only are mutually exclusive")
+
     active_question = q.question
     if inject_metadata and q.canonical_source:
         active_question = f"According to {q.corpus.upper()} document {q.canonical_source}, {q.question}"
@@ -486,7 +690,15 @@ def evaluate_question(
         question=active_question, corpus=q.corpus,
         answer="", sources=[], chunks_used=0,
         answer_type=q.answer_type,
+        difficulty=q.difficulty,
     )
+    if record_judge_calls:
+        result.judge_calls = []
+
+    def _judge(metric: str):
+        if not record_judge_calls:
+            return llm_call
+        return _recording_llm_call(llm_call, metric, result.judge_calls)
 
     try:
         start_time = time.perf_counter()
@@ -500,45 +712,22 @@ def evaluate_question(
             gens = [gen]  # baseline never repeats
             result.gen_latency = time.perf_counter() - gen_start
             result.search_latency = 0.0
-        else:
-            # Search pass, without reranker.
-            search_start = time.perf_counter()
-            retrieved_candidates = search(
-                search_query, 
-                store=store, 
-                embedder=embedder,
-                top_k=top_k, 
-                reranker=None,  
-                rerank_top_k=top_k,
-                search_method=search_method,
-                resolve_parents=resolve_parents
+        elif retrieval_only:
+            retrieved_candidates, retrieved = _run_retrieval_pass(
+                q, store, embedder, search_query, active_question, top_k, reranker, rerank_top_k,
+                search_method, resolve_parents, context_token_budget, candidate_pool, budget_overflow,
+                result, record_scores=record_retrieval_scores,
             )
-            result.search_latency = time.perf_counter() - search_start
-
-            result.candidate_chunk_ids = [getattr(r, "doc_id", None) for r in retrieved_candidates]
-            result.candidate_chunk_texts = [getattr(r, "text", "") for r in retrieved_candidates]
-
-            result.rerank_latency = 0.0
-            result.rerank_tokens = 0
-
-            if reranker:
-                rerank_start = time.perf_counter()
-
-                rerank_payload = search_query + " ".join([c.text for c in retrieved_candidates])
-                result.rerank_tokens = _local_token_count(rerank_payload)
-
-                try:
-                    retrieved = reranker.rerank(active_question, retrieved_candidates, top_k=rerank_top_k)
-                except AttributeError:
-                    # Reranker wrapper may use a different method name.
-                    retrieved = retrieved_candidates[:rerank_top_k]
-
-                result.rerank_latency = time.perf_counter() - rerank_start
-            else:
-                retrieved = retrieved_candidates[:rerank_top_k]
-
-            result.used_chunk_ids = [getattr(r, "doc_id", None) for r in retrieved]
-            result.used_chunk_texts = [getattr(r, "text", "") for r in retrieved]
+            result.latency = time.perf_counter() - start_time
+            result.chunks_used = len(retrieved)
+            _compute_retrieval_metrics(result, retrieved_candidates, retrieved, q, store, sim_threshold)
+            return result
+        else:
+            retrieved_candidates, retrieved = _run_retrieval_pass(
+                q, store, embedder, search_query, active_question, top_k, reranker, rerank_top_k,
+                search_method, resolve_parents, context_token_budget, candidate_pool, budget_overflow,
+                result, record_scores=record_retrieval_scores,
+            )
 
             gen_start = time.perf_counter()
             generator = _build_generator(
@@ -652,17 +841,17 @@ def evaluate_question(
                     # retrieved context; skip for baseline so the -1.0 "not
                     # applicable" sentinel is kept rather than a misleading 0.0.
                     if not baseline:
-                        faithfulness_scores.append(faithfulness(g_answer, retrieved, llm_call=llm_call, debug=debug))
+                        faithfulness_scores.append(faithfulness(g_answer, retrieved, llm_call=_judge("faithfulness"), debug=debug))
                     relevancy_scores.append(
-                        answer_relevancy(active_question, g_answer, embedder, llm_call=llm_call, debug=debug)
+                        answer_relevancy(active_question, g_answer, embedder, llm_call=_judge("answer_relevancy"), debug=debug)
                     )
                     if q.reference_answer:
                         if not baseline:
                             recall_scores.append(
-                                context_recall(q.reference_answer, retrieved, llm_call=llm_call, debug=debug)
+                                context_recall(q.reference_answer, retrieved, llm_call=_judge("context_recall"), debug=debug)
                             )
                         correctness_scores.append(
-                            answer_correctness(g_answer, q.reference_answer, embedder, llm_call=llm_call, debug=debug)
+                            answer_correctness(g_answer, q.reference_answer, embedder, llm_call=_judge("answer_correctness"), debug=debug)
                         )
                 if faithfulness_scores:
                     result.faithfulness = sum(faithfulness_scores) / len(faithfulness_scores)
@@ -675,38 +864,18 @@ def evaluate_question(
             else:
                 # See above: faithfulness/context_recall skipped for baseline.
                 if not baseline:
-                    result.faithfulness = faithfulness(answer, retrieved, llm_call=llm_call, debug=debug)
-                result.answer_relevancy = answer_relevancy(active_question, answer, embedder, llm_call=llm_call, debug=debug)
+                    result.faithfulness = faithfulness(answer, retrieved, llm_call=_judge("faithfulness"), debug=debug)
+                result.answer_relevancy = answer_relevancy(active_question, answer, embedder, llm_call=_judge("answer_relevancy"), debug=debug)
                 if q.reference_answer:
                     if not baseline:
-                        result.context_recall = context_recall(q.reference_answer, retrieved, llm_call=llm_call, debug=debug)
-                    result.answer_correctness = answer_correctness(answer, q.reference_answer, embedder, llm_call=llm_call, debug=debug)
+                        result.context_recall = context_recall(q.reference_answer, retrieved, llm_call=_judge("context_recall"), debug=debug)
+                    result.answer_correctness = answer_correctness(answer, q.reference_answer, embedder, llm_call=_judge("answer_correctness"), debug=debug)
             judge_after = _snapshot_llm_usage(llm_call)
             result.judge_prompt_tokens = judge_after[0] - judge_before[0]
             result.judge_completion_tokens = judge_after[1] - judge_before[1]
 
         if not baseline:
-            mean_s, min_s, max_s  = cosine_sim_stats(retrieved)
-            result.mean_similarity = mean_s
-            result.min_similarity  = min_s
-            result.max_similarity  = max_s
-            result.distinct_sources_retrieved = distinct_sources_retrieved(retrieved)
-            result.canonical_hit   = canonical_source_hit(
-                retrieved, q.canonical_source, store=store, expected_release=q.release,
-            )
-            result.exact_chunk_hit = exact_chunk_hit(retrieved, q.chunk_id, q.source_text)
-            result.candidate_chunk_rank = chunk_rank(retrieved_candidates, q.chunk_id, q.source_text)
-            result.used_chunk_rank = chunk_rank(retrieved, q.chunk_id, q.source_text)
-            result.coverage_ratio  = coverage_ratio(retrieved, sim_threshold)
-
-            # Separate from canonical_hit: None = no ground truth, False =
-            # rejected as too generic.
-            if q.canonical_source is None:
-                result.canonical_source_discriminating = None
-            else:
-                result.canonical_source_discriminating = is_discriminating_source(
-                    q.canonical_source, store
-                )
+            _compute_retrieval_metrics(result, retrieved_candidates, retrieved, q, store, sim_threshold)
 
     except Exception as e:
         result.error = str(e)
@@ -748,16 +917,41 @@ def evaluate_corpus(
     resolve_parents:  bool = False,
     rag_max_tokens: int = 1000,
     prompt_mode: str = DEFAULT_PROMPT_MODE,
+    context_token_budget: int | None = None,
+    candidate_pool: int | None = None,
+    budget_overflow: str | None = None,
+    retrieval_only: bool = False,
+    record_judge_calls: bool = False,
+    run_info: dict | None = None,
+    record_retrieval_scores: bool = False,
 ) -> tuple[CorpusResult, CorpusResult | None]:
     """Run the full evaluation suite for one corpus.
 
     rag_max_tokens / prompt_mode: passed through to evaluate_question().
+    context_token_budget/candidate_pool/budget_overflow: passed through to
+    evaluate_question()'s RAG pass only (baseline never retrieves); optional,
+    unset = plain top_k path.
+
+    record_judge_calls / record_retrieval_scores: passed to evaluate_question() for the
+    RAG pass; off by default.
+
+    run_info: optional caller-supplied identity (e.g. which judge model was used)
+    stored under run_record["extra"]; must not contain secrets or private URLs.
+    Every run's results carry a run_record (see evaluation/provenance.py).
+
+    retrieval_only: passed to evaluate_question()'s RAG pass only (baseline is
+    unaffected either way). Off by default. include_baseline=True with
+    retrieval_only=True still runs a real baseline generation pass.
 
     Returns (rag_result, baseline_result); baseline_result is None if
     include_baseline=False.
     """
     # Label for the leaderboard/results row.
     questions_source_name = "default"
+    # fail fast on bad budget settings (before any per-question work)
+    context_token_budget, candidate_pool, budget_overflow = resolve_budget_args(
+        context_token_budget, candidate_pool, budget_overflow)
+
     if questions:
         questions_source_name = "custom_list"
     else:
@@ -787,6 +981,7 @@ def evaluate_corpus(
     # across threads (chromadb supports concurrent readers).
     rag_results: list[Any] = [None] * len(qs)
     rag_wall_start = time.perf_counter()
+    run_started_at = datetime.now(timezone.utc)
     # tqdm.write() via emit() so output coexists with an active bar.
     pbar = tqdm(total=len(qs), desc=f"{corpus}/{model} RAG", unit="q") if progress_bar else None
     emit = pbar.write if pbar else print
@@ -801,7 +996,9 @@ def evaluate_corpus(
             print(f"  [RAG {idx + 1}/{len(qs)}] {display_q[:65]}...")
         qr = evaluate_question(q, store, embedder, top_k, sim_threshold,
                                llm_call=llm_call, rag_llm_call=rag_llm_call,
-                               baseline=False, reranker=reranker,
+                               baseline=False, retrieval_only=retrieval_only,
+                               record_judge_calls=record_judge_calls,
+                               record_retrieval_scores=record_retrieval_scores, reranker=reranker,
                                rerank_top_k=rerank_top_k, debug=debug,
                                rag_model_name=resolved_rag_model,
                                rag_generator_name=rag_generator_name,
@@ -815,7 +1012,10 @@ def evaluate_corpus(
                                search_method=search_method,
                                resolve_parents=resolve_parents,
                                rag_max_tokens=rag_max_tokens,
-                               prompt_mode=prompt_mode,)
+                               prompt_mode=prompt_mode,
+                               context_token_budget=context_token_budget,
+                               candidate_pool=candidate_pool,
+                               budget_overflow=budget_overflow,)
         if delay > 0:
             time.sleep(delay)
         return idx, qr
@@ -829,6 +1029,11 @@ def evaluate_corpus(
             rag_results[idx] = qr
             if qr.error:
                 emit(f"    [ERROR] {qr.error}")
+            elif retrieval_only:
+                # no generation happens, so print retrieval metrics and keep
+                # the -1.0 accuracy sentinel out of the running accuracy
+                if not progress_bar:
+                    print(f"    sim={qr.mean_similarity:.3f}  n_chunks_used={qr.n_chunks_used}")
             elif qr.answer_type in ("mc", "tf"):
                 if not progress_bar:
                     print(f"    accuracy={qr.accuracy:.2f}  sim={qr.mean_similarity:.3f}")
@@ -868,6 +1073,28 @@ def evaluate_corpus(
         rag_generator_top_p=generation_top_p,
         **aggregate(rag_results),
     )
+
+    rag_result.run_record = collect_run_record(
+        params={
+            "corpus": corpus, "model": model, "top_k": top_k, "sim_threshold": sim_threshold,
+            "search_method": search_method, "rerank": reranker is not None, "rerank_top_k": rerank_top_k,
+            "resolve_parents": resolve_parents, "inject_metadata": inject_metadata,
+            "include_keywords": include_keywords, "context_token_budget": context_token_budget,
+            "candidate_pool": candidate_pool, "budget_overflow": budget_overflow,
+            "retrieval_only": retrieval_only, "include_baseline": include_baseline,
+            "rag_generator_name": rag_generator_name, "rag_generator_model": resolved_rag_model,
+            "n_generations": n_generations, "generation_temperature": generation_temperature,
+            "generation_top_p": generation_top_p, "rag_max_tokens": rag_max_tokens,
+            "prompt_mode": prompt_mode, "max_concurrency": max(1, max_concurrency),
+            "record_judge_calls": record_judge_calls,
+            "record_retrieval_scores": record_retrieval_scores,
+        },
+        embedder=embedder, reranker=reranker, store=store, questions=qs,
+        questions_name=(run_info or {}).get("questions_file") or questions_source_name,
+        started_at=run_started_at, extra=run_info,
+    )
+    rag_result.reranker_stats = _reranker_stats(reranker)
+    rag_result.embedder_stats = _embedder_stats(embedder)
 
     print_summary(rag_result)
 

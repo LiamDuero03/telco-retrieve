@@ -2,6 +2,7 @@
 API for models not run locally via sentence-transformers."""
 import os
 import json
+import threading
 import time
 from pathlib import Path
 from typing import List
@@ -18,6 +19,10 @@ class OpenRouterEmbedder:
         models_file: str | Path = Path(__file__).parent.parent.parent / "configs" / "embedding_models.json",
         # kept low to stay under OpenAI's per-request payload limit
         batch_size: int = 200,
+        # in-flight batch requests; a parameter so the throughput scripts can vary it
+        max_workers: int = 10,
+        # per-request timeout, seconds
+        timeout: float = 120.0,
     ):
         models_file = Path(models_file)
         if not models_file.exists():
@@ -33,6 +38,11 @@ class OpenRouterEmbedder:
         self._model_name  = available[model_key]["model_name"]
         self._dimensions  = available[model_key]["dimensions"]
         self.batch_size   = batch_size
+        self.max_workers  = max_workers
+        self.timeout      = timeout
+        # plain string prefixes, applied only when set
+        self._query_prefix    = available[model_key].get("query_prefix")
+        self._document_prefix = available[model_key].get("document_prefix")
         
         self.api_key = os.environ.get("OPENROUTER_API_KEY")
         if not self.api_key:
@@ -45,6 +55,12 @@ class OpenRouterEmbedder:
         adapter = HTTPAdapter(pool_connections=20, pool_maxsize=20)
         self.session.mount('https://', adapter)
 
+        # usage as reported in OpenRouter's response body, summed over embed() calls;
+        # updated under _usage_lock because batches run concurrently
+        self.total_prompt_tokens = 0
+        self.total_cost_usd = 0.0
+        self._usage_lock = threading.Lock()
+
     @property
     def model_key(self) -> str:
         return self._model_key
@@ -53,9 +69,18 @@ class OpenRouterEmbedder:
     def dimensions(self) -> int:
         return self._dimensions
 
-    def embed(self, texts: List[str]) -> List[List[float]]:
+    def _apply_prefix(self, texts: List[str], is_query: bool) -> List[str]:
+        prefix = self._query_prefix if is_query else self._document_prefix
+        if not prefix:
+            return texts
+        return [f"{prefix}{t}" for t in texts]
+
+    def embed(self, texts: list[str], is_query: bool = False,
+              apply_prefix: bool = True) -> list[list[float]]:
         import concurrent.futures
-        
+
+        if apply_prefix:
+            texts = self._apply_prefix(texts, is_query)
         all_embeddings_dict = {}
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -69,35 +94,70 @@ class OpenRouterEmbedder:
             }
             retries = 6
             backoff = 2
-            
+            last_error = "no response"
+
             for attempt in range(retries):
-                response = self.session.post(self.url, headers=headers, json=payload)
-                
+                try:
+                    response = self.session.post(self.url, headers=headers, json=payload,
+                                                 timeout=self.timeout)
+                except requests.exceptions.RequestException as e:
+                    # timeouts and dropped connections are transient: retry with backoff
+                    last_error = f"{type(e).__name__}: {e}"
+                    print(f"  [Network Error] {last_error}. Retrying in {backoff}s...")
+                    time.sleep(backoff)
+                    backoff *= 2
+                    continue
+
                 if response.status_code == 200:
-                    json_resp = response.json()
-                    
-                    # OpenRouter can return HTTP 200 with an error embedded in the body
-                    if "error" in json_resp and json_resp["error"]:
-                        error_msg = json_resp["error"].get("message", "Unknown provider error")
-                        print(f"  [API Error] OpenRouter returned an error: {error_msg}. Retrying...")
+                    try:
+                        json_resp = response.json()
+                    except ValueError:
+                        last_error = "response was not valid JSON"
+                        print(f"  [API Error] {last_error}. Retrying in {backoff}s...")
                         time.sleep(backoff)
                         backoff *= 2
                         continue
-                        
-                    data = json_resp.get("data", [])
+
+                    # OpenRouter can return HTTP 200 with an error embedded in the body
+                    if "error" in json_resp and json_resp["error"]:
+                        err = json_resp["error"]
+                        error_msg = err.get("message", "Unknown provider error") if isinstance(err, dict) else str(err)
+                        last_error = error_msg
+                        print(f"  [API Error] OpenRouter returned an error: {error_msg}. Retrying in {backoff}s...")
+                        time.sleep(backoff)
+                        backoff *= 2
+                        continue
+
+                    data = json_resp.get("data") or []
+                    if len(data) != len(batch_texts):
+                        # a short (or long) answer would silently misalign vectors and chunks
+                        last_error = f"got {len(data)} embeddings for {len(batch_texts)} inputs"
+                        print(f"  [API Error] {last_error}. Retrying in {backoff}s...")
+                        time.sleep(backoff)
+                        backoff *= 2
+                        continue
+
+                    usage = json_resp.get("usage") or {}
+                    if usage:
+                        with self._usage_lock:
+                            self.total_prompt_tokens += usage.get("prompt_tokens") or 0
+                            self.total_cost_usd += usage.get("cost") or 0.0
+
                     data_sorted = sorted(data, key=lambda x: x["index"])
                     return start_idx, [item["embedding"] for item in data_sorted]
-                    
-                elif response.status_code == 429:
-                    print(f"  [Rate Limited] OpenRouter returned 429. Sleeping for {backoff}s...")
+
+                elif response.status_code in (429, 500, 502, 503, 504):
+                    last_error = f"HTTP {response.status_code}"
+                    label = "Rate Limited" if response.status_code == 429 else "Server Error"
+                    print(f"  [{label}] OpenRouter returned {response.status_code}. Sleeping for {backoff}s...")
                     time.sleep(backoff)
                     backoff *= 2
                 else:
-                    response.raise_for_status()
-                    
-            raise Exception(f"Failed to fetch embeddings after {retries} attempts.")
+                    response.raise_for_status()   # other 4xx: not transient, do not retry
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            raise Exception(f"Failed to fetch embeddings after {retries} attempts (last error: {last_error}).")
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = {}
             for i in range(0, len(texts), self.batch_size):
                 batch = texts[i:i + self.batch_size]

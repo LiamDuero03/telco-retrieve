@@ -1,6 +1,7 @@
 """Unified CLI for Open Telco RAG."""
 
 from __future__ import annotations
+import logging
 import os
 
 os.environ["OMP_NUM_THREADS"] = "8"
@@ -72,6 +73,10 @@ def _enrichment_requires_llm(enrichment: str) -> bool:
     except Exception:
         return False
 
+# exit status of `evaluate` when every question of a corpus failed (1 stays "error")
+EXIT_ALL_QUESTIONS_FAILED = 3
+
+
 def main(argv: list[str] | None = None) -> None:
     # Force UTF-8 so emoji don't crash cp1252 consoles.
     if hasattr(sys.stdout, "reconfigure"):
@@ -86,6 +91,9 @@ def main(argv: list[str] | None = None) -> None:
         prog="open-telco-rag",
         description="Open RAG pipeline for telecom specifications.",
     )
+    parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], default=None,
+                        help="Optional: configure Python logging at this level (timestamped lines on stderr). "
+                             "Without it, logging behaves as before (warnings only, plain messages).")
     sub = parser.add_subparsers(dest="command")
 
     # ── ingest ────────────────────────────────────────────────────────────────
@@ -96,8 +104,18 @@ def main(argv: list[str] | None = None) -> None:
     p_ingest.add_argument("--data",       default=None,           help="Data directory")
     p_ingest.add_argument("--model",      default="minilm",       help="Embedding model key")
     p_ingest.add_argument("--db-path",    default="chroma_db",    help="ChromaDB path")
-    p_ingest.add_argument("--chunk-size", type=int, default=1024, help="Chunk size in chars")
-    p_ingest.add_argument("--overlap",    type=int, default=200,  help="Chunk overlap in chars")
+    # defaults (1024 / 200) applied in _run_ingest so explicit values can be detected
+    p_ingest.add_argument("--chunk-size", type=int, default=None, help="Chunk size in chars (default 1024)")
+    p_ingest.add_argument("--overlap",    type=int, default=None, help="Chunk overlap in chars (default 200)")
+    p_ingest.add_argument("--target-tokens", type=int, default=None,
+                          help="Optional: size chunks in tokens (cl100k_base) instead of characters -- "
+                               "target size per chunk. Cannot be combined with --chunk-size/--overlap.")
+    p_ingest.add_argument("--max-tokens", type=int, default=None,
+                          help="Optional: hard cap on tokens per chunk (defaults to --target-tokens). "
+                               "Cannot be combined with --chunk-size/--overlap.")
+    p_ingest.add_argument("--overlap-tokens", type=int, default=None,
+                          help="Optional: token overlap between chunks; text_baseline and "
+                               "sliding_window_tokens only, and requires --target-tokens/--max-tokens.")
     p_ingest.add_argument("--no-resume",  action="store_true",    help="Disable resume")
     p_ingest.add_argument("--collection", default=None,
                           help="Override collection name (default: source_type_model)")
@@ -128,6 +146,9 @@ def main(argv: list[str] | None = None) -> None:
                       help="Backend for computing embeddings (default: local)")
     p_ingest.add_argument("--batch-size", type=int, default=None,
                           help="Number of chunks to send per embedding call (defaults to 256 for local, 500 for openrouter)")
+    p_ingest.add_argument("--embed-max-workers", type=int, default=None,
+                          help="OpenRouterEmbedder only: in-flight sub-batch requests per embed() call "
+                               "(default: 10). Ignored for --embed-backend local.")
     p_ingest.add_argument("--llm-backend", choices=["local", "openrouter"], default="local",
                           help="Backend for chunking strategies (e.g. lumber_chunker) and/or enrichment "
                                "strategies (llm_metadata) that require an LLM — shared by both, since a "
@@ -214,6 +235,14 @@ def main(argv: list[str] | None = None) -> None:
                              "Must follow the same format as configs/eval_questions/{corpus}.json. "
                              "If omitted, loads from configs/eval_questions/{corpus}.json")
     p_eval.add_argument("--top-k",          type=int, default=5,  help="Chunks to retrieve per question")
+    p_eval.add_argument("--search-method", choices=["dense", "bm25", "hybrid"], default="dense",
+                        help="Retrieval method (default: dense), same choices as search/ask")
+    p_eval.add_argument("--record-judge-responses", action="store_true",
+                        help="Optional: store every judge prompt and raw response per question in the "
+                             "results file (large: prompts include the retrieved chunks). Off by default.")
+    p_eval.add_argument("--record-retrieval-scores", action="store_true",
+                        help="Optional: store the store distance of every retrieved chunk per question "
+                             "(candidate_distances / used_distances). Off by default.")
     p_eval.add_argument("--threshold",      type=float, default=0.5,
                         help="Similarity threshold for coverage_ratio metric (default: 0.5)")
     p_eval.add_argument("--output",         default="results",
@@ -263,6 +292,19 @@ def main(argv: list[str] | None = None) -> None:
                         help="Enable reranking during evaluation retrieval")
     p_eval.add_argument("--rerank-top-k",   type=int, default=5,
                         help="Chunks to keep after reranking (default: 5)")
+    p_eval.add_argument("--retrieval-only", action="store_true",
+                        help="Optional: run retrieval and the retrieval metrics only -- no answer "
+                             "generation, no judge/LLM calls, no API keys needed. Does not update "
+                             "the leaderboard. With --include-baseline the baseline pass still runs.")
+    p_eval.add_argument("--context-token-budget", type=int, default=None,
+                        help="Optional: fill the generator's context up to this many tokens (cl100k_base) "
+                             "instead of a fixed --top-k/--rerank-top-k chunk count.")
+    p_eval.add_argument("--candidate-pool", type=int, default=None,
+                        help="With --context-token-budget: candidates to retrieve and rerank before "
+                             "filling the budget (default 30).")
+    p_eval.add_argument("--budget-overflow", choices=["stop", "skip", "truncate"], default=None,
+                        help="With --context-token-budget: what to do with the first chunk that does not "
+                             "fit (default stop).")
     p_eval.add_argument("--reranker-model", default="ms-marco-minilm",
                         help="Reranker model key from configs/reranker_models.json "
                              "(default: ms-marco-minilm, telecom: otel-reranker-0.6b)")
@@ -304,6 +346,10 @@ def main(argv: list[str] | None = None) -> None:
 
 
     args = parser.parse_args(argv)
+
+    if args.log_level:
+        logging.basicConfig(level=getattr(logging, args.log_level), force=True,
+                            format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
     if not args.command:
         parser.print_help()
@@ -367,10 +413,13 @@ def _get_source(source_type: str, use_marker: bool = False):
 
 
 
-def _get_embedder(model_key: str, backend: str = "local"):
+def _get_embedder(model_key: str, backend: str = "local", max_workers: int | None = None):
     if backend == "openrouter":
         from open_telco_rag.embedders.openrouter_embedder import OpenRouterEmbedder
-        return OpenRouterEmbedder(model_key=model_key)
+        kwargs = {"model_key": model_key}
+        if max_workers is not None:
+            kwargs["max_workers"] = max_workers
+        return OpenRouterEmbedder(**kwargs)
     else:
         from open_telco_rag.embedders.sentense_transformers import SentenceTransformerEmbedder
         return SentenceTransformerEmbedder(model_key=model_key)
@@ -453,7 +502,8 @@ def _run_ingest(args) -> None:
     # 256 matches the GPU micro-batch size; override with --batch-size on tight hardware.
     default_batch_size = 500 if embed_backend == "openrouter" else 256
     batch_size_arg = getattr(args, "batch_size", None) or default_batch_size
-    embedder = _get_embedder(args.model, backend=embed_backend)
+    embed_max_workers = getattr(args, "embed_max_workers", None)
+    embedder = _get_embedder(args.model, backend=embed_backend, max_workers=embed_max_workers)
     store      = _get_store(args.source_type, args.model, args.db_path,
                             collection=getattr(args, "collection", None),
                             distance_metric=distance_metric)
@@ -532,24 +582,47 @@ def _run_ingest(args) -> None:
             # Distinct key from chunking's llm_client; popped before chunk_document().
             chunk_kwargs["enrichment_llm_client"] = llm_client
 
-    # Pull structural constraints from the strategy definition JSON
-    strat_path = Path("chunking_strategies.json")
-    if strat_path.exists():
-        try:
-            strat_meta = json.loads(strat_path.read_text(encoding="utf-8")).get(strategy, {})
-            if strat_meta.get("unit") == "tokens":
-                chunk_kwargs["chunk_tokens"] = args.chunk_size
-                chunk_kwargs["overlap_tokens"] = args.overlap
-            else:
-                chunk_kwargs["chunk_size"] = args.chunk_size
-                chunk_kwargs["overlap"] = args.overlap
-        except Exception as e:
-            print(f"[Warning] Failed to parse chunking_strategies.json ({e}). Falling back to characters.")
-            chunk_kwargs["chunk_size"] = args.chunk_size
-            chunk_kwargs["overlap"] = args.overlap
+    chunk_size = getattr(args, "chunk_size", None)
+    overlap    = getattr(args, "overlap", None)
+    target_tokens  = getattr(args, "target_tokens", None)
+    max_tokens     = getattr(args, "max_tokens", None)
+    overlap_tokens = getattr(args, "overlap_tokens", None)
+
+    if target_tokens is not None or max_tokens is not None:
+        # token sizing: don't inject the char defaults
+        if chunk_size is not None or overlap is not None:
+            sys.exit("error: --target-tokens/--max-tokens cannot be combined with --chunk-size/--overlap; "
+                     "use token sizing or character sizing, not both.")
+        if overlap_tokens is not None and strategy not in ("text_baseline", "sliding_window_tokens"):
+            sys.exit(f"error: --overlap-tokens is not supported for the {strategy} strategy.")
+        chunk_kwargs["target_tokens"] = target_tokens
+        chunk_kwargs["max_tokens"] = max_tokens
+        if overlap_tokens is not None:
+            chunk_kwargs["overlap_tokens"] = overlap_tokens
+        print(f"  Chunk size: TOKENS (target={target_tokens}, max={max_tokens or target_tokens})")
     else:
-        chunk_kwargs["chunk_size"] = args.chunk_size
-        chunk_kwargs["overlap"] = args.overlap
+        if overlap_tokens is not None:
+            sys.exit("error: --overlap-tokens requires --target-tokens or --max-tokens.")
+        chunk_size = 1024 if chunk_size is None else chunk_size
+        overlap    = 200 if overlap is None else overlap
+        # pull structural constraints from the strategy definition json
+        strat_path = Path("chunking_strategies.json")
+        if strat_path.exists():
+            try:
+                strat_meta = json.loads(strat_path.read_text(encoding="utf-8")).get(strategy, {})
+                if strat_meta.get("unit") == "tokens":
+                    chunk_kwargs["chunk_tokens"] = chunk_size
+                    chunk_kwargs["overlap_tokens"] = overlap
+                else:
+                    chunk_kwargs["chunk_size"] = chunk_size
+                    chunk_kwargs["overlap"] = overlap
+            except Exception as e:
+                print(f"[Warning] Failed to parse chunking_strategies.json ({e}). Falling back to characters.")
+                chunk_kwargs["chunk_size"] = chunk_size
+                chunk_kwargs["overlap"] = overlap
+        else:
+            chunk_kwargs["chunk_size"] = chunk_size
+            chunk_kwargs["overlap"] = overlap
 
     stats = ingest(**chunk_kwargs)
 
@@ -654,26 +727,56 @@ def _run_evaluate(args) -> None:
     from open_telco_rag.evaluation.evaluate import evaluate_corpus
     from open_telco_rag.evaluation.questions import SUPPORTED_CORPORA, load_questions, EvalQuestion
     from open_telco_rag.evaluation._claude import make_llm_call
+    from open_telco_rag.core.retrieval import resolve_budget_args
+
+    budget_kwargs = {
+        "context_token_budget": getattr(args, "context_token_budget", None),
+        "candidate_pool": getattr(args, "candidate_pool", None),
+        "budget_overflow": getattr(args, "budget_overflow", None),
+    }
+    try:
+        resolved = resolve_budget_args(**budget_kwargs)
+    except ValueError as e:
+        sys.exit(f"error: {e}")
+    # resolved values (defaults filled in when a budget is set) for the run + leaderboard row
+    budget_kwargs = dict(zip(budget_kwargs, resolved))
 
     embed_backend = getattr(args, "embed_backend", "local")
     embedder = _get_embedder(args.model, backend=embed_backend)
     output_dir = None if args.no_save else Path(args.output)
 
-    llm_call = make_llm_call(
-        args.generator, args.generator_model,
-        base_url=getattr(args, "llm_base_url", None),
-        api_key=getattr(args, "llm_api_key", None),
-    )
+    retrieval_only = getattr(args, "retrieval_only", False)
+    no_llm = retrieval_only and not args.include_baseline
 
     # RAG base_url/api_key fall back to the metrics ones unless given their own.
     rag_generator_name  = args.rag_generator       or args.generator
     rag_generator_model = args.rag_generator_model or args.generator_model
     rag_base_url = getattr(args, "rag_llm_base_url", None) or getattr(args, "llm_base_url", None)
     rag_api_key  = getattr(args, "rag_llm_api_key", None)  or getattr(args, "llm_api_key", None)
-    rag_llm_call = make_llm_call(rag_generator_name, rag_generator_model, base_url=rag_base_url, api_key=rag_api_key)
 
-    print(f"  Metrics LLM  : {args.generator} / {args.generator_model or 'default'}")
-    print(f"  RAG gen LLM  : {rag_generator_name} / {rag_generator_model or 'default'}")
+    # fail before any work if a Claude generator is selected without a key; the
+    # per-question calls would otherwise all fail and the run would still exit 0
+    if (not no_llm and "claude" in (args.generator, rag_generator_name)
+            and not os.environ.get("ANTHROPIC_API_KEY")):
+        sys.exit("error: --generator/--rag-generator claude needs ANTHROPIC_API_KEY "
+                 "(set it in the environment or a .env file).")
+
+    if no_llm:
+        # nothing calls an LLM in retrieval-only mode, so don't build clients
+        def _no_llm_call(prompt, max_tokens):
+            raise RuntimeError("LLM call attempted in --retrieval-only mode")
+        llm_call = rag_llm_call = _no_llm_call
+        print("  Mode         : retrieval only (no generation, no LLM calls)")
+    else:
+        llm_call = make_llm_call(
+            args.generator, args.generator_model,
+            base_url=getattr(args, "llm_base_url", None),
+            api_key=getattr(args, "llm_api_key", None),
+        )
+        rag_llm_call = make_llm_call(rag_generator_name, rag_generator_model, base_url=rag_base_url, api_key=rag_api_key)
+
+        print(f"  Metrics LLM  : {args.generator} / {args.generator_model or 'default'}")
+        print(f"  RAG gen LLM  : {rag_generator_name} / {rag_generator_model or 'default'}")
 
     custom_questions = None
     if args.questions_file:
@@ -691,6 +794,8 @@ def _run_evaluate(args) -> None:
         print(f"[INFO] Loaded {len(custom_questions)} questions from {qpath}")
 
     corpora = SUPPORTED_CORPORA if args.corpus == "all" else [args.corpus]
+
+    failed_corpora: list[str] = []
 
     for corpus in corpora:
         collection = args.collection if len(corpora) == 1 else None
@@ -733,11 +838,31 @@ def _run_evaluate(args) -> None:
             rag_base_url      = rag_base_url,
             rag_api_key       = rag_api_key,
             inject_metadata   = args.inject_metadata,
+            include_keywords  = getattr(args, "include_keywords", False),
+            run_info          = {"judge": {"generator": args.generator, "model": args.generator_model},
+                                 "embed_backend": embed_backend,
+                                 # file name only, never the path
+                                 **({"questions_file": Path(args.questions_file).name}
+                                    if getattr(args, "questions_file", None) else {})},
             search_method=getattr(args, "search_method", "dense"),
             resolve_parents   = getattr(args, "resolve_parents", False),
+            **budget_kwargs,
+            **({"retrieval_only": True} if retrieval_only else {}),
+            **({"record_judge_calls": True} if getattr(args, "record_judge_responses", False) else {}),
+            **({"record_retrieval_scores": True} if getattr(args, "record_retrieval_scores", False) else {}),
         )
 
-        if not args.no_leaderboard:
+        if result.question_results and all(q.error for q in result.question_results):
+            # nothing was evaluated: say so, keep the saved results, skip the leaderboard row
+            failed_corpora.append(corpus)
+            print(f"\n[ERROR] Every one of the {len(result.question_results)} questions failed for "
+                  f"{corpus.upper()} (see the per-question errors above); no metrics were computed. "
+                  f"Results were still saved.", file=sys.stderr)
+            if not args.no_leaderboard:
+                print("  Leaderboard not updated.")
+        elif retrieval_only and not args.no_leaderboard:
+            print("\n  Leaderboard not updated (retrieval-only runs have no generation metrics).")
+        elif not args.no_leaderboard:
             _update_leaderboard(
                 leaderboard_path = Path(args.leaderboard),
                 result           = result,
@@ -754,7 +879,11 @@ def _run_evaluate(args) -> None:
                 search_method=getattr(args, "search_method", "dense"),
                 embed_backend=embed_backend,
                 run_name         = getattr(args, "run_name", None),
+                **budget_kwargs,
             )
+
+    if failed_corpora:
+        sys.exit(EXIT_ALL_QUESTIONS_FAILED)
 
 
 
@@ -774,7 +903,10 @@ def _update_leaderboard(
     include_keywords: bool = False,
     search_method:    str = "dense", 
     embed_backend:    str = "local",
-    run_name:         str | None = None,) -> None:
+    run_name:         str | None = None,
+    context_token_budget: int | None = None,
+    candidate_pool:   int | None = None,
+    budget_overflow:  str | None = None,) -> None:
     """Append one row to the leaderboard JSON file."""
     import json
     from datetime import datetime
@@ -874,6 +1006,12 @@ def _update_leaderboard(
         "bl_average":            _avg(baseline_result) if baseline_result else None,
     }
 
+    # budget keys only appear on rows from budgeted runs
+    if context_token_budget is not None:
+        row["context_token_budget"] = context_token_budget
+        row["candidate_pool"] = candidate_pool
+        row["budget_overflow"] = budget_overflow
+
     leaderboard_path.parent.mkdir(parents=True, exist_ok=True)
     rows = []
     if leaderboard_path.exists():
@@ -928,6 +1066,8 @@ def _run_delete_collection(args) -> None:
             return
 
         client.delete_collection(name=args.collection)
+        from open_telco_rag.evaluation.provenance import index_settings_file
+        index_settings_file(args.db_path, args.collection).unlink(missing_ok=True)
         FTSStore(path=args.db_path, collection_name=args.collection).delete()
         print(f"Deleted collection '{args.collection}'.")
     except Exception as e:

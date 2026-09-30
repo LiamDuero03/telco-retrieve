@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import copy
 import csv
+import hashlib
 import json
 import os
+import re
 import sys
 import threading
 import time
 import sqlite3
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed, wait
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -38,6 +41,155 @@ from cli.main import _get_source
 
 
 # ── Multi-core worker ────────────────────────────────────────────────────────
+def _span_metadata(chunk) -> dict:
+    """char offsets + token count stored for token-sized chunks (span metric)"""
+    return {"char_start": chunk.char_start, "char_end": chunk.char_end, "n_tokens": chunk.n_tokens}
+
+
+# ── ingest resume bookkeeping ─────────────────────────────────────────────────
+# the progress file lists fully ingested files and is tied to a fingerprint of the
+# non-secret settings that decide what gets stored
+
+_SECRET_KEY = re.compile(r"key|secret|token(?!s)|password|authorization|credential", re.IGNORECASE)
+_NON_CONTENT_KWARGS = {"batch_size", "write_batch_size", "resume", "log_dir", "on_progress"}
+
+
+def _norm_path(path: Any) -> str:
+    """absolute, separator- and (on Windows) case-normalized path string"""
+    return os.path.normcase(os.path.abspath(str(path))).replace("\\", "/")
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, Enum):
+        return _json_safe(value.value)
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return None  # clients / callables / objects: not settings, not recorded
+
+
+def _ingest_settings(store: Any, embedder: Any, min_length: int, chunk_kwargs: dict) -> dict:
+    """non-secret settings that determine which chunks a run stores"""
+    chunking = {}
+    for key, value in sorted(chunk_kwargs.items()):
+        if key in _NON_CONTENT_KWARGS or _SECRET_KEY.search(key):
+            continue
+        safe = _json_safe(value)
+        if safe is not None:
+            chunking[key] = safe
+    return {
+        "db_path": _norm_path(getattr(store, "path", "chroma_db")),
+        "collection": getattr(store, "collection_name", "documents"),
+        "model_key": embedder.model_key,
+        "min_length": min_length,
+        "chunking": chunking,
+    }
+
+
+def _fingerprint(settings: dict) -> str:
+    return hashlib.sha256(json.dumps(settings, sort_keys=True).encode("utf8")).hexdigest()
+
+
+def _set_aside(path: Path) -> Path:
+    bak = path.with_name(path.name + ".bak")
+    path.replace(bak)  # renamed, never deleted
+    return bak
+
+
+def _count_chunks(store: Any) -> int:
+    try:
+        return int(store.count())
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def _load_progress(progress_file: Path, legacy_file: Path, fingerprint: str, store: Any) -> set[str]:
+    """files already ingested under exactly these settings; empty (with a warning
+    and the old file renamed to .bak) when the file is unreadable or foreign"""
+    if legacy_file.exists():
+        bak = _set_aside(legacy_file)
+        print(f"\n[WARN] Found an old-format resume file ({legacy_file.name}). It does not record which "
+              f"collection or settings it belongs to, so it cannot be trusted: this run restarts from "
+              f"scratch. The old file was renamed to {bak.name}.")
+    if not progress_file.exists():
+        n_existing = _count_chunks(store)
+        if n_existing:
+            print(f"\n[WARN] No resume record matches these settings, but the target collection already "
+                  f"holds {n_existing} chunks (the settings, database or log directory changed since it "
+                  f"was ingested). Every file is ingested again over them, so chunks from different "
+                  f"settings can end up mixed; use --no-resume to rebuild the collection or a new "
+                  f"--collection.")
+        return set()
+
+    reason = None
+    completed: set[str] = set()
+    try:
+        data = json.loads(progress_file.read_text(encoding="utf8"))
+        if not isinstance(data, dict) or "completed" not in data:
+            reason = "it is in an old or unrecognized format"
+        elif data.get("fingerprint") != fingerprint:
+            reason = "it was written for a different collection, database or chunking/enrichment configuration"
+        else:
+            completed = set(data["completed"])
+    except (ValueError, OSError) as e:
+        reason = f"it could not be read ({type(e).__name__})"
+
+    if reason is None and completed and _count_chunks(store) == 0:
+        reason = (f"it lists {len(completed)} finished file(s) but the collection is empty "
+                  f"(it was deleted or rebuilt)")
+    if reason is None:
+        return completed
+
+    bak = _set_aside(progress_file)
+    msg = (f"\n[WARN] Ignoring resume file {progress_file.name}: {reason}. Starting fresh; "
+           f"the old file was renamed to {bak.name}.")
+    n_existing = _count_chunks(store)
+    if n_existing:
+        msg += (f" Note: the target collection already holds {n_existing} chunks, and files are "
+                f"re-ingested over them, so chunks from different settings can end up mixed; use "
+                f"--no-resume to rebuild the collection or a new --collection.")
+    print(msg)
+    return set()
+
+
+def _record_index_settings(store: Any, fingerprint: str, settings: dict) -> None:
+    """remember which settings a collection was ingested with, in a sidecar next
+    to the database (travels with it, e.g. through push-hf), so evaluation results
+    can state the chunking they ran against. keeps a history: a collection that
+    was ingested under more than one configuration says so. never fails an ingest"""
+    from open_telco_rag.evaluation.provenance import code_version, index_settings_file
+
+    try:
+        path = index_settings_file(store.path, store.collection_name)
+        try:
+            data = json.loads(path.read_text(encoding="utf8"))
+            history = list(data.get("history", []))
+        except (OSError, ValueError):
+            history = []
+        # the fingerprint covers the (local) db path; the recorded settings do not
+        entry = {"fingerprint": fingerprint, "settings": {k: v for k, v in settings.items() if k != "db_path"},
+                 "updated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                 "code": code_version()}
+        if history and history[-1].get("fingerprint") == fingerprint:
+            history[-1] = entry
+        else:
+            history.append(entry)
+        path.write_text(json.dumps({"version": 1, "latest": entry, "history": history}), encoding="utf8")
+    except Exception as e:  # noqa: BLE001 - bookkeeping only
+        print(f"\n[WARN] Could not record the index settings ({e}); the ingest itself succeeded.")
+
+
+def _unseen(ids: list[str], texts: list[str], seen: dict[str, int]) -> tuple[list[str], list[str]]:
+    """the (id, text) pairs not already in the BM25 index with the same text"""
+    new = [(i, t) for i, t in zip(ids, texts) if seen.get(i) != hash(t)]
+    return [i for i, _ in new], [t for _, t in new]
+
+
+def _write_progress(progress_file: Path, fingerprint: str, settings: dict, completed: set[str]) -> None:
+    progress_file.write_text(json.dumps(
+        {"version": 2, "fingerprint": fingerprint, "settings": settings, "completed": sorted(completed)}
+    ), encoding="utf8")
+
+
 def _process_file_worker(args: tuple) -> dict:
     """Runs in a CPU process pool; imports are module-scoped so spawned
     Windows workers can resolve `cli`."""
@@ -143,6 +295,10 @@ def _process_file_worker(args: tuple) -> dict:
                 "chunk_index": j,
                 "source_type": c.source_type
             }
+            # offsets only exist for token-sized chunks (target_tokens/
+            # max_tokens); default ingests store exactly what they always did
+            if c.char_start >= 0:
+                base_meta.update(_span_metadata(c))
             if hasattr(c, 'metadata') and c.metadata:
                 base_meta.update(c.metadata)
 
@@ -215,10 +371,13 @@ def ingest(
 
     use_marker = getattr(source, '_use_marker', False)
 
-    progress_file = log_dir / f".progress_{embedder.model_key}.json"
+    settings    = _ingest_settings(store, embedder, min_length, chunk_kwargs)
+    fingerprint = _fingerprint(settings)
+    progress_file = log_dir / f".progress_{embedder.model_key}_{fingerprint[:12]}.json"
+    legacy_file   = log_dir / f".progress_{embedder.model_key}.json"
     completed: set[str] = set()
-    if resume and progress_file.exists():
-        completed = set(json.loads(progress_file.read_text()))
+    if resume:
+        completed = _load_progress(progress_file, legacy_file, fingerprint, store)
 
     extensions = source.supported_extensions()
     files = [
@@ -233,8 +392,19 @@ def ingest(
     store_col  = getattr(store, "collection_name", "documents")
     fts_store  = FTSStore(path=store_path, collection_name=store_col)
 
+    fts_seen: dict[str, int] = {}
     if not resume:
         fts_store.clear()
+    else:
+        # a run that was killed after some FTS writes but before the matching Chroma writes would
+        # otherwise insert those rows a second time
+        removed, repeated = fts_store.remove_exact_duplicates()
+        if removed:
+            print(f"\n[INFO] Removed {removed} repeated BM25 rows (same chunk id and text) left by an earlier interrupted run.")
+        if repeated:
+            print(f"\n[WARN] {repeated} BM25 rows repeat a chunk id with different text (chunks from different "
+                  f"settings); they were left in place. Rebuild the collection with --no-resume to remove them.")
+        fts_seen = fts_store.existing_hashes()
 
     max_workers = max(1, (os.cpu_count() or 2) - 1)
     
@@ -261,6 +431,7 @@ def ingest(
     all_metas: list[dict] = []
     files_to_log = []
     files_processed_this_run = []
+    file_ends: list[tuple[str, int]] = []       # (file, index in all_* after its last chunk)
 
     with ProcessPoolExecutor(max_workers=max_workers) as executor, \
          tqdm(total=len(tasks), desc="Parsing Files", unit="file", colour="CYAN") as file_bar:
@@ -276,6 +447,7 @@ def ingest(
                 all_texts.extend(res["chunks"])
                 all_ids.extend(res["ids"])
                 all_metas.extend(res["metadatas"])
+                file_ends.append((res["rel"], len(all_texts)))
 
                 stats.total_chunking_time_sec += (res["chunking_time_ms"] / 1000)
                 files_to_log.append((
@@ -308,6 +480,11 @@ def ingest(
     write_texts: list[str] = []
     write_metas: list[dict] = []
     db_futures = []
+    # resume checkpoints: a file counts as done once every chunk of it is confirmed stored
+    dispatched = 0                              # rows handed to background writes so far
+    flush_marks: list[tuple[int, list]] = []    # (rows dispatched, the futures writing them)
+    confirmed = 0                               # rows whose writes all succeeded
+    next_file = 0
     # Serialise same-store writes; see _locked_add().
     store_lock = threading.Lock()
     fts_lock = threading.Lock()
@@ -319,9 +496,29 @@ def ingest(
         with ThreadPoolExecutor(max_workers=8) as db_writer, \
              tqdm(total=total_chunks, desc="Embedding & Storing", unit="chunk", colour="GREEN") as chunk_bar:
 
+            def _checkpoint() -> None:
+                """write the files whose chunks are all confirmed stored to the progress
+                file, so a killed run resumes from here; bookkeeping, never fails an ingest"""
+                nonlocal confirmed, next_file
+                while flush_marks and all(f.done() and not f.cancelled() and f.exception() is None
+                                          for f in flush_marks[0][1]):
+                    confirmed = flush_marks.pop(0)[0]
+                newly = []
+                while next_file < len(file_ends) and file_ends[next_file][1] <= confirmed:
+                    newly.append(file_ends[next_file][0])
+                    next_file += 1
+                if newly and resume:
+                    try:
+                        completed.update(newly)
+                        _write_progress(progress_file, fingerprint, settings, completed)
+                    except Exception:  # noqa: BLE001
+                        return                  # the end-of-run write reports a failing progress file
+
             def _flush_writes(n: int) -> None:
                 """Dispatch the first n embedded rows to background writes,
                 sub-batched at max_write_batch."""
+                nonlocal dispatched
+                first_future = len(db_futures)
                 ids    = write_ids[:n]
                 embeds = write_embeds[:n]
                 texts  = write_texts[:n]
@@ -338,8 +535,10 @@ def ingest(
                         ids[start:end], embeds[start:end], texts[start:end], metas[start:end],
                     ))
                     db_futures.append(db_writer.submit(
-                        _locked_add, fts_lock, fts_store.add, ids[start:end], texts[start:end],
+                        _locked_add, fts_lock, fts_store.add, *_unseen(ids[start:end], texts[start:end], fts_seen),
                     ))
+                dispatched += n
+                flush_marks.append((dispatched, db_futures[first_future:]))
 
             for start in range(0, total_chunks, batch_size):
                 end = min(start + batch_size, total_chunks)
@@ -359,6 +558,7 @@ def ingest(
 
                 while len(write_ids) >= write_batch_size:
                     _flush_writes(write_batch_size)
+                _checkpoint()
 
             if write_ids:
                 _flush_writes(len(write_ids))
@@ -382,11 +582,14 @@ def ingest(
 
         if resume:
             completed.update(files_processed_this_run)
-            progress_file.write_text(json.dumps(sorted(completed)))
+            _write_progress(progress_file, fingerprint, settings, completed)
     except Exception as e:
         print(f"\n[WARN] Post-write bookkeeping (CSV log / resume progress file) failed: "
               f"{e} — every chunk was still successfully stored; only the log/resume "
               f"file may be incomplete.")
+
+    if stats.files_processed:
+        _record_index_settings(store, fingerprint, settings)
 
     return stats
 
@@ -701,6 +904,8 @@ def ingest_multi_enrichment(
                             "chunk_index": j,
                             "source_type": c.source_type,
                         }
+                        if c.char_start >= 0:
+                            base_meta.update(_span_metadata(c))
                         if hasattr(c, "metadata") and c.metadata:
                             base_meta.update(c.metadata)
                         texts.append(c.text)
@@ -764,11 +969,15 @@ def search(
     reranker               = None,
     rerank_top_k:    int   = 5,
     search_method:   str   = "dense",
-    resolve_parents: bool  = False,  
+    resolve_parents: bool  = False,
+    context_token_budget: int | None = None,
+    candidate_pool:  int | None = None,
+    budget_overflow: str | None = None,
 ) -> list[SearchResult]:
-    """Embed a query and retrieve nearest neighbours."""
+    """Embed a query and retrieve nearest neighbours; the budget arguments are
+    described on core.retrieval.execute_retrieval"""
     from open_telco_rag.core.retrieval import execute_retrieval
-    
+
     return execute_retrieval(
         query=query,
         store=store,
@@ -777,8 +986,11 @@ def search(
         threshold=threshold,
         reranker=reranker,
         rerank_top_k=rerank_top_k,
-        search_method=search_method, 
-        resolve_parents=resolve_parents, 
+        search_method=search_method,
+        resolve_parents=resolve_parents,
+        context_token_budget=context_token_budget,
+        candidate_pool=candidate_pool,
+        budget_overflow=budget_overflow,
     )
 
 # ── Generate ──────────────────────────────────────────────────────────────────

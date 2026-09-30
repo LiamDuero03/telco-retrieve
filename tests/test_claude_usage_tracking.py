@@ -15,9 +15,9 @@ from open_telco_rag.evaluation._claude import _make_local_call, _make_openrouter
 
 class _FakeResponse:
     status_code = 200  # read by the OpenRouter retry helper
-    headers: dict = {}
 
     def __init__(self, content, usage=None):
+        self.headers = {}
         self._content = content
         self._usage = usage or {}
 

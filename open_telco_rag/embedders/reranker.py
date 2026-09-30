@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 from pathlib import Path
 
 from open_telco_rag.types import SearchResult
+
+logger = logging.getLogger(__name__)
 
 _RERANKER_MODELS_FILE = Path(__file__).parent.parent.parent / "configs" / "reranker_models.json"
 
@@ -29,7 +32,12 @@ def load_reranker(model_key: str = "ms-marco-minilm"):
     backend = cfg.get("backend", "cross-encoder")
 
     if backend == "otel":
-        return OTelReranker(model=cfg["model_name"])
+        otel_kwargs = {}
+        if "query_max_chars" in cfg:
+            otel_kwargs["query_max_chars"] = cfg["query_max_chars"]
+        if "doc_max_chars" in cfg:
+            otel_kwargs["doc_max_chars"] = cfg["doc_max_chars"]
+        return OTelReranker(model=cfg["model_name"], **otel_kwargs)
     else:
         return CrossEncoderReranker(model_name=cfg["model_name"])
 
@@ -115,12 +123,24 @@ class OTelReranker:
         self,
         model:  str = "farbodtavakkoli/OTel-Reranker-0.6B",
         device: str = "auto",
+        query_max_chars: int = 512,
+        doc_max_chars:   int = 1024,
     ):
         self.model_name  = model
         self.device      = device
+        self.query_max_chars = query_max_chars
+        self.doc_max_chars   = doc_max_chars
         self._model      = None
         self._tokenizer  = None
         self._load_lock  = threading.Lock()
+        self.truncated_count = 0
+        self.scored_count    = 0
+
+    @property
+    def truncation_rate(self) -> float:
+        """share of scored documents cut to doc_max_chars (or scored with a query cut to
+        query_max_chars); 0.0 before anything is scored"""
+        return (self.truncated_count / self.scored_count) if self.scored_count else 0.0
 
     def _load(self):
         # Double-checked locking; see CrossEncoderReranker._load().
@@ -157,7 +177,26 @@ class OTelReranker:
         document) pair, in one batched forward pass."""
         import torch
 
-        pairs = [[query[:512], doc[:1024]] for doc in documents]
+        query_truncated = len(query) > self.query_max_chars
+        if query_truncated:
+            logger.debug(
+                "OTelReranker: query truncated to query_max_chars=%d (was %d chars).",
+                self.query_max_chars, len(query),
+            )
+
+        pairs = []
+        for doc in documents:
+            doc_truncated = len(doc) > self.doc_max_chars
+            if doc_truncated:
+                logger.debug(
+                    "OTelReranker: document truncated to doc_max_chars=%d (was %d chars).",
+                    self.doc_max_chars, len(doc),
+                )
+            if query_truncated or doc_truncated:
+                self.truncated_count += 1
+            self.scored_count += 1
+            pairs.append([query[:self.query_max_chars], doc[:self.doc_max_chars]])
+
         inputs = self._tokenizer(
             pairs,
             padding        = True,

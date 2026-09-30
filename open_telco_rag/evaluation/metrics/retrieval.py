@@ -49,6 +49,13 @@ def coverage_ratio(results: list[Any], threshold: float) -> float:
     return sum(1 for s in sims if s >= threshold) / len(sims)
 
 
+def _norm_path(s: str) -> str:
+    """ids are "{relative path}::..."; the relative path uses the OS separator
+    of the machine that ingested (backslashes on Windows), while question files
+    usually come from another OS. compare with forward slashes"""
+    return s.replace("\\", "/")
+
+
 def _document_id(result: Any) -> str:
     """Best-effort document identifier. Uses doc_id (path before "::"), not
     metadata["source"], which collapses to a generic filename across a corpus.
@@ -56,7 +63,7 @@ def _document_id(result: Any) -> str:
     doc_id = getattr(result, "doc_id", None)
     if doc_id:
         # doc_id is "{rel}::{model_key}::{chunk_index}".
-        return doc_id.split("::", 1)[0]
+        return _norm_path(doc_id.split("::", 1)[0])
     metadata = getattr(result, "metadata", None) or {}
     return metadata.get("source", "")
 
@@ -75,7 +82,7 @@ _DISCRIMINATING_FRACTION_THRESHOLD = 0.5
 # stable within a run. keyed by the store object (weakly), not id(store):
 # CPython reuses ids after garbage collection, so an id-keyed cache handed a
 # dead store's answer to a different store
-_discriminating_cache: "weakref.WeakKeyDictionary[Any, dict[str, bool]]" = weakref.WeakKeyDictionary()
+_discriminating_cache: weakref.WeakKeyDictionary[Any, dict[str, bool]] = weakref.WeakKeyDictionary()
 
 
 def is_discriminating_source(expected: str, store: Any) -> bool:
@@ -147,7 +154,8 @@ def chunk_rank(
 
     if expected_chunk_id:
         for i, r in enumerate(results, start=1):
-            if getattr(r, "doc_id", None) == expected_chunk_id:
+            rid = getattr(r, "doc_id", None)
+            if rid is not None and _norm_path(rid) == _norm_path(expected_chunk_id):
                 return i
 
     if expected_chunk_text:
@@ -182,6 +190,63 @@ def exact_chunk_hit(
     if rank < 0:
         return -1
     return 1 if rank > 0 else 0
+
+
+def _has_valid_offsets(result: Any) -> bool:
+    metadata = getattr(result, "metadata", None) or {}
+    char_start = metadata.get("char_start", -1)
+    char_end = metadata.get("char_end", -1)
+    return char_start is not None and char_end is not None and char_start >= 0 and char_end >= 0
+
+
+def _span_overlap_hit(
+    results: list[Any],
+    evidence_char_start: int | None,
+    evidence_char_end: int | None,
+    evidence_doc_id: str | None,
+) -> int:
+    """does any result from evidence_doc_id overlap the evidence span by any amount?
+
+    1 = a chunk overlaps, 0 = offsets exist but none overlap, -1 = not applicable
+    (no evidence span, or no result carries offsets, e.g. a legacy collection)
+    """
+    if evidence_char_start is None or evidence_char_end is None or not evidence_doc_id:
+        return -1
+
+    any_offsets_available = False
+    for r in results:
+        if not _has_valid_offsets(r):
+            continue
+        any_offsets_available = True
+        metadata = r.metadata or {}
+        char_start = metadata["char_start"]
+        char_end = metadata["char_end"]
+        if _document_id(r) == _norm_path(evidence_doc_id) and char_start < evidence_char_end and evidence_char_start < char_end:
+            return 1
+
+    return 0 if any_offsets_available else -1
+
+
+def span_hit_at_k(
+    results: list[Any],
+    evidence_char_start: int | None,
+    evidence_char_end: int | None,
+    evidence_doc_id: str | None,
+) -> int:
+    """chunker-agnostic alternative to exact_chunk_hit: does a retrieved chunk overlap
+    the evidence span? see _span_overlap_hit for the -1/0/1 convention"""
+    return _span_overlap_hit(results, evidence_char_start, evidence_char_end, evidence_doc_id)
+
+
+def span_hit_in_context(
+    context: list[Any],
+    evidence_char_start: int | None,
+    evidence_char_end: int | None,
+    evidence_doc_id: str | None,
+) -> int:
+    """span_hit_at_k over the chunks that made it into the generator's context after
+    budgeted assembly, so a retrieved evidence chunk can still miss here"""
+    return _span_overlap_hit(context, evidence_char_start, evidence_char_end, evidence_doc_id)
 
 
 def _any_metadata_or_doc_id_contains(result: Any, needle_lower: str) -> bool:
