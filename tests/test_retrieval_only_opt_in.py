@@ -114,3 +114,13 @@ def test_cli_retrieval_only_with_baseline_still_builds_llms(cli_evaluate):
     seen, tmp = cli_evaluate
     _run(["--retrieval-only", "--include-baseline"], tmp)
     assert seen["llm_built"] == 2
+
+
+def test_cli_record_judge_responses_and_search_method_defaults(cli_evaluate):
+    seen, tmp = cli_evaluate
+    _run([], tmp)
+    assert "record_judge_calls" not in seen["corpus_kwargs"]
+    assert seen["corpus_kwargs"]["search_method"] == "dense"
+    _run(["--record-judge-responses", "--search-method", "hybrid"], tmp)
+    assert seen["corpus_kwargs"]["record_judge_calls"] is True
+    assert seen["corpus_kwargs"]["search_method"] == "hybrid"

@@ -227,6 +227,11 @@ def main(argv: list[str] | None = None) -> None:
                              "Must follow the same format as configs/eval_questions/{corpus}.json. "
                              "If omitted, loads from configs/eval_questions/{corpus}.json")
     p_eval.add_argument("--top-k",          type=int, default=5,  help="Chunks to retrieve per question")
+    p_eval.add_argument("--search-method", choices=["dense", "bm25", "hybrid"], default="dense",
+                        help="Retrieval method (default: dense), same choices as search/ask")
+    p_eval.add_argument("--record-judge-responses", action="store_true",
+                        help="Optional: store every judge prompt and raw response per question in the "
+                             "results file (large: prompts include the retrieved chunks). Off by default.")
     p_eval.add_argument("--threshold",      type=float, default=0.5,
                         help="Similarity threshold for coverage_ratio metric (default: 0.5)")
     p_eval.add_argument("--output",         default="results",
@@ -813,6 +818,7 @@ def _run_evaluate(args) -> None:
             resolve_parents   = getattr(args, "resolve_parents", False),
             **budget_kwargs,
             **({"retrieval_only": True} if retrieval_only else {}),
+            **({"record_judge_calls": True} if getattr(args, "record_judge_responses", False) else {}),
         )
 
         if retrieval_only and not args.no_leaderboard:

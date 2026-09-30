@@ -137,6 +137,18 @@ def _snapshot_llm_usage(llm_call: Callable[[str, int], str]) -> tuple[int, int]:
     )
 
 
+def _recording_llm_call(
+    llm_call: Callable[[str, int], str], metric: str, sink: list[dict],
+) -> Callable[[str, int], str]:
+    """wraps llm_call so each (metric, prompt, raw response) is appended to sink;
+    the real call (and its usage tracking) is delegated unchanged"""
+    def _wrapped(prompt: str, max_tokens: int) -> str:
+        raw = llm_call(prompt, max_tokens)
+        sink.append({"metric": metric, "prompt": prompt, "raw_response": raw})
+        return raw
+    return _wrapped
+
+
 def _build_baseline_generator(llm_call: Callable[[str, int], str], max_tokens: int = 1000):
     """Generator that answers from LLM knowledge only - no context chunks.
     Raise max_tokens for reasoning-capable OpenRouter models.
@@ -611,8 +623,14 @@ def evaluate_question(
     context_token_budget: int | None = None,
     candidate_pool: int | None = None,
     budget_overflow: str | None = None,
+    record_judge_calls: bool = False,
 ) -> QuestionResult:
     """Run all applicable metrics for one question.
+
+    record_judge_calls=True: also store every judge prompt/raw response for
+    this question in result.judge_calls (open/fill_blank only; mc/tf never
+    call a judge). Off by default -- the field stays None and is omitted from
+    saved output, since prompts include the retrieved chunk text.
 
     retrieval_only=True: runs retrieval (respecting reranker/budget) and every
     retrieval-tier metric, then returns WITHOUT calling a generator or judge:
@@ -666,6 +684,14 @@ def evaluate_question(
         answer_type=q.answer_type,
         difficulty=q.difficulty,
     )
+    if record_judge_calls:
+        result.judge_calls = []
+
+    def _judge(metric: str):
+        # off by default: the judge callable is passed through untouched
+        if not record_judge_calls:
+            return llm_call
+        return _recording_llm_call(llm_call, metric, result.judge_calls)
 
     try:
         start_time = time.perf_counter()
@@ -808,17 +834,17 @@ def evaluate_question(
                     # retrieved context; skip for baseline so the -1.0 "not
                     # applicable" sentinel is kept rather than a misleading 0.0.
                     if not baseline:
-                        faithfulness_scores.append(faithfulness(g_answer, retrieved, llm_call=llm_call, debug=debug))
+                        faithfulness_scores.append(faithfulness(g_answer, retrieved, llm_call=_judge("faithfulness"), debug=debug))
                     relevancy_scores.append(
-                        answer_relevancy(active_question, g_answer, embedder, llm_call=llm_call, debug=debug)
+                        answer_relevancy(active_question, g_answer, embedder, llm_call=_judge("answer_relevancy"), debug=debug)
                     )
                     if q.reference_answer:
                         if not baseline:
                             recall_scores.append(
-                                context_recall(q.reference_answer, retrieved, llm_call=llm_call, debug=debug)
+                                context_recall(q.reference_answer, retrieved, llm_call=_judge("context_recall"), debug=debug)
                             )
                         correctness_scores.append(
-                            answer_correctness(g_answer, q.reference_answer, embedder, llm_call=llm_call, debug=debug)
+                            answer_correctness(g_answer, q.reference_answer, embedder, llm_call=_judge("answer_correctness"), debug=debug)
                         )
                 if faithfulness_scores:
                     result.faithfulness = sum(faithfulness_scores) / len(faithfulness_scores)
@@ -831,12 +857,12 @@ def evaluate_question(
             else:
                 # See above: faithfulness/context_recall skipped for baseline.
                 if not baseline:
-                    result.faithfulness = faithfulness(answer, retrieved, llm_call=llm_call, debug=debug)
-                result.answer_relevancy = answer_relevancy(active_question, answer, embedder, llm_call=llm_call, debug=debug)
+                    result.faithfulness = faithfulness(answer, retrieved, llm_call=_judge("faithfulness"), debug=debug)
+                result.answer_relevancy = answer_relevancy(active_question, answer, embedder, llm_call=_judge("answer_relevancy"), debug=debug)
                 if q.reference_answer:
                     if not baseline:
-                        result.context_recall = context_recall(q.reference_answer, retrieved, llm_call=llm_call, debug=debug)
-                    result.answer_correctness = answer_correctness(answer, q.reference_answer, embedder, llm_call=llm_call, debug=debug)
+                        result.context_recall = context_recall(q.reference_answer, retrieved, llm_call=_judge("context_recall"), debug=debug)
+                    result.answer_correctness = answer_correctness(answer, q.reference_answer, embedder, llm_call=_judge("answer_correctness"), debug=debug)
             judge_after = _snapshot_llm_usage(llm_call)
             result.judge_prompt_tokens = judge_after[0] - judge_before[0]
             result.judge_completion_tokens = judge_after[1] - judge_before[1]
@@ -888,6 +914,7 @@ def evaluate_corpus(
     candidate_pool: int | None = None,
     budget_overflow: str | None = None,
     retrieval_only: bool = False,
+    record_judge_calls: bool = False,
 ) -> tuple[CorpusResult, CorpusResult | None]:
     """Run the full evaluation suite for one corpus.
 
@@ -895,6 +922,8 @@ def evaluate_corpus(
     context_token_budget/candidate_pool/budget_overflow: passed through to
     evaluate_question()'s RAG pass only (baseline never retrieves); optional,
     unset = plain top_k path.
+
+    record_judge_calls: passed to evaluate_question() for the RAG pass; off by default.
 
     retrieval_only: passed to evaluate_question()'s RAG pass only (baseline is
     unaffected either way). Off by default. include_baseline=True with
@@ -952,7 +981,8 @@ def evaluate_corpus(
             print(f"  [RAG {idx + 1}/{len(qs)}] {display_q[:65]}...")
         qr = evaluate_question(q, store, embedder, top_k, sim_threshold,
                                llm_call=llm_call, rag_llm_call=rag_llm_call,
-                               baseline=False, retrieval_only=retrieval_only, reranker=reranker,
+                               baseline=False, retrieval_only=retrieval_only,
+                               record_judge_calls=record_judge_calls, reranker=reranker,
                                rerank_top_k=rerank_top_k, debug=debug,
                                rag_model_name=resolved_rag_model,
                                rag_generator_name=rag_generator_name,

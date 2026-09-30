@@ -66,6 +66,11 @@ class QuestionResult:
     judge_prompt_tokens:     int = 0
     judge_completion_tokens: int = 0
 
+    # every judge call made for this question: [{"metric", "prompt",
+    # "raw_response"}, ...] in call order. opt-in (record_judge_calls);
+    # None, and omitted from saved output, otherwise
+    judge_calls: list[dict] | None = None
+
     # ── Deterministic scoring (mc/tf only; -1.0 = not applicable) ────────────
     # accuracy is mc/tf's own field; the four OE metrics stay at -1.0 for mc/tf.
     accuracy: float = -1.0
@@ -489,7 +494,7 @@ def aggregate(question_results: list[QuestionResult]) -> dict:
 # opt-in fields: dropped from serialized output while None, so default runs
 # serialize exactly as before
 _OPT_IN_QUESTION_FIELDS = ("context_tokens", "n_chunks_used", "budget", "fill_ratio",
-                           "span_hit_at_k", "span_hit_in_context", "difficulty")
+                           "span_hit_at_k", "span_hit_in_context", "difficulty", "judge_calls")
 _OPT_IN_CORPUS_FIELDS = ("mean_context_tokens", "mean_fill_ratio",
                          "reranker_stats", "embedder_stats",
                          "span_hit_at_k_rate", "span_hit_in_context_rate")
