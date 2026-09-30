@@ -182,3 +182,15 @@ def test_secrets_and_objects_are_never_recorded(tmp_path, data):
     _ingest(tmp_path, data, api_key=secret)
     (progress,) = list((tmp_path / "logs").glob(".progress*.json"))
     assert secret not in progress.read_text(encoding="utf8")
+
+
+def test_a_resume_record_for_a_deleted_collection_is_not_trusted(tmp_path, data, capsys):
+    import chromadb
+
+    first, store = _ingest(tmp_path, data)
+    chromadb.PersistentClient(path=str(tmp_path / "db")).delete_collection(name="coll_a")
+    capsys.readouterr()
+    stats, rebuilt = _ingest(tmp_path, data)                      # same name, same settings, now empty
+    out = capsys.readouterr().out
+    assert stats.files_processed == len(DOCS) and stats.skipped_files == 0 and rebuilt.count() > 0
+    assert "collection is empty" in out and "deleted or rebuilt" in out

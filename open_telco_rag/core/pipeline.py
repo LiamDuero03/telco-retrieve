@@ -135,6 +135,9 @@ def _load_progress(progress_file: Path, legacy_file: Path, fingerprint: str, sto
     except (ValueError, OSError) as e:
         reason = f"it could not be read ({type(e).__name__})"
 
+    if reason is None and completed and _count_chunks(store) == 0:
+        reason = (f"it lists {len(completed)} finished file(s) but the collection is empty "
+                  f"(it was deleted or rebuilt)")
     if reason is None:
         return completed
 
