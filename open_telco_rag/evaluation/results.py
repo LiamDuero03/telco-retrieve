@@ -94,6 +94,13 @@ class QuestionResult:
     candidate_chunk_rank: int = -1
     used_chunk_rank:      int = -1
 
+    # ── budgeted context (opt-in): None unless context_token_budget was set,
+    # and left out of serialized output while None (see question_to_dict)
+    context_tokens: int | None = None    # tokens in the chunks actually used
+    n_chunks_used:  int | None = None    # chunks fill_context_budget() kept
+    budget:         int | None = None    # the context_token_budget for this question
+    fill_ratio:     float | None = None  # context_tokens / budget
+
     # ── Retrieval metrics: computed for every non-baseline question ──────────
     mean_similarity:  float = 0.0
     min_similarity:   float = 0.0
@@ -168,6 +175,10 @@ class CorpusResult:
     exact_chunk_hit_rate:  float = -1.0
     mean_reciprocal_rank: float = -1.0   # mean of 1/used_chunk_rank; -1.0 with no provenance
     mean_coverage_ratio:   float = -1.0
+
+    # ── budgeted context aggregates (opt-in): None, and omitted from output, without a budget
+    mean_context_tokens: float | None = None
+    mean_fill_ratio:     float | None = None
 
     # ── Tier 2 aggregates (-1.0 = not computed) ───────────────────────────────
     mean_context_recall:     float = -1.0
@@ -393,6 +404,7 @@ def aggregate(question_results: list[QuestionResult]) -> dict:
     canonical_qs = [r for r in question_results if r.canonical_hit >= 0]
     exact_chunk_qs = [r for r in question_results if r.exact_chunk_hit >= 0]
     rank_qs = [r for r in question_results if r.used_chunk_rank >= 0]
+    budgeted_qs = [r for r in question_results if r.budget is not None]
 
     by_format: dict[str, dict] = {}
     for fmt in sorted({r.answer_type for r in question_results}):
@@ -428,7 +440,38 @@ def aggregate(question_results: list[QuestionResult]) -> dict:
         weighted_score_pct=      _weighted_score_pct(question_results),
         by_format=by_format,
         **_aggregate_efficiency(question_results),
+        # opt-in keys: only present when at least one question used a budget
+        **({
+            "mean_context_tokens": _mean_or_zero([float(r.context_tokens) for r in budgeted_qs]),
+            "mean_fill_ratio":     _mean([r.fill_ratio for r in budgeted_qs]),
+        } if budgeted_qs else {}),
     )
+
+
+# opt-in fields: dropped from serialized output while None, so default runs
+# serialize exactly as before
+_OPT_IN_QUESTION_FIELDS = ("context_tokens", "n_chunks_used", "budget", "fill_ratio")
+_OPT_IN_CORPUS_FIELDS = ("mean_context_tokens", "mean_fill_ratio")
+
+
+def question_to_dict(result: QuestionResult) -> dict:
+    d = asdict(result)
+    for key in _OPT_IN_QUESTION_FIELDS:
+        if d.get(key) is None:
+            d.pop(key, None)
+    return d
+
+
+def result_to_dict(result: CorpusResult) -> dict:
+    d = asdict(result)
+    for key in _OPT_IN_CORPUS_FIELDS:
+        if d.get(key) is None:
+            d.pop(key, None)
+    for q in d.get("question_results", []):
+        for key in _OPT_IN_QUESTION_FIELDS:
+            if q.get(key) is None:
+                q.pop(key, None)
+    return d
 
 
 def save_results(result: CorpusResult, output_dir: Path) -> Path:
@@ -437,7 +480,7 @@ def save_results(result: CorpusResult, output_dir: Path) -> Path:
     ts       = result.timestamp or datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"eval_{result.corpus}_{result.model}_{ts}.json"
     path     = output_dir / filename
-    path.write_text(json.dumps(asdict(result), indent=2, default=str),
+    path.write_text(json.dumps(result_to_dict(result), indent=2, default=str),
                     encoding="utf-8")
     print(f"  Saved -> {path}")
     return path

@@ -1,10 +1,134 @@
 """Search implementation: dense/bm25/hybrid retrieval, reranking, and
 parent-chunk resolution for hierarchical parent-child chunking."""
 from __future__ import annotations
+import logging
 import math
 from typing import Any
+import tiktoken
 from open_telco_rag.types import SearchResult, Embedder
 from open_telco_rag.stores.fts import FTSStore
+
+logger = logging.getLogger(__name__)
+
+# same encoding as core/chunking.py; created lazily so the default (no budget)
+# path never initializes a tokenizer
+_ENCODING_CACHE: dict[str, Any] = {}
+
+DEFAULT_CANDIDATE_POOL = 30
+DEFAULT_BUDGET_OVERFLOW = "stop"
+_OVERFLOW_POLICIES = ("stop", "skip", "truncate")
+
+
+def _get_encoding() -> Any:
+    enc = _ENCODING_CACHE.get("cl100k_base")
+    if enc is None:
+        enc = tiktoken.get_encoding("cl100k_base")
+        _ENCODING_CACHE["cl100k_base"] = enc
+    return enc
+
+
+def _count_tokens(text: str) -> int:
+    return len(_get_encoding().encode(text)) if text else 0
+
+
+def _truncate_to_tokens(text: str, max_tokens: int) -> str:
+    if max_tokens <= 0:
+        return ""
+    enc = _get_encoding()
+    return enc.decode(enc.encode(text)[:max_tokens])
+
+
+def resolve_budget_args(
+    context_token_budget: int | None,
+    candidate_pool: int | None,
+    budget_overflow: str | None,
+) -> tuple[int | None, int | None, str | None]:
+    """Validate the optional budget settings and fill in defaults.
+
+    Returns (budget, pool, overflow); all None when no budget is set.
+    candidate_pool and budget_overflow only mean something with a budget, so
+    setting either one alone raises ValueError.
+    """
+    if context_token_budget is None:
+        if candidate_pool is not None or budget_overflow is not None:
+            raise ValueError(
+                "candidate_pool and budget_overflow require context_token_budget; "
+                "set a budget or leave both unset."
+            )
+        return None, None, None
+
+    for name, value in (("context_token_budget", context_token_budget),
+                        ("candidate_pool", candidate_pool)):
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value <= 0):
+            raise ValueError(f"{name} must be a positive integer, got {value!r}")
+    if budget_overflow is not None and budget_overflow not in _OVERFLOW_POLICIES:
+        raise ValueError(
+            f"Unknown budget_overflow policy: {budget_overflow!r} (choose from {_OVERFLOW_POLICIES})"
+        )
+    return (
+        context_token_budget,
+        DEFAULT_CANDIDATE_POOL if candidate_pool is None else candidate_pool,
+        DEFAULT_BUDGET_OVERFLOW if budget_overflow is None else budget_overflow,
+    )
+
+
+def fill_context_budget(
+    candidates: list[SearchResult],
+    budget: int,
+    overflow: str = "stop",
+) -> list[SearchResult]:
+    """Select a prefix of `candidates` (already in rank order) that fits
+    within `budget` tokens.
+
+    overflow policy, applied at the first candidate that doesn't fit as-is:
+      "stop"     - halt immediately, strict rank order (default).
+      "skip"     - leave this candidate out, keep considering later
+                   (smaller) ones.
+      "truncate" - cut this candidate's text down to exactly fill the
+                   remaining budget, include it, then stop.
+
+    Logs a warning if every candidate is consumed without reaching the
+    budget (candidate_pool was too small for this budget), as opposed to
+    stopping/skipping because of the overflow policy itself.
+    """
+    if overflow not in _OVERFLOW_POLICIES:
+        raise ValueError(f"Unknown budget_overflow policy: {overflow!r}")
+
+    selected: list[SearchResult] = []
+    used = 0
+    pool_exhausted = True
+
+    for cand in candidates:
+        cand_tokens = _count_tokens(cand.text)
+        if used + cand_tokens <= budget:
+            selected.append(cand)
+            used += cand_tokens
+            continue
+
+        if overflow == "skip":
+            continue
+
+        if overflow == "truncate":
+            remaining = budget - used
+            truncated_text = _truncate_to_tokens(cand.text, remaining)
+            if truncated_text:
+                selected.append(SearchResult(
+                    text=truncated_text, distance=cand.distance,
+                    metadata=cand.metadata, doc_id=cand.doc_id,
+                ))
+                used += _count_tokens(truncated_text)
+
+        pool_exhausted = False  # stopped by policy, not by running out of candidates
+        break
+
+    if pool_exhausted and used < budget and candidates:
+        logger.warning(
+            "fill_context_budget: exhausted all %d candidate(s) at %d/%d "
+            "tokens -- candidate_pool may be too small to fill this budget.",
+            len(candidates), used, budget,
+        )
+
+    return selected
 
 
 def _resolve_parent_chunks(results: list[SearchResult]) -> list[SearchResult]:
@@ -60,11 +184,32 @@ def execute_retrieval(
     reranker               = None,
     rerank_top_k:    int   = 5,
     search_method:   str   = "dense",
-    resolve_parents: bool  = False,  
+    resolve_parents: bool  = False,
+    context_token_budget: int | None = None,
+    candidate_pool:  int | None = None,
+    budget_overflow: str | None = None,
 ) -> list[SearchResult]:
-    """Run dense / bm25 / hybrid retrieval, then optional reranking and parent resolution."""
+    """Run dense / bm25 / hybrid retrieval, then optional reranking and parent
+    resolution.
+
+    context_token_budget=None (default): the plain top_k path below.
+    candidate_pool / budget_overflow are only valid with a budget (ValueError
+    otherwise); they default to 30 / "stop" when a budget is set.
+
+    with a budget: over-fetches candidate_pool candidates instead of
+    top_k*3/top_k, reranks (or truncates) to candidate_pool instead of
+    rerank_top_k/top_k, resolves parents over that larger pool, then fills the
+    budget in rank order via fill_context_budget(). top_k/rerank_top_k are
+    ignored in this mode.
+    """
+    context_token_budget, candidate_pool, budget_overflow = resolve_budget_args(
+        context_token_budget, candidate_pool, budget_overflow)
     search_method = search_method.lower()
-    candidate_k = top_k * 3 if reranker is not None else top_k
+    budgeted = context_token_budget is not None
+    if budgeted:
+        candidate_k = candidate_pool
+    else:
+        candidate_k = top_k * 3 if reranker is not None else top_k
 
     dense_results: list[SearchResult] = []
     bm25_results: list[SearchResult] = []
@@ -126,12 +271,18 @@ def execute_retrieval(
 
     # Rerank
     if reranker is not None and final_candidates:
-        final_candidates = reranker.rerank(query, final_candidates, top_k=rerank_top_k)
+        rerank_n = candidate_pool if budgeted else rerank_top_k
+        final_candidates = reranker.rerank(query, final_candidates, top_k=rerank_n)
     else:
-        final_candidates = final_candidates[:top_k]
+        final_candidates = final_candidates[:candidate_pool] if budgeted else final_candidates[:top_k]
 
-    # Expand to parent contexts
+    # Expand to parent contexts (dedup by parent_id, keeping the best-ranked
+    # child) -- same call either way, just over a candidate_pool-sized list
+    # before budgeting, instead of a top_k-sized list with nothing after it.
     if resolve_parents:
         final_candidates = _resolve_parent_chunks(final_candidates)
+
+    if budgeted:
+        final_candidates = fill_context_budget(final_candidates, context_token_budget, budget_overflow)
 
     return final_candidates

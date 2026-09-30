@@ -764,11 +764,18 @@ def search(
     reranker               = None,
     rerank_top_k:    int   = 5,
     search_method:   str   = "dense",
-    resolve_parents: bool  = False,  
+    resolve_parents: bool  = False,
+    context_token_budget: int | None = None,
+    candidate_pool:  int | None = None,
+    budget_overflow: str | None = None,
 ) -> list[SearchResult]:
-    """Embed a query and retrieve nearest neighbours."""
+    """Embed a query and retrieve nearest neighbours.
+
+    context_token_budget/candidate_pool/budget_overflow: optional, see
+    core.retrieval.execute_retrieval(); unset = plain top_k behaviour.
+    """
     from open_telco_rag.core.retrieval import execute_retrieval
-    
+
     return execute_retrieval(
         query=query,
         store=store,
@@ -777,8 +784,11 @@ def search(
         threshold=threshold,
         reranker=reranker,
         rerank_top_k=rerank_top_k,
-        search_method=search_method, 
-        resolve_parents=resolve_parents, 
+        search_method=search_method,
+        resolve_parents=resolve_parents,
+        context_token_budget=context_token_budget,
+        candidate_pool=candidate_pool,
+        budget_overflow=budget_overflow,
     )
 
 # ── Generate ──────────────────────────────────────────────────────────────────

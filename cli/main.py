@@ -273,6 +273,15 @@ def main(argv: list[str] | None = None) -> None:
                         help="Enable reranking during evaluation retrieval")
     p_eval.add_argument("--rerank-top-k",   type=int, default=5,
                         help="Chunks to keep after reranking (default: 5)")
+    p_eval.add_argument("--context-token-budget", type=int, default=None,
+                        help="Optional: fill the generator's context up to this many tokens (cl100k_base) "
+                             "instead of a fixed --top-k/--rerank-top-k chunk count.")
+    p_eval.add_argument("--candidate-pool", type=int, default=None,
+                        help="With --context-token-budget: candidates to retrieve and rerank before "
+                             "filling the budget (default 30).")
+    p_eval.add_argument("--budget-overflow", choices=["stop", "skip", "truncate"], default=None,
+                        help="With --context-token-budget: what to do with the first chunk that does not "
+                             "fit (default stop).")
     p_eval.add_argument("--reranker-model", default="ms-marco-minilm",
                         help="Reranker model key from configs/reranker_models.json "
                              "(default: ms-marco-minilm, telecom: otel-reranker-0.6b)")
@@ -687,6 +696,19 @@ def _run_evaluate(args) -> None:
     from open_telco_rag.evaluation.evaluate import evaluate_corpus
     from open_telco_rag.evaluation.questions import SUPPORTED_CORPORA, load_questions, EvalQuestion
     from open_telco_rag.evaluation._claude import make_llm_call
+    from open_telco_rag.core.retrieval import resolve_budget_args
+
+    budget_kwargs = {
+        "context_token_budget": getattr(args, "context_token_budget", None),
+        "candidate_pool": getattr(args, "candidate_pool", None),
+        "budget_overflow": getattr(args, "budget_overflow", None),
+    }
+    try:
+        resolved = resolve_budget_args(**budget_kwargs)
+    except ValueError as e:
+        sys.exit(f"error: {e}")
+    # resolved values (defaults filled in when a budget is set) for the run + leaderboard row
+    budget_kwargs = dict(zip(budget_kwargs, resolved))
 
     embed_backend = getattr(args, "embed_backend", "local")
     embedder = _get_embedder(args.model, backend=embed_backend)
@@ -768,6 +790,7 @@ def _run_evaluate(args) -> None:
             inject_metadata   = args.inject_metadata,
             search_method=getattr(args, "search_method", "dense"),
             resolve_parents   = getattr(args, "resolve_parents", False),
+            **budget_kwargs,
         )
 
         if not args.no_leaderboard:
@@ -787,6 +810,7 @@ def _run_evaluate(args) -> None:
                 search_method=getattr(args, "search_method", "dense"),
                 embed_backend=embed_backend,
                 run_name         = getattr(args, "run_name", None),
+                **budget_kwargs,
             )
 
 
@@ -807,7 +831,10 @@ def _update_leaderboard(
     include_keywords: bool = False,
     search_method:    str = "dense", 
     embed_backend:    str = "local",
-    run_name:         str | None = None,) -> None:
+    run_name:         str | None = None,
+    context_token_budget: int | None = None,
+    candidate_pool:   int | None = None,
+    budget_overflow:  str | None = None,) -> None:
     """Append one row to the leaderboard JSON file."""
     import json
     from datetime import datetime
@@ -906,6 +933,12 @@ def _update_leaderboard(
         "bl_answer_correctness": round(max(0, baseline_result.mean_answer_correctness), 3) if baseline_result else None,
         "bl_average":            _avg(baseline_result) if baseline_result else None,
     }
+
+    # budget keys only appear on rows from budgeted runs
+    if context_token_budget is not None:
+        row["context_token_budget"] = context_token_budget
+        row["candidate_pool"] = candidate_pool
+        row["budget_overflow"] = budget_overflow
 
     leaderboard_path.parent.mkdir(parents=True, exist_ok=True)
     rows = []

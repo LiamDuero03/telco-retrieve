@@ -40,6 +40,7 @@ from open_telco_rag.evaluation.metrics.retrieval import (
     cosine_sim_stats, distinct_sources_retrieved, canonical_source_hit,
     exact_chunk_hit, chunk_rank, coverage_ratio, is_discriminating_source,
 )
+from open_telco_rag.core.retrieval import fill_context_budget, resolve_budget_args
 from open_telco_rag.evaluation.metrics.ground_truth import (
     context_recall, answer_correctness,
 )
@@ -453,6 +454,9 @@ def evaluate_question(
     generation_top_p: float | None = None,
     rag_max_tokens: int = 1000,
     prompt_mode: str = DEFAULT_PROMPT_MODE,
+    context_token_budget: int | None = None,
+    candidate_pool: int | None = None,
+    budget_overflow: str | None = None,
 ) -> QuestionResult:
     """Run all applicable metrics for one question.
 
@@ -465,7 +469,18 @@ def evaluate_question(
     anything (else the repeats are byte-identical). None leaves it at 0.0.
     rag_max_tokens: raise for reasoning-capable OpenRouter models.
     prompt_mode: RAG branch only.
+
+    context_token_budget=None (default): top_k/rerank_top_k control retrieval
+    as before; candidate_pool/budget_overflow are only valid with a budget
+    (ValueError otherwise, defaults 30 / "stop").
+    Set: over-fetches candidate_pool candidates instead of top_k, reranks
+    (or truncates) to candidate_pool instead of rerank_top_k, then fills
+    the budget in rank order (see core.retrieval.fill_context_budget);
+    top_k/rerank_top_k are ignored. Populates
+    result.context_tokens/n_chunks_used/budget/fill_ratio.
     """
+    context_token_budget, candidate_pool, budget_overflow = resolve_budget_args(
+        context_token_budget, candidate_pool, budget_overflow)
     from open_telco_rag.core.pipeline import search, generate
     
     active_question = q.question
@@ -501,15 +516,19 @@ def evaluate_question(
             result.gen_latency = time.perf_counter() - gen_start
             result.search_latency = 0.0
         else:
-            # Search pass, without reranker.
+            # Search pass, without reranker. In budget mode, over-fetch
+            # candidate_pool candidates instead of top_k -- the budget fill
+            # below decides how many are actually used, independent of top_k.
+            budgeted = context_token_budget is not None
+            fetch_k = candidate_pool if budgeted else top_k
             search_start = time.perf_counter()
             retrieved_candidates = search(
-                search_query, 
-                store=store, 
+                search_query,
+                store=store,
                 embedder=embedder,
-                top_k=top_k, 
-                reranker=None,  
-                rerank_top_k=top_k,
+                top_k=fetch_k,
+                reranker=None,
+                rerank_top_k=fetch_k,
                 search_method=search_method,
                 resolve_parents=resolve_parents
             )
@@ -521,6 +540,7 @@ def evaluate_question(
             result.rerank_latency = 0.0
             result.rerank_tokens = 0
 
+            rerank_n = candidate_pool if budgeted else rerank_top_k
             if reranker:
                 rerank_start = time.perf_counter()
 
@@ -528,15 +548,23 @@ def evaluate_question(
                 result.rerank_tokens = _local_token_count(rerank_payload)
 
                 try:
-                    retrieved = reranker.rerank(active_question, retrieved_candidates, top_k=rerank_top_k)
+                    retrieved = reranker.rerank(active_question, retrieved_candidates, top_k=rerank_n)
                 except AttributeError:
                     # Reranker wrapper may use a different method name.
-                    retrieved = retrieved_candidates[:rerank_top_k]
+                    retrieved = retrieved_candidates[:rerank_n]
 
                 result.rerank_latency = time.perf_counter() - rerank_start
             else:
-                retrieved = retrieved_candidates[:rerank_top_k]
+                retrieved = retrieved_candidates[:rerank_n]
 
+            if budgeted:
+                retrieved = fill_context_budget(retrieved, context_token_budget, budget_overflow)
+                result.context_tokens = sum(_local_token_count(r.text) for r in retrieved)
+                result.n_chunks_used = len(retrieved)
+                result.budget = context_token_budget
+                result.fill_ratio = result.context_tokens / context_token_budget
+
+            # chunks handed to the generator (post budget fill when a budget is set)
             result.used_chunk_ids = [getattr(r, "doc_id", None) for r in retrieved]
             result.used_chunk_texts = [getattr(r, "text", "") for r in retrieved]
 
@@ -748,16 +776,26 @@ def evaluate_corpus(
     resolve_parents:  bool = False,
     rag_max_tokens: int = 1000,
     prompt_mode: str = DEFAULT_PROMPT_MODE,
+    context_token_budget: int | None = None,
+    candidate_pool: int | None = None,
+    budget_overflow: str | None = None,
 ) -> tuple[CorpusResult, CorpusResult | None]:
     """Run the full evaluation suite for one corpus.
 
     rag_max_tokens / prompt_mode: passed through to evaluate_question().
+    context_token_budget/candidate_pool/budget_overflow: passed through to
+    evaluate_question()'s RAG pass only (baseline never retrieves); optional,
+    unset = plain top_k path.
 
     Returns (rag_result, baseline_result); baseline_result is None if
     include_baseline=False.
     """
     # Label for the leaderboard/results row.
     questions_source_name = "default"
+    # fail fast on bad budget settings (before any per-question work)
+    context_token_budget, candidate_pool, budget_overflow = resolve_budget_args(
+        context_token_budget, candidate_pool, budget_overflow)
+
     if questions:
         questions_source_name = "custom_list"
     else:
@@ -815,7 +853,10 @@ def evaluate_corpus(
                                search_method=search_method,
                                resolve_parents=resolve_parents,
                                rag_max_tokens=rag_max_tokens,
-                               prompt_mode=prompt_mode,)
+                               prompt_mode=prompt_mode,
+                               context_token_budget=context_token_budget,
+                               candidate_pool=candidate_pool,
+                               budget_overflow=budget_overflow,)
         if delay > 0:
             time.sleep(delay)
         return idx, qr

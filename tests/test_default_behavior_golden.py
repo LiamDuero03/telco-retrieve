@@ -169,7 +169,7 @@ def _evaluate_golden() -> dict:
     import open_telco_rag.core.pipeline as pipeline_module
     from open_telco_rag.evaluation.evaluate import evaluate_question
     from open_telco_rag.evaluation.questions import EvalQuestion
-    from open_telco_rag.evaluation.results import aggregate
+    from open_telco_rag.evaluation.results import aggregate, question_to_dict
     from open_telco_rag.types import SearchResult
 
     calls: dict = {"search": [], "generate": []}
@@ -211,7 +211,7 @@ def _evaluate_golden() -> dict:
 
     return {
         "calls": calls,
-        "question_results": [_scrub(asdict(r)) for r in results],
+        "question_results": [_scrub(question_to_dict(r)) for r in results],
         "aggregate": _scrub(aggregate(results)),
     }
 
