@@ -1,6 +1,7 @@
 """Unified CLI for Open Telco RAG."""
 
 from __future__ import annotations
+import logging
 import os
 
 os.environ["OMP_NUM_THREADS"] = "8"
@@ -90,6 +91,9 @@ def main(argv: list[str] | None = None) -> None:
         prog="open-telco-rag",
         description="Open RAG pipeline for telecom specifications.",
     )
+    parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], default=None,
+                        help="Optional: configure Python logging at this level (timestamped lines on stderr). "
+                             "Without it, logging behaves as before (warnings only, plain messages).")
     sub = parser.add_subparsers(dest="command")
 
     # ── ingest ────────────────────────────────────────────────────────────────
@@ -342,6 +346,10 @@ def main(argv: list[str] | None = None) -> None:
 
 
     args = parser.parse_args(argv)
+
+    if args.log_level:
+        logging.basicConfig(level=getattr(logging, args.log_level), force=True,
+                            format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
     if not args.command:
         parser.print_help()

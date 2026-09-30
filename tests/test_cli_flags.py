@@ -117,3 +117,27 @@ def test_distance_metric_defaults_to_l2_and_reaches_the_store_from_the_ingest_co
     assert captured["distance_metric"] == "l2"
     cli_main._run_ingest(argparse.Namespace(**base, distance_metric="cosine"))
     assert captured["distance_metric"] == "cosine"
+
+
+# ── --log-level ───────────────────────────────────────────────────────────────
+
+def test_log_level_configures_logging_only_when_given(monkeypatch):
+    import logging
+
+    monkeypatch.setattr(cli_main, "_run_info", lambda args: None)
+    root = logging.getLogger()
+    before = (root.level, list(root.handlers))
+    try:
+        cli_main.main(["info"])
+        assert (root.level, list(root.handlers)) == before          # untouched by default
+        cli_main.main(["--log-level", "DEBUG", "info"])
+        assert root.level == logging.DEBUG and root.handlers
+        assert "%(levelname)s" in root.handlers[0].formatter._fmt
+    finally:
+        root.handlers[:] = before[1]
+        root.setLevel(before[0])
+
+
+def test_log_level_rejects_unknown_levels(capsys):
+    with pytest.raises(SystemExit):
+        cli_main.main(["--log-level", "LOUD", "info"])

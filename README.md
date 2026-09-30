@@ -429,6 +429,7 @@ open-telco-rag evaluate 3gpp \
 | `--candidate-pool` | `30` with a budget | With `--context-token-budget`: candidates to retrieve and rerank before filling the budget. |
 | `--budget-overflow` | `stop` with a budget | With `--context-token-budget`: `stop`, `skip` or `truncate` the first chunk that does not fit. |
 | `--retrieval-only` | `off` | Optional: run retrieval and retrieval metrics only, with no generation, no LLM calls and no API keys needed. Does not update the leaderboard. |
+| `--log-level` | unset | Global option (before the command): configure Python logging at `DEBUG`/`INFO`/`WARNING`/`ERROR` with timestamped lines on stderr. Unset, logging behaves as before. |
 | `--record-retrieval-scores` | `off` | Optional: store the store distance of every retrieved chunk per question (`candidate_distances` / `used_distances`, aligned with the chunk ids). |
 | `--record-judge-responses` | `off` | Optional: store every judge prompt and raw response per question in the results file. |
 
@@ -597,6 +598,21 @@ Generation metrics: `accuracy` (mc/tf exact match; abstentions count as 0 but
 are tracked separately), `faithfulness`, `answer_relevancy`, `context_recall`
 and `answer_correctness` (open questions, LLM-judged; see "How scoring works"
 above).
+
+**Denominators.** Every mean or rate skips the `-1` "not applicable" value, so each
+one is taken over the questions it applies to (and that did not fail):
+
+| Metric | Computed over |
+|--------|---------------|
+| `mean_accuracy` | mc/tf questions that produced an outcome; `accuracy` per question is 1 for correct and 0 for incorrect or abstained |
+| `mean_accuracy_attempted` | correct / (correct + incorrect), abstentions excluded |
+| `abstention_rate`, `wrong_rate` | abstained (resp. incorrect) / all mc/tf outcomes |
+| `weighted_score_pct` | (mc/tf correct + 5 x open correct) / (mc/tf total + 5 x open total) x 100; open questions without a reference answer are left out |
+| `mean_faithfulness`, `mean_answer_relevancy` | open questions that were scored (non-baseline for faithfulness) |
+| `mean_context_recall`, `mean_answer_correctness` | open questions that have a reference answer |
+| `canonical_hit_rate`, `exact_chunk_hit_rate`, span rates | questions where the check applies (value 0 or 1, not -1) |
+| `mean_similarity`, `mean_coverage_ratio`, `mean_distinct_sources_retrieved` | questions that ran retrieval without failing; N/A (-1) if none did |
+| latency, token and cost totals | every question, including failed ones |
 
 **Failed questions.** A question that fails (network error, missing key, ...) is
 recorded with `error` and `error_type` and the run continues. When at least one

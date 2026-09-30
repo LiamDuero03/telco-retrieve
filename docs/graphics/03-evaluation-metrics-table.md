@@ -13,3 +13,19 @@
 | `coverage_ratio` | Retrieval | Retrieval confidence | No | Fraction of retrieved chunks meeting a similarity threshold — low values suggest retrieval settled for weak matches to fill top-k. |
 | `source_coverage` | Retrieval | Source diversity | No | Count of distinct source documents among retrieved chunks — 1 means single-document, no cross-document synthesis. |
 | `canonical_source_hit` | Retrieval | Right-document recall | Yes | Binary: does the question's expected canonical source (e.g. spec number) appear among retrieved chunks? −1 when no canonical source is defined for the question. |
+
+## Optional metrics
+
+Reported only when the run uses the feature or the data supports it; the metrics
+above are always the base set.
+
+| Metric | Evaluation Stage | Optional because | Description |
+|---|---|---|---|
+| `exact_chunk_hit` | Retrieval | needs chunk provenance in the question file | 1 if the exact chunk the question was generated from was retrieved (by chunk id, else by text containment), 0 if not, -1 without provenance. |
+| `candidate_chunk_rank` / `used_chunk_rank`, `mean_reciprocal_rank` | Retrieval | needs chunk provenance | 1-based rank of that chunk before / after reranking (0 = not found); MRR is the mean of 1 / used rank. |
+| `span_hit_at_k`, `span_hit_in_context` | Retrieval | needs an evidence span in the question file (`scripts/add_evidence_spans.py`) | Overlap of a retrieved (resp. budget-filled) chunk with the evidence span; absent without a span, -1 if the collection has no offsets. |
+| `context_tokens`, `n_chunks_used`, `fill_ratio`, `budget_stats` | Retrieval | `--context-token-budget` | How much of the token budget the context used and what the fill did. |
+| `n_errors`, `error_rate`, `errors_by_type` | Run | only when a question failed | Failed questions, excluded from the means and rates above. |
+| `reranker_stats`, `embedder_stats` | Run | reranker / embedder reports counters | Truncation counts, OpenRouter token usage and cost. |
+| `difficulty`, `judge_calls`, `candidate_distances` / `used_distances` | Per question | data has it / `--record-judge-responses` / `--record-retrieval-scores` | Question label; raw judge prompts and responses; store distances of retrieved chunks. |
+
