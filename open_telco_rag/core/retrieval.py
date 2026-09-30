@@ -75,7 +75,7 @@ def fill_context_budget(
     consumed without reaching the budget (candidate_pool too small)
     """
     if overflow not in _OVERFLOW_POLICIES:
-        raise ValueError(f"Unknown budget_overflow policy: {overflow!r}")
+        raise ValueError(f"Unknown budget_overflow policy: {overflow!r} (choose from {_OVERFLOW_POLICIES})")
 
     selected: list[SearchResult] = []
     used = 0

@@ -123,7 +123,7 @@ class OpenRouterEmbedder:
                         err = json_resp["error"]
                         error_msg = err.get("message", "Unknown provider error") if isinstance(err, dict) else str(err)
                         last_error = error_msg
-                        print(f"  [API Error] OpenRouter returned an error: {error_msg}. Retrying...")
+                        print(f"  [API Error] OpenRouter returned an error: {error_msg}. Retrying in {backoff}s...")
                         time.sleep(backoff)
                         backoff *= 2
                         continue

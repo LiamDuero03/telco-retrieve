@@ -591,10 +591,10 @@ def _run_ingest(args) -> None:
     if target_tokens is not None or max_tokens is not None:
         # token sizing: don't inject the char defaults
         if chunk_size is not None or overlap is not None:
-            sys.exit("--target-tokens/--max-tokens cannot be combined with --chunk-size/--overlap; "
+            sys.exit("error: --target-tokens/--max-tokens cannot be combined with --chunk-size/--overlap; "
                      "use token sizing or character sizing, not both.")
         if overlap_tokens is not None and strategy not in ("text_baseline", "sliding_window_tokens"):
-            sys.exit(f"--overlap-tokens is not supported for the {strategy} strategy.")
+            sys.exit(f"error: --overlap-tokens is not supported for the {strategy} strategy.")
         chunk_kwargs["target_tokens"] = target_tokens
         chunk_kwargs["max_tokens"] = max_tokens
         if overlap_tokens is not None:
@@ -602,7 +602,7 @@ def _run_ingest(args) -> None:
         print(f"  Chunk size: TOKENS (target={target_tokens}, max={max_tokens or target_tokens})")
     else:
         if overlap_tokens is not None:
-            sys.exit("--overlap-tokens requires --target-tokens or --max-tokens.")
+            sys.exit("error: --overlap-tokens requires --target-tokens or --max-tokens.")
         chunk_size = 1024 if chunk_size is None else chunk_size
         overlap    = 200 if overlap is None else overlap
         # pull structural constraints from the strategy definition json
