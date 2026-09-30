@@ -109,12 +109,20 @@ class QuestionResult:
     span_hit_at_k:       int | None = None
     span_hit_in_context: int | None = None
 
+    # ── raw retrieval scores (opt-in, record_retrieval_scores): the store distance of every
+    # candidate / used chunk, aligned with candidate_chunk_ids / used_chunk_ids; None otherwise
+    candidate_distances: list | None = None
+    used_distances:      list | None = None
+
     # ── budgeted context (opt-in): None unless context_token_budget was set,
     # and left out of serialized output while None (see question_to_dict)
     context_tokens: int | None = None    # tokens in the chunks actually used
     n_chunks_used:  int | None = None    # chunks fill_context_budget() kept
     budget:         int | None = None    # the context_token_budget for this question
     fill_ratio:     float | None = None  # context_tokens / budget
+    # what the fill did: candidates, kept, skipped, truncated, stopped_by_policy,
+    # pool_exhausted, empty (overflow events); budgeted questions only
+    budget_stats:   dict | None = None
 
     # ── Retrieval metrics: computed for every non-baseline question ──────────
     mean_similarity:  float = 0.0
@@ -531,7 +539,8 @@ def aggregate(question_results: list[QuestionResult]) -> dict:
 
 # opt-in fields: dropped from serialized output while None, so default runs
 # serialize exactly as before
-_OPT_IN_QUESTION_FIELDS = ("context_tokens", "n_chunks_used", "budget", "fill_ratio",
+_OPT_IN_QUESTION_FIELDS = ("context_tokens", "n_chunks_used", "budget", "fill_ratio", "budget_stats",
+                           "candidate_distances", "used_distances",
                            "span_hit_at_k", "span_hit_in_context", "difficulty", "judge_calls")
 _OPT_IN_CORPUS_FIELDS = ("run_record", "n_errors", "error_rate", "errors_by_type", "mean_context_tokens", "mean_fill_ratio",
                          "reranker_stats", "embedder_stats",

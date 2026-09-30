@@ -236,6 +236,9 @@ def main(argv: list[str] | None = None) -> None:
     p_eval.add_argument("--record-judge-responses", action="store_true",
                         help="Optional: store every judge prompt and raw response per question in the "
                              "results file (large: prompts include the retrieved chunks). Off by default.")
+    p_eval.add_argument("--record-retrieval-scores", action="store_true",
+                        help="Optional: store the store distance of every retrieved chunk per question "
+                             "(candidate_distances / used_distances). Off by default.")
     p_eval.add_argument("--threshold",      type=float, default=0.5,
                         help="Similarity threshold for coverage_ratio metric (default: 0.5)")
     p_eval.add_argument("--output",         default="results",
@@ -834,6 +837,7 @@ def _run_evaluate(args) -> None:
             **budget_kwargs,
             **({"retrieval_only": True} if retrieval_only else {}),
             **({"record_judge_calls": True} if getattr(args, "record_judge_responses", False) else {}),
+            **({"record_retrieval_scores": True} if getattr(args, "record_retrieval_scores", False) else {}),
         )
 
         if result.question_results and all(q.error for q in result.question_results):

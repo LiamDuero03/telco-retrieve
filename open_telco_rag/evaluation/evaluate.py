@@ -420,6 +420,7 @@ def _run_retrieval_pass(
     candidate_pool: int | None,
     budget_overflow: str | None,
     result: QuestionResult,
+    record_scores: bool = False,
 ) -> tuple[list, list]:
     """search -> optional rerank -> optional budget fill, filling in result's
     latency / candidate_* / used_* / budget fields. shared by the RAG and
@@ -468,7 +469,9 @@ def _run_retrieval_pass(
         retrieved = retrieved_candidates[:rerank_n]
 
     if budgeted:
-        retrieved = fill_context_budget(retrieved, context_token_budget, budget_overflow)
+        fill_stats: dict = {}
+        retrieved = fill_context_budget(retrieved, context_token_budget, budget_overflow, stats=fill_stats)
+        result.budget_stats = fill_stats
         result.context_tokens = sum(_local_token_count(r.text) for r in retrieved)
         result.n_chunks_used = len(retrieved)
         result.budget = context_token_budget
@@ -477,6 +480,9 @@ def _run_retrieval_pass(
     # chunks handed to the generator (post budget fill when a budget is set)
     result.used_chunk_ids = [getattr(r, "doc_id", None) for r in retrieved]
     result.used_chunk_texts = [getattr(r, "text", "") for r in retrieved]
+    if record_scores:
+        result.candidate_distances = [getattr(r, "distance", None) for r in retrieved_candidates]
+        result.used_distances = [getattr(r, "distance", None) for r in retrieved]
 
     return retrieved_candidates, retrieved
 
@@ -625,8 +631,12 @@ def evaluate_question(
     candidate_pool: int | None = None,
     budget_overflow: str | None = None,
     record_judge_calls: bool = False,
+    record_retrieval_scores: bool = False,
 ) -> QuestionResult:
     """Run all applicable metrics for one question.
+
+    record_retrieval_scores=True: also store the store distance of every candidate
+    and used chunk (candidate_distances / used_distances). Off by default.
 
     record_judge_calls=True: also store every judge prompt/raw response for
     this question in result.judge_calls (open/fill_blank only; mc/tf never
@@ -710,7 +720,7 @@ def evaluate_question(
             retrieved_candidates, retrieved = _run_retrieval_pass(
                 q, store, embedder, search_query, active_question, top_k, reranker, rerank_top_k,
                 search_method, resolve_parents, context_token_budget, candidate_pool, budget_overflow,
-                result,
+                result, record_scores=record_retrieval_scores,
             )
             result.latency = time.perf_counter() - start_time
             result.chunks_used = len(retrieved)
@@ -720,7 +730,7 @@ def evaluate_question(
             retrieved_candidates, retrieved = _run_retrieval_pass(
                 q, store, embedder, search_query, active_question, top_k, reranker, rerank_top_k,
                 search_method, resolve_parents, context_token_budget, candidate_pool, budget_overflow,
-                result,
+                result, record_scores=record_retrieval_scores,
             )
 
             gen_start = time.perf_counter()
@@ -917,6 +927,7 @@ def evaluate_corpus(
     retrieval_only: bool = False,
     record_judge_calls: bool = False,
     run_info: dict | None = None,
+    record_retrieval_scores: bool = False,
 ) -> tuple[CorpusResult, CorpusResult | None]:
     """Run the full evaluation suite for one corpus.
 
@@ -925,7 +936,8 @@ def evaluate_corpus(
     evaluate_question()'s RAG pass only (baseline never retrieves); optional,
     unset = plain top_k path.
 
-    record_judge_calls: passed to evaluate_question() for the RAG pass; off by default.
+    record_judge_calls / record_retrieval_scores: passed to evaluate_question() for the
+    RAG pass; off by default.
 
     run_info: optional caller-supplied identity (e.g. which judge model was used)
     stored under run_record["extra"]; must not contain secrets or private URLs.
@@ -989,7 +1001,8 @@ def evaluate_corpus(
         qr = evaluate_question(q, store, embedder, top_k, sim_threshold,
                                llm_call=llm_call, rag_llm_call=rag_llm_call,
                                baseline=False, retrieval_only=retrieval_only,
-                               record_judge_calls=record_judge_calls, reranker=reranker,
+                               record_judge_calls=record_judge_calls,
+                               record_retrieval_scores=record_retrieval_scores, reranker=reranker,
                                rerank_top_k=rerank_top_k, debug=debug,
                                rag_model_name=resolved_rag_model,
                                rag_generator_name=rag_generator_name,
@@ -1078,6 +1091,7 @@ def evaluate_corpus(
             "generation_top_p": generation_top_p, "rag_max_tokens": rag_max_tokens,
             "prompt_mode": prompt_mode, "max_concurrency": max(1, max_concurrency),
             "record_judge_calls": record_judge_calls,
+            "record_retrieval_scores": record_retrieval_scores,
         },
         embedder=embedder, reranker=reranker, store=store, questions=qs,
         questions_name=questions_source_name, started_at=run_started_at, extra=run_info,

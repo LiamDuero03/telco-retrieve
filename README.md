@@ -429,6 +429,7 @@ open-telco-rag evaluate 3gpp \
 | `--candidate-pool` | `30` with a budget | With `--context-token-budget`: candidates to retrieve and rerank before filling the budget. |
 | `--budget-overflow` | `stop` with a budget | With `--context-token-budget`: `stop`, `skip` or `truncate` the first chunk that does not fit. |
 | `--retrieval-only` | `off` | Optional: run retrieval and retrieval metrics only, with no generation, no LLM calls and no API keys needed. Does not update the leaderboard. |
+| `--record-retrieval-scores` | `off` | Optional: store the store distance of every retrieved chunk per question (`candidate_distances` / `used_distances`, aligned with the chunk ids). |
 | `--record-judge-responses` | `off` | Optional: store every judge prompt and raw response per question in the results file. |
 
 #### How scoring works, per question type
@@ -504,8 +505,9 @@ runs with different chunk sizes can be compared at the same context size:
 `truncate` (cut that chunk to fill the budget exactly). `--top-k` and
 `--rerank-top-k` are ignored in this mode. `--candidate-pool` and
 `--budget-overflow` require a budget; giving either without one is an error.
-Budgeted runs add `context_tokens`, `n_chunks_used`, `budget` and `fill_ratio`
-per question, and `mean_context_tokens` / `mean_fill_ratio` to the totals.
+Budgeted runs add `context_tokens`, `n_chunks_used`, `budget`, `fill_ratio` and
+`budget_stats` (what the fill did: candidates, kept, skipped, truncated, stopped by
+policy, pool exhausted, empty) per question, and `mean_context_tokens` / `mean_fill_ratio` to the totals.
 
 #### Optional: retrieval-only runs
 

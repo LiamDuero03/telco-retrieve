@@ -77,9 +77,14 @@ def fill_context_budget(
     candidates: list[SearchResult],
     budget: int,
     overflow: str = "stop",
+    stats: dict | None = None,
 ) -> list[SearchResult]:
     """Select a prefix of `candidates` (already in rank order) that fits
     within `budget` tokens.
+
+    stats: optional dict filled with what happened: candidates, kept, skipped
+    (left out under "skip"), truncated (last chunk cut), stopped_by_policy,
+    pool_exhausted and empty.
 
     overflow policy, applied at the first candidate that doesn't fit as-is:
       "stop"     - halt immediately, strict rank order (default).
@@ -98,6 +103,8 @@ def fill_context_budget(
     selected: list[SearchResult] = []
     used = 0
     pool_exhausted = True
+    n_skipped = 0
+    truncated = False
 
     for cand in candidates:
         cand_tokens = _count_tokens(cand.text)
@@ -107,12 +114,14 @@ def fill_context_budget(
             continue
 
         if overflow == "skip":
+            n_skipped += 1
             continue
 
         if overflow == "truncate":
             remaining = budget - used
             truncated_text = _truncate_to_tokens(cand.text, remaining)
             if truncated_text:
+                truncated = True
                 selected.append(SearchResult(
                     text=truncated_text, distance=cand.distance,
                     metadata=cand.metadata, doc_id=cand.doc_id,
@@ -137,6 +146,10 @@ def fill_context_budget(
             len(candidates), used, budget,
         )
 
+    if stats is not None:
+        stats.update(candidates=len(candidates), kept=len(selected), skipped=n_skipped, truncated=truncated,
+                     stopped_by_policy=not pool_exhausted, pool_exhausted=pool_exhausted and used < budget,
+                     empty=bool(candidates) and not selected)
     return selected
 
 
