@@ -174,6 +174,9 @@ open-telco-rag ingest oran \
 | `--strategy` | `text_baseline` | Segmentation strategy registered in chunking_strategies.json |
 | `--chunk-size` | `1024` | Chunk size in characters |
 | `--overlap` | `200` | Overlap between chunks in characters |
+| `--target-tokens` | off | Optional: size chunks in tokens instead of characters (see [Token-based chunk sizing](#optional-token-based-chunk-sizing)) |
+| `--max-tokens` | off | Optional: hard cap on tokens per chunk (defaults to `--target-tokens`) |
+| `--overlap-tokens` | off | Optional: token overlap between chunks (`text_baseline` and `sliding_window_tokens` only) |
 | `--enrichment` | `none` | Pre-embedding strategy registry token mapped from enrichment_strategies.json |
 | `--enrichment-model` | `google/qwen-2.5-coder-32b` | Model name to request for the `llm_metadata` enrichment strategy — sent to whichever server `--llm-backend`/`--llm-base-url` point at |
 | `--distance-metric` | `l2` | Vector space index geometry calculation mapping: l2, cosine or ip |
@@ -182,6 +185,7 @@ open-telco-rag ingest oran \
 | `--collection` | `source_model` | Override collection name |
 | `--embed-backend` | `local` | Backend for computing vector embeddings: `local` (CPU/GPU) or `openrouter` (Cloud APIs) |
 | `--batch-size` | 64 / 500 | Parallel payload size. Defaults to 64 locally, or 500 for high-throughput OpenRouter bulk ingestion |
+| `--embed-max-workers` | `10` | OpenRouter embeddings only: in-flight requests per `embed()` call |
 
 Ingest also builds a per-collection SQLite FTS5 BM25 index alongside ChromaDB, enabling `--search-method bm25` and `--search-method hybrid` retrieval.
 
@@ -190,6 +194,76 @@ Ingest also builds a per-collection SQLite FTS5 BM25 index alongside ChromaDB, e
 A failure in purely cosmetic bookkeeping *after* every chunk is already safely stored (writing the resume-progress JSON file, a CSV log row, or a run's `_ingest_complete.json` completion marker) is now isolated from the write-critical path — it's logged as a `[WARN]`, but it can no longer retroactively misreport a fully successful ingest as `[ERROR] Bulk indexing failed` with an inflated `error_files` count. This applies to both `ingest()` and `ingest_multi_enrichment()` — the latter isolates it per enrichment variant, so one variant's marker-write hiccup doesn't take down the reported status of every other variant in the same run.
 
 **Config resolution**: `--strategy`/`--enrichment`'s available choices, and whether a given strategy/enrichment needs an LLM client, are read from `configs/chunking_strategies.json`/`configs/enrichment_strategies.json` relative to the installed package location as a fallback if no local `configs/` directory is found relative to the current working directory — so these are no longer silently degraded (to `text_baseline`-only / `none`-only, with LLM-requiring strategies going undetected) when the CLI isn't run from the exact repository root.
+
+### Optional: token-based chunk sizing
+
+By default every strategy sizes chunks in **characters** (`--chunk-size`,
+`--overlap`; `parent_size`/`child_size` for `parent_child`;
+`chunk_tokens`/`overlap_tokens` for `sliding_window_tokens`), exactly as
+before. Token sizing is opt-in and works for all five strategies:
+
+```bash
+open-telco-rag ingest 3gpp --model bge --strategy hierarchical_markdown \
+  --target-tokens 256 --max-tokens 320
+```
+
+- `--target-tokens` is the size to aim for; `--max-tokens` is a hard cap
+  (defaults to `--target-tokens`). Either one switches the run to token
+  sizing. Tokens are counted with `cl100k_base`.
+- Every chunk is an exact slice of the cleaned source text, and the ingest
+  metadata of token-sized chunks additionally stores `char_start`, `char_end`
+  and `n_tokens` (used by the span metrics below). Default ingests store
+  exactly the metadata they always did.
+- Combining token sizing with a character size (`--chunk-size`, `--overlap`,
+  `parent_size`, `child_size`, or `chunk_tokens` for `sliding_window_tokens`)
+  is an error rather than a silent choice. `max_tokens` must be at least
+  `target_tokens`.
+- `parent_child`: `target_tokens` sizes the child chunks (parents default to
+  4x), so `max_tokens` bounds the retrieved chunk.
+- The tokenizer is only initialized when token sizing is used.
+
+```python
+from open_telco_rag.core.chunking import chunk_document
+chunks = chunk_document(text, "text_baseline", target_tokens=200, max_tokens=256)
+```
+
+### Embedding models and prefixes
+
+`--model` takes any key from `configs/embedding_models.json`. Besides the
+original keys (`minilm`, `mpnet`, `e5`, `bge`, `otel-*`, `or-*`) the registry
+includes:
+
+| Key | Model | Notes |
+|-----|-------|-------|
+| `bge-m3` | BAAI/bge-m3 | local; no prefix needed |
+| `qwen3-embedding-0.6b` | Qwen/Qwen3-Embedding-0.6B | local; instruction-style query prefix |
+| `embeddinggemma-300m` | google/embeddinggemma-300m | local; uses the model's named prompts (`Retrieval-query` / `Retrieval-document`) |
+| `qwen3-embedding-8b` | qwen/qwen3-embedding-8b | served through OpenRouter (`--embed-backend openrouter`, needs `OPENROUTER_API_KEY`), 4096 dims, instruction-style query prefix |
+| `e5-prefixed` | intfloat/e5-large-v2 | opt-in variant of `e5` with `query: ` / `passage: ` prefixes |
+| `bge-prefixed` | BAAI/bge-large-en-v1.5 | opt-in variant of `bge` with BGE's query instruction |
+
+```bash
+export OPENROUTER_API_KEY=...            # your key; never commit it
+open-telco-rag ingest 3gpp --model qwen3-embedding-8b --embed-backend openrouter
+open-telco-rag evaluate 3gpp --model qwen3-embedding-8b --embed-backend openrouter
+```
+
+Prefixes are configured per registry entry (`query_prefix`,
+`document_prefix`, or `query_prompt_name`/`document_prompt_name`); entries
+without them embed text unchanged. The plain `e5` and `bge` keys keep their
+original behavior (no prefixes), so existing indexes still match.
+
+**An index built with a key must be queried with the same key.** Documents and
+queries are embedded with that key's prefixes, so `e5` and `e5-prefixed`
+produce different, incompatible vectors even though the underlying model is the
+same (they also get different collection names). Metrics that compare two
+plain texts (answer relevancy, answer correctness) never use prefixes, whatever
+the key.
+
+`SentenceTransformerEmbedder(track_truncation=True)` (off by default) counts
+texts longer than the model's `max_seq_length` and reports them in the
+evaluation results. OpenRouter embedders report token usage and cost when the
+API returns it.
 
 ### LLM-based chunking and enrichment
 
@@ -268,6 +342,12 @@ open-telco-rag ask "What does TS 28.312 define for intent?" \
 | `otel-reranker-0.6b` | OTel-Reranker-0.6B | Telecom-domain fine-tuned (recommended) |
 | `otel-reranker-4b` | OTel-Reranker-4B | Higher accuracy, requires GPU |
 
+The `otel-*` rerankers truncate the query and each document to 512 / 1024
+characters before scoring (unchanged default). A registry entry can override
+this with optional `query_max_chars` / `doc_max_chars` keys; truncation counts
+are written to the evaluation results (`reranker_stats`) when the reranker
+reports them.
+
 ### Evaluate options
 
 ```bash
@@ -327,6 +407,12 @@ open-telco-rag evaluate 3gpp \
 | `--run-name` | `None` | Custom label to identify this evaluation run (e.g., `exp_prompt_v2`). |
 | `--include-keywords` | `off` | Append question keywords to the search query. |
 | `--resolve-parents` | `off` | Expand retrieved child chunks into full parent contexts. |
+| `--search-method` | `dense` | Retrieval method: `dense`, `bm25` or `hybrid` (same choices as `search`/`ask`). |
+| `--context-token-budget` | off | Optional: fill the generator's context up to this many tokens instead of a fixed chunk count (see below). |
+| `--candidate-pool` | `30` with a budget | With `--context-token-budget`: candidates to retrieve and rerank before filling the budget. |
+| `--budget-overflow` | `stop` with a budget | With `--context-token-budget`: `stop`, `skip` or `truncate` the first chunk that does not fit. |
+| `--retrieval-only` | `off` | Optional: run retrieval and retrieval metrics only, with no generation, no LLM calls and no API keys needed. Does not update the leaderboard. |
+| `--record-judge-responses` | `off` | Optional: store every judge prompt and raw response per question in the results file. |
 
 #### How scoring works, per question type
 
@@ -359,6 +445,67 @@ formats, and get an accuracy figure for `mc`, a separate accuracy figure
 for `tf`, and separate faithfulness/relevancy/context-recall/correctness
 figures for `open`, rather than one flat number across everything. Also
 saved in the leaderboard row (`by_format` column) and the JSON output file.
+
+#### Optional: budgeted context
+
+By default the generator receives the top `--top-k` chunks (or
+`--rerank-top-k` after reranking). With `--context-token-budget N` the
+context is instead filled in rank order up to `N` tokens (`cl100k_base`), so
+runs with different chunk sizes can be compared at the same context size:
+`--candidate-pool` candidates are retrieved (and reranked) first, then
+`--budget-overflow` decides what happens at the first chunk that does not fit:
+`stop` (strict rank order), `skip` (keep looking for smaller chunks) or
+`truncate` (cut that chunk to fill the budget exactly). `--top-k` and
+`--rerank-top-k` are ignored in this mode. `--candidate-pool` and
+`--budget-overflow` require a budget; giving either without one is an error.
+Budgeted runs add `context_tokens`, `n_chunks_used`, `budget` and `fill_ratio`
+per question, and `mean_context_tokens` / `mean_fill_ratio` to the totals.
+
+#### Optional: retrieval-only runs
+
+`--retrieval-only` skips answer generation and judging, so it is cheap and
+needs no LLM key. Retrieval (reranker and budget respected) and every
+retrieval metric are computed; accuracy and the four LLM-judged metrics stay
+at their "not applicable" value. With `--include-baseline` the baseline pass
+still runs normally (and then needs LLM access).
+
+#### Metrics reference
+
+Retrieval metrics (computed for every non-baseline question):
+
+| Metric | Meaning |
+|--------|---------|
+| `mean_similarity`, `min_similarity`, `max_similarity` | Similarity of the retrieved chunks to the query (`exp(-distance)`). |
+| `coverage_ratio` | Fraction of retrieved chunks with similarity at or above `--threshold`. |
+| `distinct_sources_retrieved` | Number of distinct source documents among the retrieved chunks. |
+| `canonical_hit` | 1 if the question's expected source (and release, if given) appears in a retrieved chunk's metadata or id, 0 if not, -1 when the question has no (or only a too-generic) canonical source. |
+| `exact_chunk_hit` | 1 if the exact chunk the question was generated from was retrieved (matched by chunk id, or by text containment across configurations), 0 if not, -1 without chunk provenance. |
+| `candidate_chunk_rank`, `used_chunk_rank` | 1-based rank of that chunk before / after reranking; 0 = not found, -1 = not applicable. The corpus-level `mean_reciprocal_rank` is the mean of `1/used_chunk_rank` (0 when not found) over questions with provenance. |
+| `span_hit_at_k`, `span_hit_in_context` | Chunker-agnostic companions to `exact_chunk_hit`: 1 if any retrieved chunk (respectively any chunk placed in the budgeted context) overlaps the question's evidence span, 0 if none does. See the three states below. |
+
+**Span metrics have three states.** They are computed only for questions that
+carry an evidence span (`evidence_doc_id`, `evidence_char_start`,
+`evidence_char_end` in the question file):
+
+- absent (`None`, left out of the result files and totals): the question has no
+  evidence span, so the metric does not apply. Runs without any spans report
+  no span metrics at all.
+- `-1`: the question has a span, but no retrieved chunk carries character
+  offsets (the collection was ingested without `--target-tokens` /
+  `--max-tokens`), so it cannot be checked.
+- `0` or `1`: a real result.
+
+The `span_hit_*_rate` totals are the mean over questions with a real value.
+
+Generation metrics: `accuracy` (mc/tf exact match; abstentions count as 0 but
+are tracked separately), `faithfulness`, `answer_relevancy`, `context_recall`
+and `answer_correctness` (open questions, LLM-judged; see "How scoring works"
+above). A question that fails is recorded with `error` and `error_type`.
+
+Optional per-question fields (`difficulty`, the span and budget fields,
+`judge_calls`) appear in result files only when they were set. Run-level
+`reranker_stats` and `embedder_stats` (truncation counts, OpenRouter token
+usage and cost) appear only when the components report them.
 
 ---
 
@@ -489,6 +636,8 @@ open-telco-rag/
 │   ├── sources/                 # one class per SDO
 │   ├── embedders/
 │   │   ├── sentense_transformers.py
+│   │   ├── openrouter_embedder.py
+│   │   ├── calls.py             # embed_query / embed_plain helpers
 │   │   └── reranker.py          # CrossEncoderReranker, OTelReranker
 │   ├── generators/
 │   │   ├── claude.py
@@ -505,6 +654,9 @@ open-telco-rag/
 │       └── chroma.py
 ├── cli/
 │   └── main.py
+├── scripts/                     # helper tools (embedder smoke test, cost estimate, throughput timing)
+├── docs/graphics/               # pipeline diagrams and tables
+├── tests/                       # pytest suite (incl. golden default-behavior tests)
 ├── notebooks/                   # quickstart cookbook
 ├── configs/
 │   ├── embedding_models.json    # embedder registry
@@ -514,6 +666,35 @@ open-telco-rag/
 │   └── eval_questions/          # evaluation question sets per corpus
 └── pyproject.toml
 ```
+
+---
+
+## Helper scripts
+
+Small tools in `scripts/` (run from the repository root, after `pip install -e .`):
+
+| Script | Purpose |
+|--------|---------|
+| `embedder_smoke_test.py` | Embed a few sample texts with every locally hosted embedder and report dimension, throughput and truncation. |
+| `estimate_embedding_cost.py` | Estimate what re-embedding a collection would cost through OpenRouter (prices are a dated snapshot; `--refresh-pricing` fetches live ones). |
+| `time_embedding_throughput.py` | Measure local embedding throughput on real chunk texts from an existing collection. |
+| `time_openrouter_embedding.py` | Same for OpenRouter. Makes real, paid API calls, so keep `--sample-size` small. |
+
+Each supports `--help`.
+
+## Testing
+
+```bash
+pip install -e ".[dev,local-embed,pdf,docx,cloud-embed]"
+pytest
+```
+
+`tests/test_default_behavior_golden.py` and `tests/test_ingest_metadata_golden.py`
+pin the output of the default settings (chunking, retrieval, evaluation
+results, stored chunk metadata) against files in `tests/golden/`. They should
+only ever change when a default is changed on purpose; regenerate with
+`python tests/test_default_behavior_golden.py --write` (and the ingest
+equivalent) in that case.
 
 ---
 
@@ -548,7 +729,10 @@ Add an entry to `configs/embedding_models.json`:
 }
 ```
 
-Then use `--model my-model` in any CLI command.
+Optional keys: `query_prefix` / `document_prefix` (plain strings prepended to
+queries / documents), `query_prompt_name` / `document_prompt_name`
+(sentence-transformers named prompts) and `"backend": "openrouter"` (marks an
+entry served through OpenRouter). Then use `--model my-model` in any CLI command.
 
 ### Adding a new reranker
 
