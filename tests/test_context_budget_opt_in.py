@@ -18,7 +18,7 @@ import pytest
 import tiktoken
 
 import open_telco_rag.core.pipeline as pipeline_module
-from open_telco_rag.core import retrieval
+from open_telco_rag.core import chunking
 from open_telco_rag.core.retrieval import execute_retrieval, resolve_budget_args
 from open_telco_rag.evaluation.evaluate import evaluate_corpus, evaluate_question
 from open_telco_rag.evaluation.questions import EvalQuestion
@@ -69,7 +69,7 @@ def test_default_retrieval_never_initializes_the_tokenizer(monkeypatch):
         raise AssertionError("tiktoken.get_encoding called without a budget")
 
     monkeypatch.setattr(tiktoken, "get_encoding", boom)
-    monkeypatch.setattr(retrieval, "_ENCODING_CACHE", {})
+    monkeypatch.setattr(chunking, "_ENCODING_CACHE", {})
     assert execute_retrieval("q", _Store(), _Embedder(), top_k=3)
 
 

@@ -4,32 +4,16 @@ from __future__ import annotations
 import logging
 import math
 from typing import Any
-import tiktoken
+from open_telco_rag.core.chunking import _count_tokens, _get_encoding
 from open_telco_rag.embedders.calls import embed_query
 from open_telco_rag.types import SearchResult, Embedder
 from open_telco_rag.stores.fts import FTSStore
 
 logger = logging.getLogger(__name__)
 
-# same encoding as core/chunking.py; created lazily so the default (no budget)
-# path never initializes a tokenizer
-_ENCODING_CACHE: dict[str, Any] = {}
-
 DEFAULT_CANDIDATE_POOL = 30
 DEFAULT_BUDGET_OVERFLOW = "stop"
 _OVERFLOW_POLICIES = ("stop", "skip", "truncate")
-
-
-def _get_encoding() -> Any:
-    enc = _ENCODING_CACHE.get("cl100k_base")
-    if enc is None:
-        enc = tiktoken.get_encoding("cl100k_base")
-        _ENCODING_CACHE["cl100k_base"] = enc
-    return enc
-
-
-def _count_tokens(text: str) -> int:
-    return len(_get_encoding().encode(text)) if text else 0
 
 
 def _truncate_to_tokens(text: str, max_tokens: int) -> str:

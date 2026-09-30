@@ -59,7 +59,12 @@ def test_token_chunking_and_budget_fill_use_the_patched_encoding(monkeypatch):
 
     assert chunks and kept
     assert set(calls) == {"cl100k_base"}
-    assert 1 <= len(calls) <= 2, "each call site creates the encoding once, then reuses it"
+    assert calls == ["cl100k_base"], "chunking and retrieval share one lazily created encoding"
+
+
+def test_retrieval_counts_tokens_with_the_chunking_helper():
+    assert retrieval._count_tokens is chunking._count_tokens
+    assert retrieval._get_encoding is chunking._get_encoding
 
 
 def test_a_fake_tokenizer_changes_the_token_counts(monkeypatch):

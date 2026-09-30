@@ -62,7 +62,8 @@ def _accumulate_chunks(
 # ── Token-aware helpers (shared by the target_tokens/max_tokens code paths) ──
 # All token counting uses cl100k_base, same encoding as the pre-existing
 # sliding_window_tokens strategy, so counts are comparable across strategies.
-# encoding is created lazily so default char paths never init a tokenizer
+# the encoding is created lazily (default char paths never load a tokenizer) and is
+# shared with core/retrieval.py for budgeted context assembly
 _ENCODING_CACHE: dict[str, Any] = {}
 
 
