@@ -34,38 +34,28 @@ class SentenceTransformerEmbedder:
         self._model_name  = available[model_key]["model_name"]
         self._dimensions  = available[model_key]["dimensions"]
         self._description = available[model_key].get("description", "")
-        # Plain string prefixes (e.g. e5's "query: "/"passage: ", Qwen3-
-        # Embedding's instruction-style query prefix) applied only when set
-        # -- every entry without these keys embeds exactly as before.
+        # plain string prefixes, applied only when set
         self._query_prefix    = available[model_key].get("query_prefix")
         self._document_prefix = available[model_key].get("document_prefix")
-        # SBERT prompt_name mechanism (e.g. EmbeddingGemma's named prompts,
-        # resolved from the model's OWN config, not a literal string here)
-        # -- mutually independent of the plain-prefix keys above; a model
-        # entry uses one mechanism or the other, never both.
+        # sbert prompt_name resolved from the model's own config; an entry uses
+        # either this or the plain prefixes, never both
         self._query_prompt_name    = available[model_key].get("query_prompt_name")
         self._document_prompt_name = available[model_key].get("document_prompt_name")
         self._model       = None
         self._first_embed_done = False
-        # opt-in: with track_truncation=True every embed() also tokenizes the
-        # texts to count how many exceed max_seq_length (they get silently
-        # truncated by the model otherwise); see truncation_rate below.
-        # off by default: the extra tokenization pass costs time.
+        # off by default: counting truncation tokenizes every batch a second time
         self.track_truncation = track_truncation
         self.truncated_count = 0
         self.scored_count    = 0
 
     @property
     def max_seq_length(self) -> int | None:
-        """The loaded model's max_seq_length (tokens), or None before the
-        first embed() call (the model isn't loaded yet)."""
+        """None until the first embed() loads the model"""
         return getattr(self._model, "max_seq_length", None) if self._model is not None else None
 
     @property
     def truncation_rate(self) -> float:
-        """Fraction of texts embedded so far whose true token length
-        exceeded max_seq_length. 0.0 if nothing has been embedded yet, or if
-        the length check itself isn't available for this model."""
+        """share of checked texts longer than max_seq_length; 0.0 before any check"""
         return (self.truncated_count / self.scored_count) if self.scored_count else 0.0
 
     @property
@@ -111,11 +101,8 @@ class SentenceTransformerEmbedder:
                   f"in {time.perf_counter() - load_start:.1f}s")
 
     def _record_length_check(self, texts: list[str]) -> None:
-        """Best-effort: counts how many of `texts` will be silently
-        truncated by the model (true token length > max_seq_length), warns
-        once per embed() call if any are, and accumulates into
-        truncated_count/scored_count. Never raises -- not every
-        SentenceTransformer backend exposes a HF-style .tokenizer.encode()."""
+        """count texts the model will silently truncate and warn once per call;
+        never raises (not every backend exposes tokenizer.encode)"""
         if not self.track_truncation:
             return
         max_len = getattr(self._model, "max_seq_length", None)
@@ -148,10 +135,8 @@ class SentenceTransformerEmbedder:
         import torch
         self._load()
 
-        # Length-checked/embedded AFTER the prefix is applied -- the prefix's
-        # own tokens count against max_seq_length too (matters most for
-        # Qwen3-Embedding's fairly long instruction-style query prefix).
-        # apply_prefix=False (text-vs-text metrics): no prefix / prompt at all
+        # the prefix counts against max_seq_length, so check length after applying it;
+        # apply_prefix=False (text-vs-text metrics) means no prefix or prompt at all
         if apply_prefix:
             texts = self._apply_prefix(texts, is_query)
         self._record_length_check(texts)

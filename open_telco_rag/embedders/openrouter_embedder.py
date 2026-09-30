@@ -19,11 +19,9 @@ class OpenRouterEmbedder:
         models_file: str | Path = Path(__file__).parent.parent.parent / "configs" / "embedding_models.json",
         # kept low to stay under OpenAI's per-request payload limit
         batch_size: int = 200,
-        # in-flight batch requests; exposed (not just a local default) so
-        # calibration/throughput runs can compare concurrency levels using
-        # this exact code path instead of a bespoke harness.
+        # in-flight batch requests; a parameter so the throughput scripts can vary it
         max_workers: int = 10,
-        # per-request timeout in seconds; a stalled connection used to block forever
+        # per-request timeout, seconds
         timeout: float = 120.0,
     ):
         models_file = Path(models_file)
@@ -42,9 +40,7 @@ class OpenRouterEmbedder:
         self.batch_size   = batch_size
         self.max_workers  = max_workers
         self.timeout      = timeout
-        # Plain string prefixes (e.g. qwen3-embedding-8b's instruction-style
-        # query prefix) applied only when set -- see SentenceTransformerEmbedder
-        # for the same mechanism used on the local-serving side.
+        # plain string prefixes, applied only when set
         self._query_prefix    = available[model_key].get("query_prefix")
         self._document_prefix = available[model_key].get("document_prefix")
         
@@ -59,10 +55,8 @@ class OpenRouterEmbedder:
         adapter = HTTPAdapter(pool_connections=20, pool_maxsize=20)
         self.session.mount('https://', adapter)
 
-        # Real usage accounting from OpenRouter's own response body (not a
-        # local token/price estimate) -- accumulated across every embed()
-        # call this instance makes; process_batch() updates these under
-        # _usage_lock since batches run concurrently.
+        # usage as reported in OpenRouter's response body, summed over embed() calls;
+        # updated under _usage_lock because batches run concurrently
         self.total_prompt_tokens = 0
         self.total_cost_usd = 0.0
         self._usage_lock = threading.Lock()

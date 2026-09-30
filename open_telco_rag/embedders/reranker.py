@@ -138,9 +138,8 @@ class OTelReranker:
 
     @property
     def truncation_rate(self) -> float:
-        """Fraction of documents scored so far that were cut down to
-        doc_max_chars (or whose query was cut to query_max_chars). 0.0 if
-        nothing has been scored yet."""
+        """share of scored documents cut to doc_max_chars (or scored with a query cut to
+        query_max_chars); 0.0 before anything is scored"""
         return (self.truncated_count / self.scored_count) if self.scored_count else 0.0
 
     def _load(self):
