@@ -70,6 +70,7 @@
     },
     "qwen3-embedding-8b": {
         "model_name": "qwen/qwen3-embedding-8b",
+        "backend": "openrouter",
         "dimensions": 4096,
         "description": "Qwen3 embedding series, 8B params — largest Qwen3 embedding variant. Served via OpenRouter (--embed-backend openrouter), not local sentence-transformers, unlike qwen3-embedding-0.6b (verified live 2026-09-29: OpenRouter routes to DeepInfra, returns 4096-dim vectors, no Matryoshka truncation applied)",
         "query_prefix": "Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: "
