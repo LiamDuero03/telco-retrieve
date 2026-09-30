@@ -1094,7 +1094,8 @@ def evaluate_corpus(
             "record_retrieval_scores": record_retrieval_scores,
         },
         embedder=embedder, reranker=reranker, store=store, questions=qs,
-        questions_name=questions_source_name, started_at=run_started_at, extra=run_info,
+        questions_name=(run_info or {}).get("questions_file") or questions_source_name,
+        started_at=run_started_at, extra=run_info,
     )
     rag_result.reranker_stats = _reranker_stats(reranker)
     rag_result.embedder_stats = _embedder_stats(embedder)

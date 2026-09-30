@@ -188,3 +188,8 @@ def test_a_missing_or_corrupt_sidecar_is_just_absent(tmp_path):
     (tmp_path / ".ingest_settings_bad.json").write_text("{not json", encoding="utf8")
     assert read_index_settings(tmp_path, "bad") is None
     assert read_index_settings(None, None) is None
+
+
+def test_the_questions_file_name_from_the_caller_is_recorded_not_a_path(monkeypatch, tmp_path):
+    _, saved = _evaluate(monkeypatch, tmp_path, run_info={"questions_file": "my_questions.json"})
+    assert saved["run_record"]["dataset"]["questions_file"] == "my_questions.json"

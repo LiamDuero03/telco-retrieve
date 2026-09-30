@@ -839,7 +839,10 @@ def _run_evaluate(args) -> None:
             inject_metadata   = args.inject_metadata,
             include_keywords  = getattr(args, "include_keywords", False),
             run_info          = {"judge": {"generator": args.generator, "model": args.generator_model},
-                                 "embed_backend": embed_backend},
+                                 "embed_backend": embed_backend,
+                                 # file name only, never the path
+                                 **({"questions_file": Path(args.questions_file).name}
+                                    if getattr(args, "questions_file", None) else {})},
             search_method=getattr(args, "search_method", "dense"),
             resolve_parents   = getattr(args, "resolve_parents", False),
             **budget_kwargs,
