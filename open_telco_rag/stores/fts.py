@@ -59,6 +59,22 @@ class FTSStore:
         )
         conn.commit()
 
+    def existing_hashes(self) -> dict[str, int]:
+        """doc_id -> hash of its text for every indexed row; hashes are only comparable within one process"""
+        return {doc_id: hash(text) for doc_id, text in self._get_conn().execute("SELECT doc_id, text FROM bm25_index")}
+
+    def remove_exact_duplicates(self) -> tuple[int, int]:
+        """delete rows that repeat both the doc_id and the text of an earlier row (left by an ingest that was
+        killed and resumed). returns (rows removed, doc_ids still repeated with different text, left alone)"""
+        conn = self._get_conn()
+        total, distinct = conn.execute("SELECT COUNT(*), COUNT(DISTINCT doc_id) FROM bm25_index").fetchone()
+        if total == distinct:
+            return 0, 0
+        conn.execute("DELETE FROM bm25_index WHERE rowid NOT IN (SELECT MIN(rowid) FROM bm25_index GROUP BY doc_id, text)")
+        conn.commit()
+        left, distinct = conn.execute("SELECT COUNT(*), COUNT(DISTINCT doc_id) FROM bm25_index").fetchone()
+        return total - left, left - distinct
+
     def search(self, query: str, top_k: int = 5) -> list[tuple[str, float]]:
         """Instant O(terms) BM25 lookup returning a list of (doc_id, score) tuples."""
         if not self.db_path.exists():

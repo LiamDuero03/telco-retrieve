@@ -178,6 +178,12 @@ def _record_index_settings(store: Any, fingerprint: str, settings: dict) -> None
         print(f"\n[WARN] Could not record the index settings ({e}); the ingest itself succeeded.")
 
 
+def _unseen(ids: list[str], texts: list[str], seen: dict[str, int]) -> tuple[list[str], list[str]]:
+    """the (id, text) pairs not already in the BM25 index with the same text"""
+    new = [(i, t) for i, t in zip(ids, texts) if seen.get(i) != hash(t)]
+    return [i for i, _ in new], [t for _, t in new]
+
+
 def _write_progress(progress_file: Path, fingerprint: str, settings: dict, completed: set[str]) -> None:
     progress_file.write_text(json.dumps(
         {"version": 2, "fingerprint": fingerprint, "settings": settings, "completed": sorted(completed)}
@@ -386,8 +392,19 @@ def ingest(
     store_col  = getattr(store, "collection_name", "documents")
     fts_store  = FTSStore(path=store_path, collection_name=store_col)
 
+    fts_seen: dict[str, int] = {}
     if not resume:
         fts_store.clear()
+    else:
+        # a run that was killed after some FTS writes but before the matching Chroma writes would
+        # otherwise insert those rows a second time
+        removed, repeated = fts_store.remove_exact_duplicates()
+        if removed:
+            print(f"\n[INFO] Removed {removed} repeated BM25 rows (same chunk id and text) left by an earlier interrupted run.")
+        if repeated:
+            print(f"\n[WARN] {repeated} BM25 rows repeat a chunk id with different text (chunks from different "
+                  f"settings); they were left in place. Rebuild the collection with --no-resume to remove them.")
+        fts_seen = fts_store.existing_hashes()
 
     max_workers = max(1, (os.cpu_count() or 2) - 1)
     
@@ -518,7 +535,7 @@ def ingest(
                         ids[start:end], embeds[start:end], texts[start:end], metas[start:end],
                     ))
                     db_futures.append(db_writer.submit(
-                        _locked_add, fts_lock, fts_store.add, ids[start:end], texts[start:end],
+                        _locked_add, fts_lock, fts_store.add, *_unseen(ids[start:end], texts[start:end], fts_seen),
                     ))
                 dispatched += n
                 flush_marks.append((dispatched, db_futures[first_future:]))
