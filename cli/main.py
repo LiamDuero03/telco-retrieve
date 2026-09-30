@@ -72,6 +72,10 @@ def _enrichment_requires_llm(enrichment: str) -> bool:
     except Exception:
         return False
 
+# exit status of `evaluate` when every question of a corpus failed (1 stays "error")
+EXIT_ALL_QUESTIONS_FAILED = 3
+
+
 def main(argv: list[str] | None = None) -> None:
     # Force UTF-8 so emoji don't crash cp1252 consoles.
     if hasattr(sys.stdout, "reconfigure"):
@@ -779,6 +783,8 @@ def _run_evaluate(args) -> None:
 
     corpora = SUPPORTED_CORPORA if args.corpus == "all" else [args.corpus]
 
+    failed_corpora: list[str] = []
+
     for corpus in corpora:
         collection = args.collection if len(corpora) == 1 else None
         store      = _get_store(corpus, args.model, args.db_path, collection=collection)
@@ -828,7 +834,15 @@ def _run_evaluate(args) -> None:
             **({"record_judge_calls": True} if getattr(args, "record_judge_responses", False) else {}),
         )
 
-        if retrieval_only and not args.no_leaderboard:
+        if result.question_results and all(q.error for q in result.question_results):
+            # nothing was evaluated: say so, keep the saved results, skip the leaderboard row
+            failed_corpora.append(corpus)
+            print(f"\n[ERROR] Every one of the {len(result.question_results)} questions failed for "
+                  f"{corpus.upper()} (see the per-question errors above); no metrics were computed. "
+                  f"Results were still saved.", file=sys.stderr)
+            if not args.no_leaderboard:
+                print("  Leaderboard not updated.")
+        elif retrieval_only and not args.no_leaderboard:
             print("\n  Leaderboard not updated (retrieval-only runs have no generation metrics).")
         elif not args.no_leaderboard:
             _update_leaderboard(
@@ -849,6 +863,9 @@ def _run_evaluate(args) -> None:
                 run_name         = getattr(args, "run_name", None),
                 **budget_kwargs,
             )
+
+    if failed_corpora:
+        sys.exit(EXIT_ALL_QUESTIONS_FAILED)
 
 
 

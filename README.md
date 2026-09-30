@@ -566,7 +566,18 @@ fields work as before and simply produce no span metrics.
 Generation metrics: `accuracy` (mc/tf exact match; abstentions count as 0 but
 are tracked separately), `faithfulness`, `answer_relevancy`, `context_recall`
 and `answer_correctness` (open questions, LLM-judged; see "How scoring works"
-above). A question that fails is recorded with `error` and `error_type`.
+above).
+
+**Failed questions.** A question that fails (network error, missing key, ...) is
+recorded with `error` and `error_type` and the run continues. When at least one
+question failed, the results add `n_errors`, `error_rate` and `errors_by_type`
+(also per answer type), and the summary prints a "FAILED questions" line; runs
+with no failures do not have these keys. Failed questions are excluded from the
+retrieval means (`mean_similarity`, coverage, distinct sources) and from every
+rate, so a failure never counts as a score of zero; `n_questions` still includes
+them. If **every** question of a corpus fails, `evaluate` still saves the results
+but prints an error, skips the leaderboard row and exits with status **3**
+(status 1 stays "the command itself failed"); partial failures exit 0.
 
 Optional per-question fields (`difficulty`, the span and budget fields,
 `judge_calls`) appear in result files only when they were set. Run-level

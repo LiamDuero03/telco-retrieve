@@ -194,6 +194,12 @@ class CorpusResult:
     span_hit_in_context_rate: float | None = None
     mean_coverage_ratio:   float = -1.0
 
+    # ── failed questions (only present when at least one question failed): count,
+    # share of n_questions and a breakdown by exception type
+    n_errors:       int | None = None
+    error_rate:     float | None = None
+    errors_by_type: dict | None = None
+
     # ── run-level component stats (opt-in): only set when the reranker/embedder
     # exposes counters (OTel reranker truncation, embedder truncation tracking,
     # OpenRouter usage); None, and omitted from saved output, otherwise
@@ -301,8 +307,9 @@ def _aggregate_one_format(results: list[QuestionResult]) -> dict:
     span_ic = [r for r in results if r.span_hit_in_context is not None and r.span_hit_in_context >= 0]
     entry = {
         "n":                    len(results),
-        "mean_similarity":      _mean([r.mean_similarity for r in results]),
-        "mean_distinct_sources_retrieved": _mean([float(r.distinct_sources_retrieved) for r in results]),
+        "mean_similarity":      _mean([r.mean_similarity for r in _retrieval_population(results)]),
+        "mean_distinct_sources_retrieved": _mean(
+            [float(r.distinct_sources_retrieved) for r in _retrieval_population(results)]),
         "canonical_hit_rate":   (sum(r.canonical_hit for r in canonical) / len(canonical)
                                   if canonical else -1.0),
         "n_canonical_source_non_discriminating": sum(
@@ -310,8 +317,9 @@ def _aggregate_one_format(results: list[QuestionResult]) -> dict:
         ),
         "exact_chunk_hit_rate": (sum(r.exact_chunk_hit for r in exact_chunk) / len(exact_chunk)
                                   if exact_chunk else -1.0),
-        "mean_coverage_ratio":  _mean([r.coverage_ratio for r in results]),
+        "mean_coverage_ratio":  _mean([r.coverage_ratio for r in _retrieval_population(results)]),
     }
+    entry.update({k: v for k, v in _error_summary(results).items() if k != "errors_by_type"})
     # opt-in keys: only when some question in this group has an evidence span
     if any(r.span_hit_at_k is not None for r in results):
         entry["span_hit_at_k_rate"] = (sum(r.span_hit_at_k for r in span_ak) / len(span_ak)
@@ -430,8 +438,33 @@ def _weighted_score_pct(question_results: list[QuestionResult]) -> float:
     return (numerator / denominator) * 100
 
 
+def _error_summary(results: list[QuestionResult]) -> dict:
+    """{} when nothing failed, else count / rate / breakdown by exception type"""
+    errored = [r for r in results if r.error]
+    if not errored:
+        return {}
+    by_type: dict[str, int] = {}
+    for r in errored:
+        by_type[r.error_type or "Unknown"] = by_type.get(r.error_type or "Unknown", 0) + 1
+    return {"n_errors": len(errored), "error_rate": len(errored) / len(results),
+            "errors_by_type": dict(sorted(by_type.items()))}
+
+
+def _retrieval_population(results: list[QuestionResult]) -> list[QuestionResult]:
+    """questions whose retrieval metrics are real numbers. a failed question keeps
+    the 0.0 defaults of its retrieval fields, which are not scores and must not
+    dilute the means; identical to `results` when nothing failed"""
+    return [r for r in results if not r.error]
+
+
 def aggregate(question_results: list[QuestionResult]) -> dict:
-    """Compute aggregate metrics from a list of QuestionResults."""
+    """Compute aggregate metrics from a list of QuestionResults.
+
+    Failed questions (error != "") are counted in n_errors / error_rate /
+    errors_by_type (present only when something failed) and left out of the
+    retrieval-metric means (mean_similarity, coverage, distinct sources).
+    Rates over a sentinel (-1 = not applicable) already skip them."""
+    retrieval_qs = _retrieval_population(question_results)
 
     canonical_qs = [r for r in question_results if r.canonical_hit >= 0]
     exact_chunk_qs = [r for r in question_results if r.exact_chunk_hit >= 0]
@@ -458,9 +491,9 @@ def aggregate(question_results: list[QuestionResult]) -> dict:
         wrong_rate=              outcome_rates["wrong_rate"],
         mean_faithfulness=       _mean([r.faithfulness       for r in question_results]),
         mean_answer_relevancy=   _mean([r.answer_relevancy   for r in question_results]),
-        mean_similarity=         _mean([r.mean_similarity    for r in question_results]),
+        mean_similarity=         _mean([r.mean_similarity    for r in retrieval_qs]),
         mean_distinct_sources_retrieved=
-                                  _mean([float(r.distinct_sources_retrieved) for r in question_results]),
+                                  _mean([float(r.distinct_sources_retrieved) for r in retrieval_qs]),
         canonical_hit_rate=     (sum(r.canonical_hit for r in canonical_qs) /
                                   len(canonical_qs) if canonical_qs else -1.0),
         n_canonical_source_non_discriminating=
@@ -470,12 +503,13 @@ def aggregate(question_results: list[QuestionResult]) -> dict:
         # rank==0 (not found) contributes 0, not 1/0 -- standard MRR convention.
         mean_reciprocal_rank=   (sum(1.0 / r.used_chunk_rank if r.used_chunk_rank > 0 else 0.0
                                       for r in rank_qs) / len(rank_qs) if rank_qs else -1.0),
-        mean_coverage_ratio=     _mean([r.coverage_ratio     for r in question_results]),
+        mean_coverage_ratio=     _mean([r.coverage_ratio     for r in retrieval_qs]),
         mean_context_recall=     _mean([r.context_recall     for r in question_results]),
         mean_answer_correctness= _mean([r.answer_correctness for r in question_results]),
         weighted_score_pct=      _weighted_score_pct(question_results),
         by_format=by_format,
         **_aggregate_efficiency(question_results),
+        **_error_summary(question_results),
         # opt-in keys: only present when the run has evidence spans
         **({
             "span_hit_at_k_rate": (sum(r.span_hit_at_k for r in span_ak_qs) /
@@ -495,7 +529,7 @@ def aggregate(question_results: list[QuestionResult]) -> dict:
 # serialize exactly as before
 _OPT_IN_QUESTION_FIELDS = ("context_tokens", "n_chunks_used", "budget", "fill_ratio",
                            "span_hit_at_k", "span_hit_in_context", "difficulty", "judge_calls")
-_OPT_IN_CORPUS_FIELDS = ("mean_context_tokens", "mean_fill_ratio",
+_OPT_IN_CORPUS_FIELDS = ("n_errors", "error_rate", "errors_by_type", "mean_context_tokens", "mean_fill_ratio",
                          "reranker_stats", "embedder_stats",
                          "span_hit_at_k_rate", "span_hit_in_context_rate")
 
@@ -569,6 +603,12 @@ def print_summary(result: CorpusResult) -> None:
         else:
             fmt = ".1f" if label == "Distinct sources (mean count)" else ".3f"
             print(f"  {label:<32} {value:>8{fmt}}  {kind}")
+
+    if result.n_errors:
+        types = ", ".join(f"{t} x{n}" for t, n in (result.errors_by_type or {}).items())
+        print(f"  {'':32} FAILED questions: {result.n_errors}/{result.n_questions} "
+              f"({result.error_rate:.0%})" + (f" -- {types}" if types else ""))
+        print(f"  {'':32}   they are excluded from the retrieval means above and from every rate.")
 
     if result.n_canonical_source_non_discriminating > 0:
         print(f"  {'':32} {result.n_canonical_source_non_discriminating} question(s) had a "
