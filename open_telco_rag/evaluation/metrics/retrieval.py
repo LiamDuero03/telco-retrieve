@@ -14,6 +14,7 @@ import logging
 import math
 import re
 import statistics
+import weakref
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -70,9 +71,11 @@ def distinct_sources_retrieved(results: list[Any]) -> int:
 # non-discriminating.
 _DISCRIMINATING_FRACTION_THRESHOLD = 0.5
 
-# (id(store), expected) -> bool. Cached: all_doc_ids() is expensive and
-# stable within a run.
-_discriminating_cache: dict[tuple[int, str], bool] = {}
+# store -> {expected: bool}. cached because all_doc_ids() is expensive and
+# stable within a run. keyed by the store object (weakly), not id(store):
+# CPython reuses ids after garbage collection, so an id-keyed cache handed a
+# dead store's answer to a different store
+_discriminating_cache: "weakref.WeakKeyDictionary[Any, dict[str, bool]]" = weakref.WeakKeyDictionary()
 
 
 def is_discriminating_source(expected: str, store: Any) -> bool:
@@ -87,9 +90,12 @@ def is_discriminating_source(expected: str, store: Any) -> bool:
     if all_doc_ids_fn is None:
         return False
 
-    cache_key = (id(store), expected)
-    if cache_key in _discriminating_cache:
-        return _discriminating_cache[cache_key]
+    try:
+        per_store = _discriminating_cache.setdefault(store, {})
+    except TypeError:  # not weak-referenceable or not hashable: just don't cache
+        per_store = None
+    if per_store is not None and expected in per_store:
+        return per_store[expected]
 
     ids = all_doc_ids_fn()
     exp_lower = expected.lower()
@@ -99,7 +105,8 @@ def is_discriminating_source(expected: str, store: Any) -> bool:
         n_matching = sum(1 for doc_id in ids if exp_lower in doc_id.lower())
         result = (n_matching / len(ids)) < _DISCRIMINATING_FRACTION_THRESHOLD
 
-    _discriminating_cache[cache_key] = result
+    if per_store is not None:
+        per_store[expected] = result
     return result
 
 

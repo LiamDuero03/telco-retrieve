@@ -339,3 +339,42 @@ def test_coverage_ratio_uses_the_same_rounded_precision_as_cosine_sim_stats():
     assert mean_sim == max_sim == 1.0
 
     assert coverage_ratio(results, threshold=1.0) == 1.0
+
+
+# ── the discriminating-source cache must not outlive its store ────────────────
+
+def test_discriminating_cache_is_not_shared_with_a_new_store_that_reuses_an_id():
+    """CPython reuses the id() of a freed object. A cache keyed by id(store)
+    would hand a dead store's answer to the next store built in its place.
+    Build many short-lived stores with different corpora and check each one is
+    queried and answered on its own."""
+    import gc
+
+    for i in range(200):
+        generic = _real_corpus_shaped_store(5)            # "raw.md" matches every doc id
+        assert is_discriminating_source("raw.md", generic) is False
+        assert generic.all_doc_ids_call_count == 1, i
+        del generic
+        gc.collect()
+
+        specific = _FakeStore(["a/one.md::m::0", "b/two.md::m::0", "c/raw.md::m::0",
+                               "d/three.md::m::0"])       # "raw.md" matches 1 of 4
+        assert is_discriminating_source("raw.md", specific) is True
+        assert specific.all_doc_ids_call_count == 1, i
+        del specific
+        gc.collect()
+
+
+def test_discriminating_source_still_works_for_stores_that_cannot_be_cached():
+    class Uncacheable:
+        __slots__ = ("ids",)          # no __weakref__ slot -> cannot be weakly referenced
+
+        def __init__(self, ids):
+            self.ids = ids
+
+        def all_doc_ids(self):
+            return self.ids
+
+    store = Uncacheable(["a/raw.md::m::0", "b/spec1.md::m::0", "c/spec2.md::m::0", "d/spec3.md::m::0"])
+    assert is_discriminating_source("raw.md", store) is True
+    assert is_discriminating_source("raw.md", store) is True
