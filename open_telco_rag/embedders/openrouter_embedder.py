@@ -78,10 +78,12 @@ class OpenRouterEmbedder:
             return texts
         return [f"{prefix}{t}" for t in texts]
 
-    def embed(self, texts: List[str], is_query: bool = False) -> List[List[float]]:
+    def embed(self, texts: List[str], is_query: bool = False,
+              apply_prefix: bool = True) -> List[List[float]]:
         import concurrent.futures
 
-        texts = self._apply_prefix(texts, is_query)
+        if apply_prefix:
+            texts = self._apply_prefix(texts, is_query)
         all_embeddings_dict = {}
         headers = {
             "Authorization": f"Bearer {self.api_key}",

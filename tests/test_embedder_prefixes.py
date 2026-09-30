@@ -167,7 +167,7 @@ def test_only_the_intended_registry_keys_carry_prefix_settings():
 
 
 def test_retrieval_works_with_an_embedder_that_has_no_is_query_parameter():
-    from open_telco_rag.core.retrieval import _embed_query
+    from open_telco_rag.embedders.calls import embed_query as _embed_query
 
     class Legacy:
         def embed(self, texts):
@@ -179,3 +179,60 @@ def test_retrieval_works_with_an_embedder_that_has_no_is_query_parameter():
 
     assert _embed_query(Legacy(), "q") == [1.0, 2.0]
     assert _embed_query(Modern(), "q") == [9.0]
+
+
+# ── text-vs-text metric embeddings are prefix-free for every key ──────────────
+
+def _recording_embedders():
+    """(plain, prefixed, fakes): e5 vs e5-prefixed with recording fake models."""
+    plain = SentenceTransformerEmbedder(model_key="e5")
+    prefixed = SentenceTransformerEmbedder(model_key="e5-prefixed")
+    return plain, prefixed, _wire_fake_model(plain), _wire_fake_model(prefixed)
+
+
+def test_embed_plain_sends_identical_text_for_plain_and_prefixed_keys():
+    from open_telco_rag.embedders.calls import embed_plain
+
+    plain, prefixed, fake_plain, fake_prefixed = _recording_embedders()
+    embed_plain(plain, ["an answer", "a reference"])
+    embed_plain(prefixed, ["an answer", "a reference"])
+    assert fake_plain.last_texts == fake_prefixed.last_texts == ["an answer", "a reference"]
+    assert fake_prefixed.last_kwargs == fake_plain.last_kwargs
+
+
+def test_embed_plain_skips_prompt_names_too():
+    from open_telco_rag.embedders.calls import embed_plain
+
+    gemma = SentenceTransformerEmbedder(model_key="embeddinggemma-300m")
+    fake = _wire_fake_model(gemma)
+    embed_plain(gemma, ["text"])
+    assert "prompt_name" not in fake.last_kwargs and fake.last_texts == ["text"]
+
+
+def test_answer_correctness_and_relevancy_embeddings_ignore_prefixed_keys():
+    from open_telco_rag.evaluation.metrics.generation import answer_relevancy
+    from open_telco_rag.evaluation.metrics.ground_truth import answer_correctness
+
+    def judge(prompt, max_tokens):
+        return '{"questions": ["what does the AMF do?"], "claims": []}'
+
+    seen = {}
+    for name, key in (("plain", "e5"), ("prefixed", "e5-prefixed")):
+        embedder = SentenceTransformerEmbedder(model_key=key)
+        fake = _wire_fake_model(embedder)
+        answer_correctness("the AMF registers UEs", "the AMF handles registration", embedder,
+                           llm_call=judge)
+        correctness_texts = list(fake.last_texts)
+        answer_relevancy("what does the AMF do?", "it registers UEs", embedder, llm_call=judge)
+        seen[name] = (correctness_texts, list(fake.last_texts))
+    assert seen["plain"] == seen["prefixed"]
+    assert all(not t.startswith(("query:", "passage:")) for group in seen["prefixed"] for t in group)
+
+
+def test_retrieval_still_applies_the_query_prefix_for_prefixed_keys():
+    from open_telco_rag.embedders.calls import embed_query
+
+    embedder = SentenceTransformerEmbedder(model_key="e5-prefixed")
+    fake = _wire_fake_model(embedder)
+    embed_query(embedder, "what does the AMF do")
+    assert fake.last_texts == ["query: what does the AMF do"]

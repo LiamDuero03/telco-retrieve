@@ -143,16 +143,19 @@ class SentenceTransformerEmbedder:
             return texts
         return [f"{prefix}{t}" for t in texts]
 
-    def embed(self, texts: list[str], is_query: bool = False) -> list[list[float]]:
+    def embed(self, texts: list[str], is_query: bool = False,
+              apply_prefix: bool = True) -> list[list[float]]:
         import torch
         self._load()
 
         # Length-checked/embedded AFTER the prefix is applied -- the prefix's
         # own tokens count against max_seq_length too (matters most for
         # Qwen3-Embedding's fairly long instruction-style query prefix).
-        texts = self._apply_prefix(texts, is_query)
+        # apply_prefix=False (text-vs-text metrics): no prefix / prompt at all
+        if apply_prefix:
+            texts = self._apply_prefix(texts, is_query)
         self._record_length_check(texts)
-        prompt_name = self._query_prompt_name if is_query else self._document_prompt_name
+        prompt_name = (self._query_prompt_name if is_query else self._document_prompt_name) if apply_prefix else None
         encode_kwargs = {"prompt_name": prompt_name} if prompt_name else {}
 
         optimal_batch_size = 256 if torch.cuda.is_available() else 32

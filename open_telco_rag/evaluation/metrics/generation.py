@@ -13,6 +13,7 @@ from typing import Any, Callable
 
 import numpy as np
 
+from open_telco_rag.embedders.calls import embed_plain
 from open_telco_rag.evaluation._claude import claude_call, parse_json
 
 logger = logging.getLogger(__name__)
@@ -198,7 +199,7 @@ Answer:
         return 0.0
 
     try:
-        embeddings = embedder.embed([question] + reverse_qs)
+        embeddings = embed_plain(embedder, [question] + reverse_qs)
         q0   = np.array(embeddings[0])
         sims = []
         for emb in embeddings[1:]:
