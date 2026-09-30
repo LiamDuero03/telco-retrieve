@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 class SentenceTransformerEmbedder:
@@ -15,6 +18,7 @@ class SentenceTransformerEmbedder:
         self,
         model_key:    str = "minilm",
         models_file: str | Path = Path(__file__).parent.parent.parent / "configs" / "embedding_models.json",
+        track_truncation: bool = False,
     ):
         models_file = Path(models_file)
         if not models_file.exists():
@@ -32,6 +36,26 @@ class SentenceTransformerEmbedder:
         self._description = available[model_key].get("description", "")
         self._model       = None
         self._first_embed_done = False
+        # opt-in: with track_truncation=True every embed() also tokenizes the
+        # texts to count how many exceed max_seq_length (they get silently
+        # truncated by the model otherwise); see truncation_rate below.
+        # off by default: the extra tokenization pass costs time.
+        self.track_truncation = track_truncation
+        self.truncated_count = 0
+        self.scored_count    = 0
+
+    @property
+    def max_seq_length(self) -> int | None:
+        """The loaded model's max_seq_length (tokens), or None before the
+        first embed() call (the model isn't loaded yet)."""
+        return getattr(self._model, "max_seq_length", None) if self._model is not None else None
+
+    @property
+    def truncation_rate(self) -> float:
+        """Fraction of texts embedded so far whose true token length
+        exceeded max_seq_length. 0.0 if nothing has been embedded yet, or if
+        the length check itself isn't available for this model."""
+        return (self.truncated_count / self.scored_count) if self.scored_count else 0.0
 
     @property
     def model_key(self) -> str:
@@ -75,9 +99,37 @@ class SentenceTransformerEmbedder:
             print(f"Embedding model ready on {self._model.device} "
                   f"in {time.perf_counter() - load_start:.1f}s")
 
+    def _record_length_check(self, texts: list[str]) -> None:
+        """Best-effort: counts how many of `texts` will be silently
+        truncated by the model (true token length > max_seq_length), warns
+        once per embed() call if any are, and accumulates into
+        truncated_count/scored_count. Never raises -- not every
+        SentenceTransformer backend exposes a HF-style .tokenizer.encode()."""
+        if not self.track_truncation:
+            return
+        max_len = getattr(self._model, "max_seq_length", None)
+        tokenizer = getattr(self._model, "tokenizer", None)
+        if max_len is None or tokenizer is None:
+            return
+        try:
+            lengths = [len(tokenizer.encode(t, add_special_tokens=True)) for t in texts]
+        except Exception:
+            return
+
+        n_over = sum(1 for n in lengths if n > max_len)
+        self.truncated_count += n_over
+        self.scored_count += len(texts)
+        if n_over:
+            logger.warning(
+                "%s: %d/%d text(s) in this batch exceed max_seq_length=%d and "
+                "will be silently truncated by the model.",
+                self._model_name, n_over, len(texts), max_len,
+            )
+
     def embed(self, texts: list[str]) -> list[list[float]]:
         import torch
         self._load()
+        self._record_length_check(texts)
 
         optimal_batch_size = 256 if torch.cuda.is_available() else 32
 
