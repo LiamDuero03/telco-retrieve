@@ -523,7 +523,8 @@ still runs normally (and then needs LLM access).
 Every saved result contains a `run_record` (new in this version; older files
 simply lack it) describing what was run:
 
-- `code`: package version, git commit and whether the working tree was modified;
+- `code`: package version, git commit and whether the working tree was modified (both
+  `"unknown"` when there is no `.git` directory, e.g. an installed wheel);
   `environment`: Python, platform and the versions of the key dependencies
 - `settings`: the resolved evaluation settings, including every optional feature
   (search method, reranking, budget, retrieval-only, keyword/metadata injection,
@@ -535,7 +536,7 @@ simply lack it) describing what was run:
   collection was ingested with (chunking and enrichment, read from a small
   `.ingest_settings_<collection>.json` that `ingest` writes next to the database;
   `configurations_seen` is above 1 if the collection was ingested under more
-  than one configuration)
+  than one configuration); `delete` removes it together with the collection
 - `dataset`: question file name, number of questions and a SHA-256 of the
   questions as evaluated
 - `started_at` / `finished_at` (UTC), and `randomness`: the pipeline has no seeded

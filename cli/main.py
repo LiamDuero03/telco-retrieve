@@ -1065,6 +1065,8 @@ def _run_delete_collection(args) -> None:
             return
 
         client.delete_collection(name=args.collection)
+        from open_telco_rag.evaluation.provenance import index_settings_file
+        index_settings_file(args.db_path, args.collection).unlink(missing_ok=True)
         FTSStore(path=args.db_path, collection_name=args.collection).delete()
         print(f"Deleted collection '{args.collection}'.")
     except Exception as e:

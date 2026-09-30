@@ -33,6 +33,8 @@ def _version(dist: str) -> str | None:
 
 
 def _git(*args: str) -> str | None:
+    if not (_PACKAGE_DIR / ".git").exists():
+        return None   # not a checkout: never pick up an unrelated enclosing repository
     try:
         out = subprocess.run(["git", *args], cwd=_PACKAGE_DIR, capture_output=True, text=True, timeout=10,
                              check=False)
@@ -42,10 +44,13 @@ def _git(*args: str) -> str | None:
 
 
 def code_version() -> dict:
+    """git_commit / git_dirty are the string "unknown" when they cannot be determined
+    (no .git directory, e.g. installed from a wheel; git not installed; git failing)"""
     commit = _git("rev-parse", "HEAD")
     status = _git("status", "--porcelain", "--untracked-files=no") if commit else None
     return {"name": "open-telco-rag", "version": _version("open-telco-rag"),
-            "git_commit": commit, "git_dirty": (bool(status) if status is not None else None)}
+            "git_commit": commit or "unknown",
+            "git_dirty": (bool(status) if status is not None else "unknown")}
 
 
 def environment() -> dict:

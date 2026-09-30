@@ -83,6 +83,11 @@ scripts/*
 # logs anywhere, not just logs/
 *.log
 
+# ingest bookkeeping written next to a database / into logs/
+.ingest_settings_*.json
+.progress_*.json
+.progress_*.json.bak
+
 configs/eval_questions/
 # Utility and test scripts
 run_all_evals.ps1

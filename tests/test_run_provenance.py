@@ -196,3 +196,42 @@ def test_a_missing_or_corrupt_sidecar_is_just_absent(tmp_path):
 def test_the_questions_file_name_from_the_caller_is_recorded_not_a_path(monkeypatch, tmp_path):
     _, saved = _evaluate(monkeypatch, tmp_path, run_info={"questions_file": "my_questions.json"})
     assert saved["run_record"]["dataset"]["questions_file"] == "my_questions.json"
+
+
+# ── git information degrades to "unknown" ─────────────────────────────────────
+
+def test_code_version_is_unknown_without_a_git_directory(tmp_path, monkeypatch):
+    from open_telco_rag.evaluation import provenance
+
+    monkeypatch.setattr(provenance, "_PACKAGE_DIR", tmp_path)            # e.g. installed from a wheel
+    code = provenance.code_version()
+    assert code["git_commit"] == "unknown" and code["git_dirty"] == "unknown"
+    assert code["name"] == "open-telco-rag" and code["version"]
+    assert provenance.collect_run_record(
+        params={}, embedder=SimpleNamespace(model_key="m"), reranker=None, store=_Store(),
+        questions=_questions(1), questions_name="q", started_at=datetime.now(timezone.utc),
+    )["code"]["git_commit"] == "unknown"
+
+
+@pytest.mark.parametrize("failure", [FileNotFoundError("git"), OSError("boom")])
+def test_code_version_is_unknown_when_git_cannot_run(tmp_path, monkeypatch, failure):
+    import subprocess
+
+    from open_telco_rag.evaluation import provenance
+
+    (tmp_path / ".git").mkdir()
+    monkeypatch.setattr(provenance, "_PACKAGE_DIR", tmp_path)
+
+    def broken(*a, **k):
+        raise failure
+
+    monkeypatch.setattr(subprocess, "run", broken)
+    assert provenance.code_version()["git_commit"] == "unknown"
+
+
+def test_code_version_reports_a_real_checkout(monkeypatch):
+    from open_telco_rag.evaluation import provenance
+
+    code = provenance.code_version()
+    assert code["git_commit"] != "unknown" and len(code["git_commit"]) == 40
+    assert isinstance(code["git_dirty"], bool)
