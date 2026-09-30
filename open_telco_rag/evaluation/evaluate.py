@@ -502,6 +502,7 @@ def evaluate_question(
         question=active_question, corpus=q.corpus,
         answer="", sources=[], chunks_used=0,
         answer_type=q.answer_type,
+        difficulty=q.difficulty,
     )
 
     try:

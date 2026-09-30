@@ -42,6 +42,9 @@ class EvalQuestion:
     evidence_char_start: int | None = None
     evidence_char_end:   int | None = None
     evidence_doc_id:     str | None = None
+    # optional label from the qna_generation pipeline (e.g. "basic",
+    # "intermediate"); None where absent
+    difficulty:          str | None = None
 
     @classmethod
     def from_dict(cls, d: dict) -> "EvalQuestion":
@@ -55,6 +58,7 @@ class EvalQuestion:
             reference_answer = d.get("reference_answer"),
             chunk_id         = d.get("chunk_id"),
             source_text      = d.get("source_text"),
+            difficulty       = d.get("difficulty"),
             release          = d.get("release"),
             evidence_char_start = d.get("evidence_char_start"),
             evidence_char_end   = d.get("evidence_char_end"),

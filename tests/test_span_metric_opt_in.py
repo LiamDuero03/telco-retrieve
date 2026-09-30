@@ -6,6 +6,7 @@ metric names, values and aggregates are unchanged either way.
 from __future__ import annotations
 
 import io
+import json
 import tempfile
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -139,3 +140,27 @@ def test_token_sized_ingest_stores_offsets():
 def test_default_ingest_stores_no_offsets():
     metas = _ingest_metadata(chunk_size=400, overlap=50)
     assert metas and all(not ({"char_start", "char_end", "n_tokens"} & set(m)) for m in metas)
+
+
+# ── difficulty passthrough (opt-in) ───────────────────────────────────────────
+
+def test_difficulty_absent_changes_no_output(monkeypatch):
+    result = _run(monkeypatch, _question(), _chunks())
+    assert result.difficulty is None
+    assert "difficulty" not in question_to_dict(result)
+    agg = aggregate([result])
+    assert not any("difficult" in key for key in agg)
+    assert all(not any("difficult" in key for key in v) for v in agg["by_format"].values())
+    corpus = CorpusResult(corpus="3gpp", model="m", top_k=5, question_results=[result], **agg)
+    assert "difficult" not in json.dumps(result_to_dict(corpus))
+    out = io.StringIO()
+    with redirect_stdout(out):
+        print_summary(corpus)
+    assert "ifficult" not in out.getvalue()
+
+
+def test_difficulty_present_is_carried_into_the_question_result(monkeypatch):
+    result = _run(monkeypatch, _question(difficulty="intermediate"), _chunks())
+    assert question_to_dict(result)["difficulty"] == "intermediate"
+    # carried per question only: no new aggregate or summary output
+    assert not any("difficult" in key for key in aggregate([result]))

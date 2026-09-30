@@ -38,6 +38,10 @@ class QuestionResult:
     # Drives which metrics apply; also used by aggregate() to group.
     answer_type: str = "open"
 
+    # difficulty label copied from EvalQuestion.difficulty; None (and omitted
+    # from serialized output) when the question has none
+    difficulty: str | None = None
+
     # ── EFFICIENCY METRICS  ───────────────────────────────────────
     latency:           float = 0.0
     search_latency:    float = 0.0   # embedding + vector search
@@ -479,7 +483,7 @@ def aggregate(question_results: list[QuestionResult]) -> dict:
 # opt-in fields: dropped from serialized output while None, so default runs
 # serialize exactly as before
 _OPT_IN_QUESTION_FIELDS = ("context_tokens", "n_chunks_used", "budget", "fill_ratio",
-                           "span_hit_at_k", "span_hit_in_context")
+                           "span_hit_at_k", "span_hit_in_context", "difficulty")
 _OPT_IN_CORPUS_FIELDS = ("mean_context_tokens", "mean_fill_ratio",
                          "span_hit_at_k_rate", "span_hit_in_context_rate")
 
