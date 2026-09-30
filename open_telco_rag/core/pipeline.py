@@ -150,6 +150,32 @@ def _load_progress(progress_file: Path, legacy_file: Path, fingerprint: str, sto
     return set()
 
 
+def _record_index_settings(store: Any, fingerprint: str, settings: dict) -> None:
+    """remember which settings a collection was ingested with, in a sidecar next
+    to the database (travels with it, e.g. through push-hf), so evaluation results
+    can state the chunking they ran against. keeps a history: a collection that
+    was ingested under more than one configuration says so. never fails an ingest"""
+    from open_telco_rag.evaluation.provenance import index_settings_file
+
+    try:
+        path = index_settings_file(store.path, store.collection_name)
+        try:
+            data = json.loads(path.read_text(encoding="utf8"))
+            history = list(data.get("history", []))
+        except (OSError, ValueError):
+            history = []
+        # the fingerprint covers the (local) db path; the recorded settings do not
+        entry = {"fingerprint": fingerprint, "settings": {k: v for k, v in settings.items() if k != "db_path"},
+                 "updated_at": datetime.now().astimezone().isoformat(timespec="seconds")}
+        if history and history[-1].get("fingerprint") == fingerprint:
+            history[-1] = entry
+        else:
+            history.append(entry)
+        path.write_text(json.dumps({"version": 1, "latest": entry, "history": history}), encoding="utf8")
+    except Exception as e:  # noqa: BLE001 - bookkeeping only
+        print(f"\n[WARN] Could not record the index settings ({e}); the ingest itself succeeded.")
+
+
 def _write_progress(progress_file: Path, fingerprint: str, settings: dict, completed: set[str]) -> None:
     progress_file.write_text(json.dumps(
         {"version": 2, "fingerprint": fingerprint, "settings": settings, "completed": sorted(completed)}
@@ -512,6 +538,9 @@ def ingest(
         print(f"\n[WARN] Post-write bookkeeping (CSV log / resume progress file) failed: "
               f"{e} — every chunk was still successfully stored; only the log/resume "
               f"file may be incomplete.")
+
+    if stats.files_processed:
+        _record_index_settings(store, fingerprint, settings)
 
     return stats
 

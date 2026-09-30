@@ -194,6 +194,10 @@ class CorpusResult:
     span_hit_in_context_rate: float | None = None
     mean_coverage_ratio:   float = -1.0
 
+    # ── reproducibility record (see evaluation/provenance.py): code version, environment,
+    # resolved settings, model identities, dataset hash, index settings. absent in older files
+    run_record: dict | None = None
+
     # ── failed questions (only present when at least one question failed): count,
     # share of n_questions and a breakdown by exception type
     n_errors:       int | None = None
@@ -529,7 +533,7 @@ def aggregate(question_results: list[QuestionResult]) -> dict:
 # serialize exactly as before
 _OPT_IN_QUESTION_FIELDS = ("context_tokens", "n_chunks_used", "budget", "fill_ratio",
                            "span_hit_at_k", "span_hit_in_context", "difficulty", "judge_calls")
-_OPT_IN_CORPUS_FIELDS = ("n_errors", "error_rate", "errors_by_type", "mean_context_tokens", "mean_fill_ratio",
+_OPT_IN_CORPUS_FIELDS = ("run_record", "n_errors", "error_rate", "errors_by_type", "mean_context_tokens", "mean_fill_ratio",
                          "reranker_stats", "embedder_stats",
                          "span_hit_at_k_rate", "span_hit_in_context_rate")
 

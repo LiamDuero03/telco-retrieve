@@ -515,6 +515,34 @@ retrieval metric are computed; accuracy and the four LLM-judged metrics stay
 at their "not applicable" value. With `--include-baseline` the baseline pass
 still runs normally (and then needs LLM access).
 
+#### Reproducibility record
+
+Every saved result contains a `run_record` (new in this version; older files
+simply lack it) describing what was run:
+
+- `code`: package version, git commit and whether the working tree was modified;
+  `environment`: Python, platform and the versions of the key dependencies
+- `settings`: the resolved evaluation settings, including every optional feature
+  (search method, reranking, budget, retrieval-only, keyword/metadata injection,
+  generation temperature, top-p, prompt mode, concurrency, ...)
+- `embedder` (model key and name, dimensions, prefixes, sequence limit),
+  `reranker` (model and truncation limits), `tokenizer` (`cl100k_base`), and under
+  `extra.judge` the judge provider and model
+- `index`: collection name, number of chunks, distance space and the settings the
+  collection was ingested with (chunking and enrichment, read from a small
+  `.ingest_settings_<collection>.json` that `ingest` writes next to the database;
+  `configurations_seen` is above 1 if the collection was ingested under more
+  than one configuration)
+- `dataset`: question file name, number of questions and a SHA-256 of the
+  questions as evaluated
+- `started_at` / `finished_at` (UTC), and `randomness`: the pipeline has no seeded
+  randomness (only retry jitter), so there is no seed to record; generation is
+  deterministic only at temperature 0 and only as far as the provider is
+
+The record never contains API keys, base URLs or local file paths. Results are
+otherwise deterministic for the same inputs: questions keep their order under
+`--max-concurrency`, and retrieval and metrics use no random choices.
+
 #### Metrics reference
 
 Retrieval metrics (computed for every non-baseline question):

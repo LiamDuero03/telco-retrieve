@@ -42,6 +42,7 @@ from open_telco_rag.evaluation.metrics.retrieval import (
     span_hit_at_k, span_hit_in_context,
 )
 from open_telco_rag.core.retrieval import fill_context_budget, resolve_budget_args
+from open_telco_rag.evaluation.provenance import collect_run_record
 from open_telco_rag.evaluation.metrics.ground_truth import (
     context_recall, answer_correctness,
 )
@@ -915,6 +916,7 @@ def evaluate_corpus(
     budget_overflow: str | None = None,
     retrieval_only: bool = False,
     record_judge_calls: bool = False,
+    run_info: dict | None = None,
 ) -> tuple[CorpusResult, CorpusResult | None]:
     """Run the full evaluation suite for one corpus.
 
@@ -924,6 +926,10 @@ def evaluate_corpus(
     unset = plain top_k path.
 
     record_judge_calls: passed to evaluate_question() for the RAG pass; off by default.
+
+    run_info: optional caller-supplied identity (e.g. which judge model was used)
+    stored under run_record["extra"]; must not contain secrets or private URLs.
+    Every run's results carry a run_record (see evaluation/provenance.py).
 
     retrieval_only: passed to evaluate_question()'s RAG pass only (baseline is
     unaffected either way). Off by default. include_baseline=True with
@@ -967,6 +973,7 @@ def evaluate_corpus(
     # across threads (chromadb supports concurrent readers).
     rag_results: list[Any] = [None] * len(qs)
     rag_wall_start = time.perf_counter()
+    run_started_at = datetime.now()
     # tqdm.write() via emit() so output coexists with an active bar.
     pbar = tqdm(total=len(qs), desc=f"{corpus}/{model} RAG", unit="q") if progress_bar else None
     emit = pbar.write if pbar else print
@@ -1058,6 +1065,23 @@ def evaluate_corpus(
         **aggregate(rag_results),
     )
 
+    rag_result.run_record = collect_run_record(
+        params={
+            "corpus": corpus, "model": model, "top_k": top_k, "sim_threshold": sim_threshold,
+            "search_method": search_method, "rerank": reranker is not None, "rerank_top_k": rerank_top_k,
+            "resolve_parents": resolve_parents, "inject_metadata": inject_metadata,
+            "include_keywords": include_keywords, "context_token_budget": context_token_budget,
+            "candidate_pool": candidate_pool, "budget_overflow": budget_overflow,
+            "retrieval_only": retrieval_only, "include_baseline": include_baseline,
+            "rag_generator_name": rag_generator_name, "rag_generator_model": resolved_rag_model,
+            "n_generations": n_generations, "generation_temperature": generation_temperature,
+            "generation_top_p": generation_top_p, "rag_max_tokens": rag_max_tokens,
+            "prompt_mode": prompt_mode, "max_concurrency": max(1, max_concurrency),
+            "record_judge_calls": record_judge_calls,
+        },
+        embedder=embedder, reranker=reranker, store=store, questions=qs,
+        questions_name=questions_source_name, started_at=run_started_at, extra=run_info,
+    )
     rag_result.reranker_stats = _reranker_stats(reranker)
     rag_result.embedder_stats = _embedder_stats(embedder)
 
