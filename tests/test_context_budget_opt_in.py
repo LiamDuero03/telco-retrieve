@@ -213,3 +213,42 @@ def test_cli_evaluate_help_lists_the_optional_flags():
     assert result.returncode == 0, result.stderr
     for flag in ("--context-token-budget", "--candidate-pool", "--budget-overflow"):
         assert flag in result.stdout
+
+
+# ── a budget smaller than the first chunk ────────────────────────────────────
+
+def _big_candidates(n=3, words=200):
+    return [SearchResult(text="word " * words, distance=0.1, metadata={}, doc_id=f"d{i}") for i in range(n)]
+
+
+@pytest.mark.parametrize("overflow", ["stop", "skip"])
+def test_empty_context_from_a_too_small_budget_is_warned_about(overflow, caplog):
+    import logging
+    from open_telco_rag.core.retrieval import fill_context_budget
+
+    with caplog.at_level(logging.WARNING, logger="open_telco_rag.core.retrieval"):
+        assert fill_context_budget(_big_candidates(), 50, overflow) == []
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("context is EMPTY" in m and "truncate" in m for m in messages)
+    assert not any("candidate_pool may be too small" in m for m in messages)  # not the misleading one
+
+
+def test_truncate_and_normal_fills_do_not_warn(caplog):
+    import logging
+    from open_telco_rag.core.retrieval import fill_context_budget
+
+    with caplog.at_level(logging.WARNING, logger="open_telco_rag.core.retrieval"):
+        out = fill_context_budget(_big_candidates(), 50, "truncate")
+        assert len(out) == 1
+        assert fill_context_budget(_big_candidates(2, 10), 1000, "stop")
+    assert [r for r in caplog.records if "EMPTY" in r.getMessage()] == []
+
+
+def test_a_pool_that_runs_out_still_gets_the_pool_warning(caplog):
+    import logging
+    from open_telco_rag.core.retrieval import fill_context_budget
+
+    with caplog.at_level(logging.WARNING, logger="open_telco_rag.core.retrieval"):
+        out = fill_context_budget(_big_candidates(2, 10), 5000, "stop")
+    assert len(out) == 2
+    assert any("candidate_pool may be too small" in r.getMessage() for r in caplog.records)

@@ -122,7 +122,15 @@ def fill_context_budget(
         pool_exhausted = False  # stopped by policy, not by running out of candidates
         break
 
-    if pool_exhausted and used < budget and candidates:
+    if candidates and not selected:
+        # nothing fit: the generator would silently get no context at all
+        logger.warning(
+            "fill_context_budget: the %d-token budget is smaller than the first candidate "
+            "(%d tokens) under budget_overflow=%r, so the context is EMPTY. Raise the budget "
+            "or use budget_overflow='truncate'.",
+            budget, _count_tokens(candidates[0].text), overflow,
+        )
+    elif pool_exhausted and used < budget and candidates:
         logger.warning(
             "fill_context_budget: exhausted all %d candidate(s) at %d/%d "
             "tokens -- candidate_pool may be too small to fill this budget.",
