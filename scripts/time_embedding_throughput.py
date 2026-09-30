@@ -61,7 +61,7 @@ def main() -> None:
     print(f"  Real total in collection: {total_chunks:,} chunks")
     print(f"  Extrapolated embed time for the FULL collection: "
           f"{extrapolated_seconds:.0f}s  (~{extrapolated_seconds / 60:.1f} min)")
-    print(f"  NOTE: embedding-stage only -- excludes file parsing/chunking/DB writes.")
+    print("  NOTE: embedding-stage only -- excludes file parsing/chunking/DB writes.")
     print(f"{'='*70}")
 
 

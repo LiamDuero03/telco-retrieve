@@ -111,7 +111,7 @@ def print_report(report: dict, extrapolate_n: int) -> None:
     if report["peak_gpu_memory_mb"] is not None:
         print(f"  peak GPU memory: {report['peak_gpu_memory_mb']:.1f} MB")
     else:
-        print(f"  peak GPU memory: N/A (no GPU available -- skipped gracefully)")
+        print("  peak GPU memory: N/A (no GPU available -- skipped gracefully)")
     print()
 
 

@@ -87,8 +87,8 @@ def main() -> None:
     print(f"  Real total in collection: {total_chunks:,} chunks")
     print(f"  Extrapolated OpenRouter embed time for the FULL collection: "
           f"{extrapolated_seconds:.0f}s  (~{extrapolated_seconds / 60:.1f} min)")
-    print(f"  NOTE: network-bound, real API call -- includes real latency/rate-limit "
-          f"behaviour, not a local compute measurement. Excludes file parsing/chunking/DB writes.")
+    print("  NOTE: network-bound, real API call -- includes real latency/rate-limit "
+          "behaviour, not a local compute measurement. Excludes file parsing/chunking/DB writes.")
     print(f"{'='*70}")
 
 

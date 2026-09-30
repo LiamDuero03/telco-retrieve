@@ -90,7 +90,6 @@ def test_retrieval_only_leaves_generation_fields_at_defaults(monkeypatch):
 
 
 def test_retrieval_only_respects_budget(monkeypatch):
-    from open_telco_rag.core.retrieval import fill_context_budget
     import tiktoken
 
     monkeypatch.setattr(pipeline_module, "search", lambda *a, **kw: _fake_chunks())

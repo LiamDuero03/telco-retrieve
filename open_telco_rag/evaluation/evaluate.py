@@ -659,7 +659,7 @@ def evaluate_question(
     """
     context_token_budget, candidate_pool, budget_overflow = resolve_budget_args(
         context_token_budget, candidate_pool, budget_overflow)
-    from open_telco_rag.core.pipeline import search, generate
+    from open_telco_rag.core.pipeline import generate
 
     if baseline and retrieval_only:
         raise ValueError("baseline and retrieval_only are mutually exclusive")
