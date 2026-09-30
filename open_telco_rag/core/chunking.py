@@ -6,7 +6,7 @@ import concurrent.futures
 import json
 import re
 from enum import Enum
-from typing import Any
+from typing import Any, Callable
 import tiktoken
 
 from open_telco_rag.types import Chunk
@@ -55,17 +55,280 @@ def _accumulate_chunks(
     return chunks
 
 
+# ── Token-aware helpers (shared by the target_tokens/max_tokens code paths) ──
+# All token counting uses cl100k_base, same encoding as the pre-existing
+# sliding_window_tokens strategy, so counts are comparable across strategies.
+# encoding is created lazily so default char paths never init a tokenizer
+_ENCODING_CACHE: dict[str, Any] = {}
+
+
+def _get_encoding() -> Any:
+    enc = _ENCODING_CACHE.get("cl100k_base")
+    if enc is None:
+        enc = tiktoken.get_encoding("cl100k_base")
+        _ENCODING_CACHE["cl100k_base"] = enc
+    return enc
+
+
+def _count_tokens(text: str) -> int:
+    if not text:
+        return 0
+    return len(_get_encoding().encode(text))
+
+
+def _token_chunk(
+    text: str,
+    heading: str | None,
+    chunk_index: int,
+    source_type: str,
+    char_start: int,
+    char_end: int,
+    n_tokens: int | None = None,
+) -> Chunk:
+    """chunk with offsets + token count set as instance attrs (not dataclass fields)"""
+    chunk = Chunk(text=text, heading=heading, chunk_index=chunk_index, source_type=source_type)
+    chunk.char_start = char_start
+    chunk.char_end = char_end
+    chunk.n_tokens = _count_tokens(text) if n_tokens is None else n_tokens
+    return chunk
+
+
+def _paragraph_spans(text: str) -> list[tuple[int, int]]:
+    """Exact (start, end) offsets of each blank-line-separated paragraph in
+    `text`, trimmed of surrounding whitespace. Mirrors the legacy
+    `text.split("\\n\\n")` semantics but keeps offsets into the original
+    string instead of losing them to strip()/join()."""
+    seps = [m.span() for m in re.finditer(r"\n[ \t]*\n[ \t\n]*", text)]
+    bounds = []
+    prev_end = 0
+    for s_start, s_end in seps:
+        bounds.append((prev_end, s_start))
+        prev_end = s_end
+    bounds.append((prev_end, len(text)))
+
+    spans = []
+    for start, end in bounds:
+        seg = text[start:end]
+        lstripped = len(seg) - len(seg.lstrip())
+        rstripped = len(seg) - len(seg.rstrip())
+        real_start = start + lstripped
+        real_end = end - rstripped
+        if real_start < real_end:
+            spans.append((real_start, real_end))
+    return spans
+
+
+_SENTENCE_RE = re.compile(r"[^.!?\n]*[.!?]+(?:\s+|$)|[^.!?\n]+$")
+
+
+def _sentence_spans(text: str) -> list[tuple[int, int]]:
+    """Exact (start, end) offsets of each sentence in `text` (best-effort,
+    punctuation-based -- used only as the second-tier fallback when a whole
+    paragraph exceeds max_tokens)."""
+    spans = []
+    for m in _SENTENCE_RE.finditer(text):
+        seg = m.group(0)
+        if not seg.strip():
+            continue
+        lstripped = len(seg) - len(seg.lstrip())
+        rstripped = len(seg) - len(seg.rstrip())
+        s = m.start() + lstripped
+        e = m.end() - rstripped
+        if s < e:
+            spans.append((s, e))
+    return spans
+
+
+def _hard_token_split(text: str, start: int, end: int, max_tokens: int) -> list[tuple[int, int]]:
+    """Guaranteed split of text[start:end] into pieces of <= max_tokens
+    tokens, via cumulative decode length (not re-searching text -- a lone
+    token's bytes aren't guaranteed valid UTF-8 on their own, but any
+    cumulative prefix of the document's own token stream decodes exactly,
+    since the full text is valid UTF-8 and tiktoken never drops bytes).
+    Last-resort fallback: always terminates, never raises."""
+    segment = text[start:end]
+    tokens = _get_encoding().encode(segment)
+    if not tokens:
+        return [(start, end)] if start < end else []
+
+    spans = []
+    tok_start = 0
+    while tok_start < len(tokens):
+        tok_end = min(tok_start + max_tokens, len(tokens))
+        char_a = len(_get_encoding().decode(tokens[:tok_start]))
+        char_b = len(_get_encoding().decode(tokens[:tok_end]))
+        spans.append((start + char_a, start + char_b))
+        tok_start = tok_end
+    return spans
+
+
+def _accumulate_bounded(
+    text: str,
+    unit_spans: list[tuple[int, int]],
+    max_tokens: int,
+    deeper_split: Callable[[str, int, int, int], list[tuple[int, int]]],
+) -> list[tuple[int, int]]:
+    """Greedily group consecutive unit spans (paragraphs or sentences) so no
+    group exceeds max_tokens tokens. A single unit that alone exceeds
+    max_tokens is handed to `deeper_split` (sentence splitter, or a hard
+    token cut) instead of being silently left oversized."""
+    out: list[tuple[int, int]] = []
+    i = 0
+    n = len(unit_spans)
+    while i < n:
+        u_start, u_end = unit_spans[i]
+        u_tokens = _count_tokens(text[u_start:u_end])
+        if u_tokens > max_tokens:
+            out.extend(deeper_split(text, u_start, u_end, max_tokens))
+            i += 1
+            continue
+
+        group_start, group_end = u_start, u_end
+        j = i + 1
+        while j < n:
+            cand_start, cand_end = unit_spans[j]
+            cand_tokens = _count_tokens(text[cand_start:cand_end])
+            if cand_tokens > max_tokens:
+                break
+            merged_tokens = _count_tokens(text[group_start:cand_end])
+            if merged_tokens > max_tokens:
+                break
+            group_end = cand_end
+            j += 1
+        out.append((group_start, group_end))
+        i = j
+    return out
+
+
+def _bounded_split(text: str, start: int, end: int, max_tokens: int) -> list[tuple[int, int]]:
+    """Split text[start:end] into pieces of <= max_tokens tokens each,
+    preferring paragraph boundaries, then sentence boundaries, then a
+    guaranteed hard token cut. Used both as a standalone "cap this oversized
+    span" call and as the `deeper_split` callback for _accumulate_bounded."""
+    if _count_tokens(text[start:end]) <= max_tokens:
+        return [(start, end)]
+
+    paras = [(s + start, e + start) for s, e in _paragraph_spans(text[start:end])]
+    if not paras:
+        return _hard_token_split(text, start, end, max_tokens)
+
+    def _sentence_deeper(t: str, s: int, e: int, mt: int) -> list[tuple[int, int]]:
+        sents = [(ss + s, se + s) for ss, se in _sentence_spans(t[s:e])]
+        if not sents:
+            return _hard_token_split(t, s, e, mt)
+        return _accumulate_bounded(t, sents, mt, _hard_token_split)
+
+    return _accumulate_bounded(text, paras, max_tokens, _sentence_deeper)
+
+
+def _spans_to_chunks(
+    text: str,
+    spans: list[tuple[int, int]],
+    heading: str | None,
+    source_type: str,
+    start_idx: int = 0,
+) -> list[Chunk]:
+    chunks = []
+    for offset, (s, e) in enumerate(spans):
+        chunk_text = text[s:e]
+        chunks.append(_token_chunk(chunk_text, heading, start_idx + offset, source_type, s, e))
+    return chunks
+
+
+def _accumulate_paragraphs_with_overlap(
+    text: str,
+    spans: list[tuple[int, int]],
+    target_tokens: int,
+    overlap_tokens: int,
+    max_tokens: int,
+) -> list[tuple[int, int]]:
+    """Group paragraph spans up to target_tokens per group, each subsequent
+    group re-including trailing paragraphs from the previous one worth up to
+    overlap_tokens (whole-paragraph granularity -- sub-paragraph overlap
+    isn't attempted, since it would break the exact-slice offset guarantee).
+    A lone paragraph exceeding max_tokens is capped via _bounded_split.
+    """
+    n = len(spans)
+    if n == 0:
+        return []
+
+    groups: list[tuple[int, int]] = []
+    i = 0
+    while i < n:
+        u_start, u_end = spans[i]
+        u_tokens = _count_tokens(text[u_start:u_end])
+        if u_tokens > max_tokens:
+            groups.extend(_bounded_split(text, u_start, u_end, max_tokens))
+            i += 1
+            continue
+
+        group_start_idx = i
+        group_end = u_end
+        j = i + 1
+        while j < n:
+            cand_tokens = _count_tokens(text[spans[j][0]:spans[j][1]])
+            if cand_tokens > max_tokens:
+                break
+            merged_tokens = _count_tokens(text[spans[group_start_idx][0]:spans[j][1]])
+            if merged_tokens > target_tokens:
+                break
+            group_end = spans[j][1]
+            j += 1
+        groups.append((spans[group_start_idx][0], group_end))
+
+        if j >= n:
+            break
+
+        # Overlap: walk back from the last included paragraph (j-1) while the
+        # cumulative token cost stays within overlap_tokens, re-including
+        # those paragraphs as the start of the next group.
+        if overlap_tokens > 0:
+            back = j - 1
+            cum = 0
+            while back > group_start_idx:
+                seg_tokens = _count_tokens(text[spans[back][0]:spans[back][1]])
+                if cum + seg_tokens > overlap_tokens:
+                    break
+                cum += seg_tokens
+                back -= 1
+            next_i = back + 1
+            # Guard against zero forward progress (overlap consuming the
+            # entire next group).
+            i = next_i if next_i > group_start_idx else j
+        else:
+            i = j
+
+    return groups
+
+
 def chunk_hierarchical_markdown(
     text: str,
     chunk_size: int = 4000,
     source_type: str = "",
+    target_tokens: int | None = None,
+    max_tokens: int | None = None,
     **kwargs: Any,
 ) -> list[Chunk]:
     """Strategy 1: splits on Markdown headings (# to #####), tracking a
     breadcrumb trail across nested sub-sections.
+
+    Legacy path (target_tokens and max_tokens both None): character-sized,
+    byte-identical to the original implementation, chunk.char_start/char_end
+    left at their -1 default.
+
+    Token path (either given): sections are split on headings, undersized
+    adjacent sections merged up to target_tokens, oversized ones split at
+    paragraph/sentence boundaries (falling back to a hard token cut) so none
+    exceeds max_tokens. Chunk text is an exact slice of `text`.
     """
     if not text or not text.strip():
         return []
+
+    if target_tokens is not None or max_tokens is not None:
+        return _chunk_hierarchical_markdown_tokens(
+            text, source_type=source_type,
+            target_tokens=target_tokens, max_tokens=max_tokens,
+        )
 
     # Capturing group keeps heading lines in the split stream
     heading_pattern = re.compile(r"(^#{1,5}\s+.*$)", re.MULTILINE)
@@ -73,7 +336,7 @@ def chunk_hierarchical_markdown(
 
     chunks: list[Chunk] = []
     current_headers = {1: None, 2: None, 3: None, 4: None, 5: None}
-    
+
     current_text_block = ""
     active_heading_attr = "None"
     global_idx = 0
@@ -120,7 +383,7 @@ def chunk_hierarchical_markdown(
                 current_text_block = part + "\n"
             else:
                 current_text_block += part + "\n"
-                
+
     if current_text_block.strip():
         chunks.append(Chunk(
             text=current_text_block.strip(),
@@ -128,8 +391,80 @@ def chunk_hierarchical_markdown(
             chunk_index=global_idx,
             source_type=source_type
         ))
-        
+
     return chunks
+
+
+def _hierarchical_sections(text: str) -> list[dict]:
+    """Exact (start, end, heading) triples for each heading-delimited
+    section of `text`, same breadcrumb logic as the legacy character path."""
+    heading_re = re.compile(r"^(#{1,5})\s+(.*)$", re.MULTILINE)
+    matches = list(heading_re.finditer(text))
+
+    if not matches:
+        return [{"start": 0, "end": len(text), "heading": "None"}]
+
+    sections = []
+    if matches[0].start() > 0 and text[:matches[0].start()].strip():
+        sections.append({"start": 0, "end": matches[0].start(), "heading": "None"})
+
+    current_headers: dict[int, str | None] = {1: None, 2: None, 3: None, 4: None, 5: None}
+    for idx, m in enumerate(matches):
+        level = len(m.group(1))
+        heading_text = m.group(2).strip()
+        current_headers[level] = heading_text
+        for l in range(level + 1, 6):
+            current_headers[l] = None
+        breadcrumbs = [current_headers[i] for i in range(1, 6) if current_headers[i]]
+        breadcrumb = " > ".join(breadcrumbs) if breadcrumbs else "None"
+
+        sec_start = m.start()
+        sec_end = matches[idx + 1].start() if idx + 1 < len(matches) else len(text)
+        sections.append({"start": sec_start, "end": sec_end, "heading": breadcrumb})
+
+    return sections
+
+
+def _chunk_hierarchical_markdown_tokens(
+    text: str,
+    source_type: str,
+    target_tokens: int | None,
+    max_tokens: int | None,
+) -> list[Chunk]:
+    sections = _hierarchical_sections(text)
+    effective_target = target_tokens or max_tokens
+    effective_max = max_tokens or target_tokens
+
+    # Merge undersized adjacent sections up to effective_target, keeping the
+    # first section's breadcrumb (most general context) for the merged block.
+    merged: list[dict] = []
+    cur = dict(sections[0])
+    cur["n_tokens"] = _count_tokens(text[cur["start"]:cur["end"]])
+    for sec in sections[1:]:
+        seg_tokens = _count_tokens(text[sec["start"]:sec["end"]])
+        if cur["n_tokens"] + seg_tokens <= effective_target:
+            cur["end"] = sec["end"]
+            cur["n_tokens"] += seg_tokens
+        else:
+            merged.append(cur)
+            cur = dict(sec)
+            cur["n_tokens"] = seg_tokens
+    merged.append(cur)
+
+    # Split anything still over effective_max at paragraph/sentence/hard-cut boundaries.
+    final_chunks: list[Chunk] = []
+    idx = 0
+    for m in merged:
+        if m["n_tokens"] > effective_max:
+            spans = _bounded_split(text, m["start"], m["end"], effective_max)
+        else:
+            spans = [(m["start"], m["end"])]
+        for s, e in spans:
+            chunk_text = text[s:e]
+            final_chunks.append(_token_chunk(chunk_text, m["heading"], idx, source_type, s, e))
+            idx += 1
+
+    return final_chunks
 
 
 def chunk_text_baseline(
@@ -137,13 +472,35 @@ def chunk_text_baseline(
     chunk_size: int = 4000,
     overlap: int = 200,
     source_type: str = "",
+    target_tokens: int | None = None,
+    max_tokens: int | None = None,
+    overlap_tokens: int | None = None,
     **kwargs: Any,
 ) -> list[Chunk]:
-    """Baseline paragraph-based chunker with character overlap, snapped
-    backward to the nearest sentence boundary.
+    """Baseline paragraph-based chunker.
+
+    Legacy path (target_tokens and max_tokens both None): character overlap
+    snapped to the nearest sentence boundary, byte-identical to the original
+    implementation, char_start/char_end left at -1.
+
+    Token path (either given): paragraphs accumulated up to target_tokens
+    tokens per chunk (default max_tokens = target_tokens when only one is
+    given), consecutive chunks overlapping by up to overlap_tokens tokens
+    (whole-paragraph granularity; default 0 when not given). Chunk text is
+    an exact slice of `text`.
     """
     if not text or not text.strip():
         return []
+
+    if target_tokens is not None or max_tokens is not None:
+        effective_target = target_tokens or max_tokens
+        effective_max = max_tokens or target_tokens
+        effective_overlap = overlap_tokens or 0
+        spans = _paragraph_spans(text)
+        groups = _accumulate_paragraphs_with_overlap(
+            text, spans, effective_target, effective_overlap, effective_max,
+        )
+        return _spans_to_chunks(text, groups, heading=None, source_type=source_type)
 
     paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
     chunks: list[Chunk] = []
@@ -172,7 +529,7 @@ def chunk_text_baseline(
                     current = lookback_window
             else:
                 current = current
-            
+
         current = f"{current}\n\n{para}" if current else para
 
     if current.strip():
@@ -185,40 +542,88 @@ def chunk_text_baseline(
 
     return chunks
 
+# Distinguishes "caller didn't pass overlap_tokens" from "caller passed 0" --
+# the legacy path's real default is 50, the token path's is 0; a plain int
+# default can't tell those two "not given" cases apart.
+_OVERLAP_TOKENS_UNSET = object()
+
+
 def chunk_sliding_window_tokens(
     text: str,
     chunk_tokens: int = 512,
-    overlap_tokens: int = 50,
+    overlap_tokens: Any = _OVERLAP_TOKENS_UNSET,
     encoding_name: str = "cl100k_base",
     source_type: str = "",
+    target_tokens: int | None = None,
+    max_tokens: int | None = None,
 ) -> list[Chunk]:
-    """Strategy 2: fixed-size token windows with sliding overlap."""
+    """Strategy 2: fixed-size token windows with sliding overlap.
+
+    Legacy path (target_tokens and max_tokens both None): byte-identical to
+    the original implementation (decoded text stripped, char_start/char_end
+    left at -1).
+
+    Token path (either given): target_tokens overrides chunk_tokens when
+    given; max_tokens caps chunk_tokens when smaller. Offsets computed via
+    cumulative decode length (exact, since any prefix of this document's own
+    token stream decodes losslessly) and chunk text is left unstripped so it
+    stays an exact slice of `text`.
+    """
     if not text or not text.strip():
         return []
 
+    if target_tokens is None and max_tokens is None:
+        legacy_overlap = 50 if overlap_tokens is _OVERLAP_TOKENS_UNSET else overlap_tokens
+        tokenizer = tiktoken.get_encoding(encoding_name)
+        tokens = tokenizer.encode(text)
+
+        chunks: list[Chunk] = []
+        start_idx = 0
+        chunk_index = 0
+
+        while start_idx < len(tokens):
+            end_idx = min(start_idx + chunk_tokens, len(tokens))
+            chunk_token_slice = tokens[start_idx:end_idx]
+            chunk_text_decoded = tokenizer.decode(chunk_token_slice)
+
+            chunks.append(Chunk(
+                text=chunk_text_decoded.strip(),
+                heading=None,
+                chunk_index=chunk_index,
+                source_type=source_type
+            ))
+
+            chunk_index += 1
+            start_idx += (chunk_tokens - legacy_overlap)
+
+            if start_idx >= len(tokens) or (chunk_tokens <= legacy_overlap):
+                break
+
+        return chunks
+
+    effective_chunk_tokens = target_tokens or chunk_tokens
+    if max_tokens is not None:
+        effective_chunk_tokens = min(effective_chunk_tokens, max_tokens)
+    effective_overlap = 0 if overlap_tokens is _OVERLAP_TOKENS_UNSET else overlap_tokens
+    effective_overlap = min(effective_overlap, max(0, effective_chunk_tokens - 1))
+
     tokenizer = tiktoken.get_encoding(encoding_name)
     tokens = tokenizer.encode(text)
-    
-    chunks: list[Chunk] = []
-    start_idx = 0
+
+    chunks = []
+    start_tok = 0
     chunk_index = 0
-
-    while start_idx < len(tokens):
-        end_idx = min(start_idx + chunk_tokens, len(tokens))
-        chunk_token_slice = tokens[start_idx:end_idx]
-        chunk_text_decoded = tokenizer.decode(chunk_token_slice)
-
-        chunks.append(Chunk(
-            text=chunk_text_decoded.strip(),
-            heading=None,
-            chunk_index=chunk_index,
-            source_type=source_type
-        ))
-        
+    while start_tok < len(tokens):
+        end_tok = min(start_tok + effective_chunk_tokens, len(tokens))
+        char_a = len(tokenizer.decode(tokens[:start_tok]))
+        char_b = len(tokenizer.decode(tokens[:end_tok]))
+        chunk_text = text[char_a:char_b]
+        chunks.append(_token_chunk(chunk_text, None, chunk_index, source_type,
+                                   char_a, char_b, n_tokens=end_tok - start_tok))
         chunk_index += 1
-        start_idx += (chunk_tokens - overlap_tokens)
-        
-        if start_idx >= len(tokens) or (chunk_tokens <= overlap_tokens):
+        start_tok += (effective_chunk_tokens - effective_overlap)
+
+        if start_tok >= len(tokens) or (effective_chunk_tokens <= effective_overlap):
             break
 
     return chunks
@@ -229,22 +634,55 @@ def chunk_parent_child(
     parent_size: int = 2048,
     child_size: int = 512,
     source_type: str = "",
+    target_tokens: int | None = None,
+    parent_target_tokens: int | None = None,
+    max_tokens: int | None = None,
     **kwargs: Any,
 ) -> list[Chunk]:
     """Strategy 3: two-tier retrieval - large parent segments broken down
     into small, targeted child vectors.
-    """
-    parent_chunks = chunk_hierarchical_markdown(text, chunk_size=parent_size, source_type=source_type)
-    hierarchical_chunks: list[Chunk] = []
-    
-    global_child_idx = 0
-    for p_chunk in parent_chunks:
-        child_paragraphs = [p.strip() for p in p_chunk.text.split("\n\n") if p.strip()]
-        current_child_text = ""
-        parent_chunk_id = f"{source_type}_P_{p_chunk.chunk_index}"
 
-        for para in child_paragraphs:
-            if len(current_child_text) + len(para) + 2 > child_size and current_child_text:
+    Legacy path (target_tokens and max_tokens both None): byte-identical to
+    the original implementation, char_start/char_end left at -1.
+
+    Token path (target_tokens and/or max_tokens given): target_tokens is the
+    CHILD size (max_tokens stands in for it when only max_tokens is given).
+    Parents are produced by the hierarchical-markdown token path
+    (parent_target_tokens, defaulting to 4x the child target -- the legacy
+    parent_size/child_size ratio); children accumulate paragraphs up to the
+    child target each (no overlap, matching the legacy children), capped at
+    max_tokens (defaulting to the child target). Both parent and child chunk text
+    are exact slices of `text`.
+    """
+    if target_tokens is None and max_tokens is None:
+        parent_chunks = chunk_hierarchical_markdown(text, chunk_size=parent_size, source_type=source_type)
+        hierarchical_chunks: list[Chunk] = []
+
+        global_child_idx = 0
+        for p_chunk in parent_chunks:
+            child_paragraphs = [p.strip() for p in p_chunk.text.split("\n\n") if p.strip()]
+            current_child_text = ""
+            parent_chunk_id = f"{source_type}_P_{p_chunk.chunk_index}"
+
+            for para in child_paragraphs:
+                if len(current_child_text) + len(para) + 2 > child_size and current_child_text:
+                    c_chunk = Chunk(
+                        text=current_child_text.strip(),
+                        heading=p_chunk.heading,
+                        chunk_index=global_child_idx,
+                        source_type=source_type
+                    )
+                    c_chunk.metadata = {
+                        "parent_id": parent_chunk_id,
+                        "parent_context": p_chunk.text[:200] + "...",
+                        "full_parent_text": p_chunk.text  # Cached for two-tier parent retrieval routines
+                    }
+                    hierarchical_chunks.append(c_chunk)
+                    global_child_idx += 1
+                    current_child_text = ""
+                current_child_text = f"{current_child_text}\n\n{para}" if current_child_text else para
+
+            if current_child_text.strip():
                 c_chunk = Chunk(
                     text=current_child_text.strip(),
                     heading=p_chunk.heading,
@@ -254,29 +692,163 @@ def chunk_parent_child(
                 c_chunk.metadata = {
                     "parent_id": parent_chunk_id,
                     "parent_context": p_chunk.text[:200] + "...",
-                    "full_parent_text": p_chunk.text  # Cached for two-tier parent retrieval routines
+                    "full_parent_text": p_chunk.text
                 }
                 hierarchical_chunks.append(c_chunk)
                 global_child_idx += 1
-                current_child_text = ""
-            current_child_text = f"{current_child_text}\n\n{para}" if current_child_text else para
 
-        if current_child_text.strip():
-            c_chunk = Chunk(
-                text=current_child_text.strip(),
-                heading=p_chunk.heading,
-                chunk_index=global_child_idx,
-                source_type=source_type
-            )
+        return hierarchical_chunks
+
+    child_target = target_tokens or max_tokens
+    effective_parent_target = parent_target_tokens or (child_target * 4)
+    effective_max = max_tokens or child_target
+
+    parent_chunks = chunk_hierarchical_markdown(
+        text, source_type=source_type,
+        target_tokens=effective_parent_target, max_tokens=effective_parent_target,
+    )
+
+    hierarchical_chunks = []
+    global_child_idx = 0
+    for p_chunk in parent_chunks:
+        parent_chunk_id = f"{source_type}_P_{p_chunk.chunk_index}"
+        child_spans = _paragraph_spans(p_chunk.text)
+        child_groups = _accumulate_bounded(
+            p_chunk.text, child_spans, child_target, _bounded_split,
+        )
+        # Cap at effective_max too, in case the child target > max_tokens.
+        if effective_max < child_target:
+            capped_groups = []
+            for s, e in child_groups:
+                capped_groups.extend(_bounded_split(p_chunk.text, s, e, effective_max))
+            child_groups = capped_groups
+
+        for s, e in child_groups:
+            child_text = p_chunk.text[s:e]
+            c_chunk = _token_chunk(child_text, p_chunk.heading, global_child_idx, source_type,
+                                   p_chunk.char_start + s, p_chunk.char_start + e)
             c_chunk.metadata = {
                 "parent_id": parent_chunk_id,
                 "parent_context": p_chunk.text[:200] + "...",
-                "full_parent_text": p_chunk.text
+                "full_parent_text": p_chunk.text,
             }
             hierarchical_chunks.append(c_chunk)
             global_child_idx += 1
 
     return hierarchical_chunks
+
+
+def _lumber_sections(text: str) -> list[tuple[int, int]]:
+    """Exact (start, end) offsets of each level-1/2-heading-delimited
+    section of `text`, same boundary semantics as chunk_lumber_chunker's
+    legacy section_pattern.split() loop."""
+    section_re = re.compile(r"^##?\s+.*$", re.MULTILINE)
+    matches = list(section_re.finditer(text))
+    if not matches:
+        return [(0, len(text))]
+
+    spans = []
+    if matches[0].start() > 0 and text[:matches[0].start()].strip():
+        spans.append((0, matches[0].start()))
+    for idx, m in enumerate(matches):
+        start = m.start()
+        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(text)
+        spans.append((start, end))
+    return spans
+
+
+def _chunk_lumber_chunker_tokens(
+    text: str,
+    llm_client: Any,
+    model_name: str,
+    source_type: str,
+    theta: int,
+    max_tokens: int,
+) -> list[Chunk]:
+    """Token path: same rolling-window shift-detection as the legacy
+    implementation, but operating on paragraph SPANS (via _paragraph_spans)
+    instead of a stripped/rejoined string list, so every emitted chunk is an
+    exact slice of `text` with a real char_start/char_end -- then capped at
+    max_tokens via _bounded_split (theta bounds the LLM's view of a group,
+    not the chunk it decides to emit)."""
+    tokenizer = tiktoken.get_encoding("cl100k_base")
+    section_spans = _lumber_sections(text)
+
+    def process_section(sec_start: int, sec_end: int) -> list[tuple[int, int]]:
+        para_spans = [(s + sec_start, e + sec_start) for s, e in _paragraph_spans(text[sec_start:sec_end])]
+        n = len(para_spans)
+        if n == 0:
+            return []
+
+        out: list[tuple[int, int]] = []
+        p_idx = 0
+        while p_idx < n:
+            group_tokens = 0
+            curr = p_idx
+            while curr < n and group_tokens < theta:
+                seg_text = f"ID {curr}: {text[para_spans[curr][0]:para_spans[curr][1]]}"
+                group_tokens += len(tokenizer.encode(seg_text))
+                curr += 1
+            group_end_idx = curr
+
+            if group_end_idx - p_idx <= 1 or p_idx == n - 1:
+                out.append((para_spans[p_idx][0], para_spans[group_end_idx - 1][1]))
+                break
+
+            document_context = "\n".join(
+                f"ID {i}: {text[para_spans[i][0]:para_spans[i][1]]}" for i in range(p_idx, group_end_idx)
+            )
+            system_prompt = (
+                "You will receive as input an English document with paragraphs identified by 'ID XXXX: <text>'.\n"
+                "Task: Find the first paragraph (not the first one) where the content clearly changes compared to the previous paragraphs.\n"
+                "Output: Return the ID of the paragraph with the content shift as in the exemplified format: 'Answer: ID XXXX'."
+            )
+            try:
+                response = llm_client.completion.create(
+                    model=model_name,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": f"Document:\n{document_context}\n\nAnswer:"}
+                    ]
+                )
+                llm_output = response.choices[0].message.content
+                match = re.search(r"ID\s*(\d+)", llm_output, re.IGNORECASE)
+                if match:
+                    shift_id = int(match.group(1))
+                    if p_idx < shift_id < group_end_idx:
+                        out.append((para_spans[p_idx][0], para_spans[shift_id - 1][1]))
+                        p_idx = shift_id
+                        continue
+                raise ValueError("Invalid or out-of-bounds ID returned.")
+            except Exception:
+                fallback_limit = min(p_idx + 3, n)
+                out.append((para_spans[p_idx][0], para_spans[fallback_limit - 1][1]))
+                p_idx = fallback_limit
+
+        return out
+
+    section_chunk_spans: list[list[tuple[int, int]] | None] = [None] * len(section_spans)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {
+            executor.submit(process_section, s, e): i
+            for i, (s, e) in enumerate(section_spans)
+        }
+        for future in concurrent.futures.as_completed(futures):
+            idx = futures[future]
+            section_chunk_spans[idx] = future.result()
+
+    final_chunks: list[Chunk] = []
+    idx = 0
+    for spans in section_chunk_spans:
+        if not spans:
+            continue
+        for s, e in spans:
+            capped = _bounded_split(text, s, e, max_tokens) if _count_tokens(text[s:e]) > max_tokens else [(s, e)]
+            for cs, ce in capped:
+                chunk_text = text[cs:ce]
+                final_chunks.append(_token_chunk(chunk_text, None, idx, source_type, cs, ce))
+                idx += 1
+    return final_chunks
 
 
 def chunk_lumber_chunker(
@@ -285,21 +857,36 @@ def chunk_lumber_chunker(
     model_name: str = "openai/gpt-4o-mini",
     source_type: str = "",
     theta: int = 550,  # token context window (from the paper)
+    target_tokens: int | None = None,
+    max_tokens: int | None = None,
     **kwargs: Any,  # absorbs unused CLI chunk_size/overlap
 ) -> list[Chunk]:
     """Strategy 4: LumberChunker adapted for 3GPP specs. Splits by major
     Markdown headers, then runs the paper's rolling-window shift-detection
     per section, concurrently.
+
+    Legacy path (target_tokens and max_tokens both None): byte-identical to
+    the original implementation, char_start/char_end left at -1.
+
+    Token path (either given): same shift-detection algorithm, but every
+    emitted chunk is an exact slice of `text` and none exceeds max_tokens
+    (max_tokens defaults to target_tokens when only that is given; theta,
+    the LLM's view window, is unchanged -- see _chunk_lumber_chunker_tokens).
     """
     if not text or not text.strip():
         return []
+
+    if target_tokens is not None or max_tokens is not None:
+        return _chunk_lumber_chunker_tokens(
+            text, llm_client, model_name, source_type, theta, max_tokens or target_tokens,
+        )
 
     tokenizer = tiktoken.get_encoding("cl100k_base")
 
     # Split on top-level headers so the LLM never crosses a major clause boundary.
     section_pattern = re.compile(r"(^##?\s+.*$)", re.MULTILINE)
     parts = section_pattern.split(text)
-    
+
     sections = []
     current_section = ""
     for part in parts:
@@ -327,7 +914,7 @@ def chunk_lumber_chunker(
             group_paras = []
             group_tokens = 0
             curr_slice_idx = p_idx
-            
+
             while curr_slice_idx < N and group_tokens < theta:
                 para_text = f"ID {curr_slice_idx}: {paragraphs[curr_slice_idx]}"
                 group_paras.append(para_text)
@@ -346,7 +933,7 @@ def chunk_lumber_chunker(
                 "Task: Find the first paragraph (not the first one) where the content clearly changes compared to the previous paragraphs.\n"
                 "Output: Return the ID of the paragraph with the content shift as in the exemplified format: 'Answer: ID XXXX'."
             )
-            
+
             try:
                 response = llm_client.completion.create(
                     model=model_name,
@@ -413,8 +1000,34 @@ def calculate_token_budget_safe_kwargs(strategy_str: str, chunk_size: int, overl
         TOKEN_RESERVATION_BUFFER = 64
         allocated_chunk_size = max(128, chunk_size - TOKEN_RESERVATION_BUFFER)
         allocated_overlap = max(0, overlap - int(TOKEN_RESERVATION_BUFFER * 0.2))
-        
+
     return allocated_chunk_size, allocated_overlap
+
+
+# combining these with target_tokens/max_tokens is rejected, not resolved silently
+_CHAR_SIZE_KEYS = ("chunk_size", "overlap", "parent_size", "child_size")
+
+
+def _validate_token_sizing(strategy: ChunkingStrategy, kwargs: dict[str, Any]) -> None:
+    """ValueError on bad token values or a mix with explicit char sizes / chunk_tokens"""
+    for name in ("target_tokens", "max_tokens"):
+        value = kwargs.get(name)
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value <= 0):
+            raise ValueError(f"{name} must be a positive integer, got {value!r}")
+
+    target, cap = kwargs.get("target_tokens"), kwargs.get("max_tokens")
+    if target is not None and cap is not None and cap < target:
+        raise ValueError(f"max_tokens ({cap}) must be >= target_tokens ({target})")
+
+    conflicting = [k for k in _CHAR_SIZE_KEYS if kwargs.get(k) is not None]
+    if strategy == ChunkingStrategy.SLIDING_WINDOW_TOKENS and kwargs.get("chunk_tokens") is not None:
+        conflicting.append("chunk_tokens")
+    if conflicting:
+        raise ValueError(
+            "target_tokens/max_tokens cannot be combined with an explicit size argument "
+            f"({', '.join(conflicting)}). Use either token-based sizing "
+            "(target_tokens/max_tokens) or the existing size arguments, not both."
+        )
 
 
 def chunk_document(
@@ -422,10 +1035,19 @@ def chunk_document(
     strategy: ChunkingStrategy | str,
     **kwargs: Any,
 ) -> list[Chunk]:
-    """Routes text to the selected chunking strategy."""
+    """Routes text to the selected chunking strategy.
+
+    sizing is char-based by default; target_tokens/max_tokens opt in to token
+    sizing for any strategy (mixing the two styles raises ValueError).
+    """
 
     is_structured = kwargs.pop("is_structured", False)
-    
+
+    # None = not set
+    for _opt in ("target_tokens", "max_tokens"):
+        if kwargs.get(_opt) is None:
+            kwargs.pop(_opt, None)
+
     _STRATEGY_MAP = {
         ChunkingStrategy.HIERARCHICAL_MARKDOWN: chunk_hierarchical_markdown,
         ChunkingStrategy.SLIDING_WINDOW_TOKENS: chunk_sliding_window_tokens,
@@ -443,11 +1065,22 @@ def chunk_document(
                 f"Supported choices: {[s.value for s in ChunkingStrategy]}"
             )
 
+    if "target_tokens" in kwargs or "max_tokens" in kwargs:
+        _validate_token_sizing(strategy, kwargs)
+
     strategy_str = strategy.value
     # pop: enrichment isn't a chunker param and sliding_window has no **kwargs.
     enrichment = kwargs.pop("enrichment", "none")
 
-    if strategy == ChunkingStrategy.SLIDING_WINDOW_TOKENS:
+    # Only the legacy chunk_tokens/overlap_tokens path gets the
+    # metadata_tagging safety-margin injection below -- a caller using the
+    # new target_tokens/max_tokens keys must not have them overridden or
+    # have an unrelated legacy overlap_tokens default (50) silently injected
+    # alongside (that previously forced near-total overlap on the token path,
+    # since target_tokens/max_tokens take priority for size but overlap_tokens
+    # doesn't distinguish "explicitly 50" from "injected default 50").
+    if (strategy == ChunkingStrategy.SLIDING_WINDOW_TOKENS
+            and "target_tokens" not in kwargs and "max_tokens" not in kwargs):
         # Accept generic (chunk_size) or specific (chunk_tokens) names.
         raw_size = kwargs.get("chunk_tokens", kwargs.get("chunk_size", 512))
         raw_overlap = kwargs.get("overlap_tokens", kwargs.get("overlap", 50))

@@ -96,8 +96,18 @@ def main(argv: list[str] | None = None) -> None:
     p_ingest.add_argument("--data",       default=None,           help="Data directory")
     p_ingest.add_argument("--model",      default="minilm",       help="Embedding model key")
     p_ingest.add_argument("--db-path",    default="chroma_db",    help="ChromaDB path")
-    p_ingest.add_argument("--chunk-size", type=int, default=1024, help="Chunk size in chars")
-    p_ingest.add_argument("--overlap",    type=int, default=200,  help="Chunk overlap in chars")
+    # defaults (1024 / 200) applied in _run_ingest so explicit values can be detected
+    p_ingest.add_argument("--chunk-size", type=int, default=None, help="Chunk size in chars (default 1024)")
+    p_ingest.add_argument("--overlap",    type=int, default=None, help="Chunk overlap in chars (default 200)")
+    p_ingest.add_argument("--target-tokens", type=int, default=None,
+                          help="Optional: size chunks in tokens (cl100k_base) instead of characters -- "
+                               "target size per chunk. Cannot be combined with --chunk-size/--overlap.")
+    p_ingest.add_argument("--max-tokens", type=int, default=None,
+                          help="Optional: hard cap on tokens per chunk (defaults to --target-tokens). "
+                               "Cannot be combined with --chunk-size/--overlap.")
+    p_ingest.add_argument("--overlap-tokens", type=int, default=None,
+                          help="Optional: token overlap between chunks; text_baseline and "
+                               "sliding_window_tokens only, and requires --target-tokens/--max-tokens.")
     p_ingest.add_argument("--no-resume",  action="store_true",    help="Disable resume")
     p_ingest.add_argument("--collection", default=None,
                           help="Override collection name (default: source_type_model)")
@@ -532,24 +542,47 @@ def _run_ingest(args) -> None:
             # Distinct key from chunking's llm_client; popped before chunk_document().
             chunk_kwargs["enrichment_llm_client"] = llm_client
 
-    # Pull structural constraints from the strategy definition JSON
-    strat_path = Path("chunking_strategies.json")
-    if strat_path.exists():
-        try:
-            strat_meta = json.loads(strat_path.read_text(encoding="utf-8")).get(strategy, {})
-            if strat_meta.get("unit") == "tokens":
-                chunk_kwargs["chunk_tokens"] = args.chunk_size
-                chunk_kwargs["overlap_tokens"] = args.overlap
-            else:
-                chunk_kwargs["chunk_size"] = args.chunk_size
-                chunk_kwargs["overlap"] = args.overlap
-        except Exception as e:
-            print(f"[Warning] Failed to parse chunking_strategies.json ({e}). Falling back to characters.")
-            chunk_kwargs["chunk_size"] = args.chunk_size
-            chunk_kwargs["overlap"] = args.overlap
+    chunk_size = getattr(args, "chunk_size", None)
+    overlap    = getattr(args, "overlap", None)
+    target_tokens  = getattr(args, "target_tokens", None)
+    max_tokens     = getattr(args, "max_tokens", None)
+    overlap_tokens = getattr(args, "overlap_tokens", None)
+
+    if target_tokens is not None or max_tokens is not None:
+        # token sizing: don't inject the char defaults
+        if chunk_size is not None or overlap is not None:
+            sys.exit("--target-tokens/--max-tokens cannot be combined with --chunk-size/--overlap; "
+                     "use token sizing or character sizing, not both.")
+        if overlap_tokens is not None and strategy not in ("text_baseline", "sliding_window_tokens"):
+            sys.exit(f"--overlap-tokens is not supported for the {strategy} strategy.")
+        chunk_kwargs["target_tokens"] = target_tokens
+        chunk_kwargs["max_tokens"] = max_tokens
+        if overlap_tokens is not None:
+            chunk_kwargs["overlap_tokens"] = overlap_tokens
+        print(f"  Chunk size: TOKENS (target={target_tokens}, max={max_tokens or target_tokens})")
     else:
-        chunk_kwargs["chunk_size"] = args.chunk_size
-        chunk_kwargs["overlap"] = args.overlap
+        if overlap_tokens is not None:
+            sys.exit("--overlap-tokens requires --target-tokens or --max-tokens.")
+        chunk_size = 1024 if chunk_size is None else chunk_size
+        overlap    = 200 if overlap is None else overlap
+        # pull structural constraints from the strategy definition json
+        strat_path = Path("chunking_strategies.json")
+        if strat_path.exists():
+            try:
+                strat_meta = json.loads(strat_path.read_text(encoding="utf-8")).get(strategy, {})
+                if strat_meta.get("unit") == "tokens":
+                    chunk_kwargs["chunk_tokens"] = chunk_size
+                    chunk_kwargs["overlap_tokens"] = overlap
+                else:
+                    chunk_kwargs["chunk_size"] = chunk_size
+                    chunk_kwargs["overlap"] = overlap
+            except Exception as e:
+                print(f"[Warning] Failed to parse chunking_strategies.json ({e}). Falling back to characters.")
+                chunk_kwargs["chunk_size"] = chunk_size
+                chunk_kwargs["overlap"] = overlap
+        else:
+            chunk_kwargs["chunk_size"] = chunk_size
+            chunk_kwargs["overlap"] = overlap
 
     stats = ingest(**chunk_kwargs)
 
