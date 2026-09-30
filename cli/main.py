@@ -138,6 +138,9 @@ def main(argv: list[str] | None = None) -> None:
                       help="Backend for computing embeddings (default: local)")
     p_ingest.add_argument("--batch-size", type=int, default=None,
                           help="Number of chunks to send per embedding call (defaults to 256 for local, 500 for openrouter)")
+    p_ingest.add_argument("--embed-max-workers", type=int, default=None,
+                          help="OpenRouterEmbedder only: in-flight sub-batch requests per embed() call "
+                               "(default: 10). Ignored for --embed-backend local.")
     p_ingest.add_argument("--llm-backend", choices=["local", "openrouter"], default="local",
                           help="Backend for chunking strategies (e.g. lumber_chunker) and/or enrichment "
                                "strategies (llm_metadata) that require an LLM — shared by both, since a "
@@ -386,10 +389,13 @@ def _get_source(source_type: str, use_marker: bool = False):
 
 
 
-def _get_embedder(model_key: str, backend: str = "local"):
+def _get_embedder(model_key: str, backend: str = "local", max_workers: int | None = None):
     if backend == "openrouter":
         from open_telco_rag.embedders.openrouter_embedder import OpenRouterEmbedder
-        return OpenRouterEmbedder(model_key=model_key)
+        kwargs = {"model_key": model_key}
+        if max_workers is not None:
+            kwargs["max_workers"] = max_workers
+        return OpenRouterEmbedder(**kwargs)
     else:
         from open_telco_rag.embedders.sentense_transformers import SentenceTransformerEmbedder
         return SentenceTransformerEmbedder(model_key=model_key)
@@ -472,7 +478,8 @@ def _run_ingest(args) -> None:
     # 256 matches the GPU micro-batch size; override with --batch-size on tight hardware.
     default_batch_size = 500 if embed_backend == "openrouter" else 256
     batch_size_arg = getattr(args, "batch_size", None) or default_batch_size
-    embedder = _get_embedder(args.model, backend=embed_backend)
+    embed_max_workers = getattr(args, "embed_max_workers", None)
+    embedder = _get_embedder(args.model, backend=embed_backend, max_workers=embed_max_workers)
     store      = _get_store(args.source_type, args.model, args.db_path,
                             collection=getattr(args, "collection", None),
                             distance_metric=distance_metric)

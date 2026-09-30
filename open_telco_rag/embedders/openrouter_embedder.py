@@ -2,6 +2,7 @@
 API for models not run locally via sentence-transformers."""
 import os
 import json
+import threading
 import time
 from pathlib import Path
 from typing import List
@@ -18,6 +19,10 @@ class OpenRouterEmbedder:
         models_file: str | Path = Path(__file__).parent.parent.parent / "configs" / "embedding_models.json",
         # kept low to stay under OpenAI's per-request payload limit
         batch_size: int = 200,
+        # in-flight batch requests; exposed (not just a local default) so
+        # calibration/throughput runs can compare concurrency levels using
+        # this exact code path instead of a bespoke harness.
+        max_workers: int = 10,
     ):
         models_file = Path(models_file)
         if not models_file.exists():
@@ -33,6 +38,12 @@ class OpenRouterEmbedder:
         self._model_name  = available[model_key]["model_name"]
         self._dimensions  = available[model_key]["dimensions"]
         self.batch_size   = batch_size
+        self.max_workers  = max_workers
+        # Plain string prefixes (e.g. qwen3-embedding-8b's instruction-style
+        # query prefix) applied only when set -- see SentenceTransformerEmbedder
+        # for the same mechanism used on the local-serving side.
+        self._query_prefix    = available[model_key].get("query_prefix")
+        self._document_prefix = available[model_key].get("document_prefix")
         
         self.api_key = os.environ.get("OPENROUTER_API_KEY")
         if not self.api_key:
@@ -45,6 +56,14 @@ class OpenRouterEmbedder:
         adapter = HTTPAdapter(pool_connections=20, pool_maxsize=20)
         self.session.mount('https://', adapter)
 
+        # Real usage accounting from OpenRouter's own response body (not a
+        # local token/price estimate) -- accumulated across every embed()
+        # call this instance makes; process_batch() updates these under
+        # _usage_lock since batches run concurrently.
+        self.total_prompt_tokens = 0
+        self.total_cost_usd = 0.0
+        self._usage_lock = threading.Lock()
+
     @property
     def model_key(self) -> str:
         return self._model_key
@@ -53,14 +72,16 @@ class OpenRouterEmbedder:
     def dimensions(self) -> int:
         return self._dimensions
 
+    def _apply_prefix(self, texts: List[str], is_query: bool) -> List[str]:
+        prefix = self._query_prefix if is_query else self._document_prefix
+        if not prefix:
+            return texts
+        return [f"{prefix}{t}" for t in texts]
+
     def embed(self, texts: List[str], is_query: bool = False) -> List[List[float]]:
-        # is_query: accepted for Embedder protocol parity with
-        # SentenceTransformerEmbedder; currently a no-op here since no
-        # OpenRouter-hosted entry in embedding_models.json needs a query/
-        # document prefix (or-3-small, or-bge-m3 -- BGE-M3 needs none per
-        # its own model card).
         import concurrent.futures
-        
+
+        texts = self._apply_prefix(texts, is_query)
         all_embeddings_dict = {}
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -89,6 +110,12 @@ class OpenRouterEmbedder:
                         backoff *= 2
                         continue
                         
+                    usage = json_resp.get("usage") or {}
+                    if usage:
+                        with self._usage_lock:
+                            self.total_prompt_tokens += usage.get("prompt_tokens", 0)
+                            self.total_cost_usd += usage.get("cost", 0.0)
+
                     data = json_resp.get("data", [])
                     data_sorted = sorted(data, key=lambda x: x["index"])
                     return start_idx, [item["embedding"] for item in data_sorted]
@@ -102,7 +129,7 @@ class OpenRouterEmbedder:
                     
             raise Exception(f"Failed to fetch embeddings after {retries} attempts.")
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             futures = {}
             for i in range(0, len(texts), self.batch_size):
                 batch = texts[i:i + self.batch_size]
