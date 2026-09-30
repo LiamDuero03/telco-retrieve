@@ -559,6 +559,9 @@ def chunk_sliding_window_tokens(
 ) -> list[Chunk]:
     """Strategy 2: fixed-size token windows with sliding overlap.
 
+    overlap_tokens has a sentinel default (hidden from the signature): 50 on
+    the legacy path, 0 on the token path. pass it explicitly to override.
+
     Legacy path (target_tokens and max_tokens both None): byte-identical to
     the original implementation (decoded text stripped, char_start/char_end
     left at -1).
