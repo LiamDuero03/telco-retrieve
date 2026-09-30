@@ -526,6 +526,10 @@ carry an evidence span (`evidence_doc_id`, `evidence_char_start`,
 
 The `span_hit_*_rate` totals are the mean over questions with a real value.
 
+With `--resolve-parents` on a token-sized `parent_child` collection, a retrieved
+child is replaced by its parent text and the span metrics use the parent's
+span (collections ingested before this was recorded fall back to the child's).
+
 **Evidence-span fields in question files.** A question file is
 `{"questions": [...]}`. To enable the span metrics, each question needs three
 optional fields, next to the usual `question`, `corpus`, `answer_type`, ...:

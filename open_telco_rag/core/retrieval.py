@@ -148,6 +148,11 @@ def _resolve_parent_chunks(results: list[SearchResult]) -> list[SearchResult]:
             if parent_id in seen_parents:
                 continue
             seen_parents.add(parent_id)
+            if "parent_char_start" in meta:
+                # token-sized parent_child: the text is now the parent's, so
+                # its offsets are too (the span metrics read these)
+                meta = {**meta, "char_start": meta["parent_char_start"],
+                        "char_end": meta["parent_char_end"], "n_tokens": meta["parent_n_tokens"]}
             resolved.append(SearchResult(
                 text=full_parent_text,
                 distance=r.distance,

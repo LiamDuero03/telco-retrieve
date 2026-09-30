@@ -734,6 +734,11 @@ def chunk_parent_child(
                 "parent_id": parent_chunk_id,
                 "parent_context": p_chunk.text[:200] + "...",
                 "full_parent_text": p_chunk.text,
+                # the parent's own span, so resolving a child to its parent
+                # keeps offsets that describe the text actually used
+                "parent_char_start": p_chunk.char_start,
+                "parent_char_end": p_chunk.char_end,
+                "parent_n_tokens": p_chunk.n_tokens,
             }
             hierarchical_chunks.append(c_chunk)
             global_child_idx += 1
