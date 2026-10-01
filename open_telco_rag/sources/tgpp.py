@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 from open_telco_rag.core.cleaning import base_clean
@@ -48,24 +49,36 @@ class TPPSource:
             return self._load_docx(path)
         raise ValueError(f"Unsupported file type: {path.suffix}")
 
+    def clean_steps(self) -> list[tuple[str, Callable[[str], str]]]:
+        """the steps clean() applies after base_clean, in order, as (name, function); scripts/check_cleaning.py
+        reports what each of them removes"""
+        def remove(pattern: str, flags: int = 0) -> Callable[[str], str]:
+            return lambda text: re.sub(pattern, "", text, flags=flags)
+
+        def cover(text: str) -> str:
+            # 3GPP document cover table boilerplate: start of the document only, see _COVER_START
+            match = _COVER.search(text)
+            if match and match.start() <= _COVER_START:
+                return text[:match.start()] + "The present document" + text[match.end():]
+            return text
+
+        return [
+            ("table header blocks", remove(r"(\+[-=+]+\+\n)(\|.*?\n)+(\+[-=+]+\+\n?)+")),
+            ("image references", remove(r"!\[.*?\]\(.*?\)(\{.*?\})?")),
+            # pandoc superscripts (^x^): one line, no spaces, no $, so LaTeX exponents ($10^{-5}$) survive
+            ("superscripts", remove(r"\^[^^\s$]+\^")),
+            # width/height attributes left over from image conversion
+            ("width attributes", remove(r"\{[^}\n]*width=[^}\n]*\}")),
+            ("media references", remove(r"media/image\d+\.\w+")),
+            ("cover boilerplate", cover),
+            ("blank lines", lambda text: re.sub(r"\n{3,}", "\n\n", text)),
+        ]
+
     def clean(self, text: str) -> str:
         """Apply 3GPP specific cleaning on top of base cleaning."""
         text = base_clean(text)
-        # Remove markdown table header blocks (pipe table format)
-        text = re.sub(r"(\+[-=+]+\+\n)(\|.*?\n)+(\+[-=+]+\+\n?)+", "", text)
-        # Remove image references
-        text = re.sub(r"!\[.*?\]\(.*?\)(\{.*?\})?", "", text)
-        # Remove pandoc superscripts (^x^): one line, no spaces, no $, so LaTeX exponents ($10^{-5}$) survive
-        text = re.sub(r"\^[^^\s$]+\^", "", text)
-        # Remove width/height attributes left over from image conversion
-        text = re.sub(r'\{[^}\n]*width=[^}\n]*\}', '', text)
-        # Remove standalone media references
-        text = re.sub(r"media/image\d+\.\w+", "", text)
-        # Remove 3GPP document cover table boilerplate (start of the document only, see _COVER_START)
-        cover = _COVER.search(text)
-        if cover and cover.start() <= _COVER_START:
-            text = text[:cover.start()] + "The present document" + text[cover.end():]
-        text = re.sub(r"\n{3,}", "\n\n", text)
+        for _, step in self.clean_steps():
+            text = step(text)
         return text.strip()
 
     def metadata(self, path: Path) -> dict:

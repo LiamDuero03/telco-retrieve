@@ -11,7 +11,7 @@ import pytest
 
 SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 ALL = ["embedder_smoke_test", "estimate_embedding_cost", "time_embedding_throughput",
-       "time_openrouter_embedding"]
+       "time_openrouter_embedding", "check_cleaning"]
 
 
 def _load(name: str):
