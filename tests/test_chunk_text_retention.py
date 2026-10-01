@@ -20,6 +20,9 @@ def _table(n: int) -> str:
 
 # one blank-line-delimited block that mixes prose with lines that end without punctuation
 BLOCK = "\n".join([
+    "see clause 4.4.2.0 for the details of the procedure",          # internal dots, no closing punctuation
+    "| 4.4.2.0 | General | 91 |",
+    "The value is 3.5 percent of the total and 7.25 of the rest",
     " ".join(f"The function {i} shall be configured before the procedure starts." for i in range(12)),
     _table(40),
     "- a list item without a full stop",
@@ -32,6 +35,28 @@ DOC = f"# Spec\n\n## 1 Scope\n\n{BLOCK}\n\n## 2 Other\n\nShort closing paragraph
 def test_every_line_is_covered_by_a_sentence_span():
     text = "first line without a stop\n| a | b |\n| c | d |\nlast line."
     covered = "".join(text[s:e] for s, e in _sentence_spans(text))
+    assert _squash(covered) == _squash(text)
+
+
+@pytest.mark.parametrize("line", [
+    "see clause 4.4.2.0 for the details",
+    "| 4.4.2.0 | General | 91 |",
+    "The value is 3.5 percent of the total",
+    "version 1.2.3 released on 2026-01-02 (see 5.1)",
+    "ends with a number 12.5",
+])
+def test_a_line_with_internal_punctuation_but_no_closing_punctuation_is_one_span(line):
+    text = "first line.\n" + line + "\nlast line."
+    pieces = [text[s:e] for s, e in _sentence_spans(text)]
+    assert pieces == ["first line.", line, "last line."]
+
+
+def test_spans_are_ordered_disjoint_and_cover_every_non_blank_character():
+    text = ("Intro text. More 3.5 text! Really? Yes...\n\n   indented.line.with.dots\n| a | b |\n"
+            "e.g. this one, and 4.2.1 that one\n...\n?!\nend")
+    spans = _sentence_spans(text)
+    assert all(a < b for a, b in spans) and all(spans[i][1] <= spans[i + 1][0] for i in range(len(spans) - 1))
+    covered = "".join(text[s:e] for s, e in spans)
     assert _squash(covered) == _squash(text)
 
 
