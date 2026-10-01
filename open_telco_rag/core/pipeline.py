@@ -50,7 +50,7 @@ def _span_metadata(chunk) -> dict:
 # the progress file lists fully ingested files and is tied to a fingerprint of the
 # non-secret settings that decide what gets stored
 
-_SECRET_KEY = re.compile(r"key|secret|token(?!s)|password|authorization|credential", re.IGNORECASE)
+_SECRET_KEY = re.compile(r"key|secret|token(?!s|izer)|password|authorization|credential", re.IGNORECASE)
 _NON_CONTENT_KWARGS = {"batch_size", "write_batch_size", "resume", "log_dir", "on_progress"}
 
 
