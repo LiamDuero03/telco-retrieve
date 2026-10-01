@@ -116,6 +116,22 @@ def main(argv: list[str] | None = None) -> None:
     p_ingest.add_argument("--overlap-tokens", type=int, default=None,
                           help="Optional: token overlap between chunks; text_baseline and "
                                "sliding_window_tokens only, and requires --target-tokens/--max-tokens.")
+    p_ingest.add_argument("--bound-tokens", type=int, default=None,
+                          help="Optional: no stored chunk may exceed this many tokens; chunks over the bound are split "
+                               "after chunking (paragraph, block, sentence, line, token). Works with every strategy and sizing.")
+    p_ingest.add_argument("--bound-tokenizer", default=None,
+                          help="Optional: tokenizer that measures --bound-tokens: tiktoken:<encoding>, an embedding model key "
+                               "(e.g. bge-m3), a Hugging Face model name or a tokenizer.json path (default: tiktoken:cl100k_base). "
+                               "The bound only guarantees chunks fit in these tokens; other embedders count differently.")
+    p_ingest.add_argument("--bound-margin", type=int, default=None,
+                          help="Optional: tokens reserved for special tokens: chunks are cut at --bound-tokens minus this "
+                               "(default 2, so a 512 limit gives 510).")
+    p_ingest.add_argument("--bound-verify", default=None,
+                          help="Optional: check the chunks against other embedders after the bound pass, as name=limit pairs "
+                               "(e.g. bge-m3=512,minilm=256; names as for --bound-tokenizer). Needs --bound-tokens.")
+    p_ingest.add_argument("--bound-outliers", choices=["warn", "split"], default=None,
+                          help="Optional: a chunk still over a --bound-verify limit is only reported (warn, the default) "
+                               "or cut further (split). Needs --bound-verify.")
     p_ingest.add_argument("--no-resume",  action="store_true",    help="Disable resume")
     p_ingest.add_argument("--collection", default=None,
                           help="Override collection name (default: source_type_model)")
@@ -623,6 +639,30 @@ def _run_ingest(args) -> None:
         else:
             chunk_kwargs["chunk_size"] = chunk_size
             chunk_kwargs["overlap"] = overlap
+
+    bound_tokens = getattr(args, "bound_tokens", None)
+    bound_tokenizer = getattr(args, "bound_tokenizer", None)
+    bound_margin = getattr(args, "bound_margin", None)
+    bound_verify = getattr(args, "bound_verify", None)
+    bound_outliers = getattr(args, "bound_outliers", None)
+    if bound_tokens is None and any(v is not None for v in (bound_tokenizer, bound_margin, bound_verify, bound_outliers)):
+        sys.exit("error: --bound-tokenizer, --bound-margin, --bound-verify and --bound-outliers require --bound-tokens.")
+    if bound_tokens is not None:
+        from open_telco_rag.core.chunk_bound import validate_bound
+        try:
+            limit = validate_bound(bound_tokens, bound_tokenizer, bound_margin, bound_verify, bound_outliers)
+        except ValueError as e:
+            sys.exit(f"error: {e}")
+        chunk_kwargs["bound_tokens"] = bound_tokens
+        if bound_tokenizer is not None:
+            chunk_kwargs["bound_tokenizer"] = bound_tokenizer
+        if bound_margin is not None:
+            chunk_kwargs["bound_margin"] = bound_margin
+        if bound_verify is not None:
+            chunk_kwargs["bound_verify"] = bound_verify
+            chunk_kwargs["bound_outliers"] = bound_outliers or "warn"
+        from open_telco_rag.core.chunk_bound import DEFAULT_TOKENIZER
+        print(f"  Token bound: {limit} tokens per chunk ({bound_tokens} minus margin, tokenizer: {bound_tokenizer or DEFAULT_TOKENIZER})")
 
     stats = ingest(**chunk_kwargs)
 

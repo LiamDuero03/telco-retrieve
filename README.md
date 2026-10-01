@@ -275,6 +275,52 @@ from open_telco_rag.core.chunking import chunk_document
 chunks = chunk_document(text, "text_baseline", target_tokens=200, max_tokens=256)
 ```
 
+### Optional: hard token bound
+
+Embedding models cut their input at a fixed length (512 tokens for many of them), and the text past it
+is silently ignored. `--bound-tokens N` guarantees that no stored chunk is longer than N tokens, for
+every strategy and with character or token sizing; without it nothing changes.
+
+```bash
+open-telco-rag ingest 3gpp --model bge-m3 --strategy hierarchical_markdown \
+  --target-tokens 400 --bound-tokens 512 --bound-tokenizer bge-m3
+```
+
+- A chunk over the bound is split after chunking at the coarsest boundary that works: paragraphs, then
+  table and text blocks, then sentences, then lines, and last a cut by token count. A markdown table is
+  split by rows and its header rows are repeated at the top of every part (those parts are not exact
+  slices of the source). The heading and the metadata stay on every piece; chunks within the bound are
+  untouched.
+- **The bound is counted in one tokenizer, `tiktoken:cl100k_base` by default, and only guarantees that
+  chunks fit in those tokens.** Other embedders count differently (on technical text 4-20% more than
+  cl100k), so set the ceiling with headroom for the strictest embedder you use, and verify it with
+  `scripts/check_chunk_bound.py`, which reports chunks over each model's own limit and can calibrate the
+  ceiling from your data.
+- `--bound-tokenizer` changes the counting tokenizer: `tiktoken:<encoding>`, an embedding model key from
+  `configs/embedding_models.json`, a Hugging Face model name or a `tokenizer.json` path. Only tokenizer
+  files are downloaded, never model weights.
+- `--bound-margin K` reserves K tokens for special tokens (default 2: a 512 limit cuts at 510).
+- The bound, the tokenizer name and the margin (with their defaults filled in) are part of the resume
+  record and of the settings sidecar: changing any of them starts a new ingest instead of skipping
+  finished files.
+- `--bound-verify NAME=LIMIT,...` (for example `bge-m3=512,minilm=256`) names other embedders to check
+  the chunks against after the cl100k pass. A chunk still over one of those limits is only logged
+  (`--bound-outliers warn`, the default) or cut further (`--bound-outliers split`). Nothing happens
+  without `--bound-verify`.
+- Enrichment (`--enrichment`) adds text after chunking, and `--resolve-parents` returns the parent
+  text; neither is bounded. Leave room with `--bound-margin` when enrichment is on.
+- Check a collection or a staged directory without changing anything:
+  `python scripts/check_chunk_bound.py --data-dir DIR --source-type 3gpp --tokenizers minilm bge bge-m3 --calibrate`
+  reports, per tokenizer, chunks over its limit, how its token counts compare with cl100k (p50, p99,
+  p99.9, max), the largest chunks and what makes them long, the text retained by the bound pass and by
+  the `min_length` filter, and with `--calibrate` the largest cl100k ceiling that leaves no chunk (or at
+  most 0.1%) over each limit, so the ceiling is chosen from your data.
+
+```python
+from open_telco_rag.core.chunking import chunk_document
+chunks = chunk_document(text, "text_baseline", chunk_size=2000, bound_tokens=512, bound_tokenizer="bge-m3")
+```
+
 ### Embedding models and prefixes
 
 `--model` takes any key from `configs/embedding_models.json`. Besides the
@@ -841,6 +887,7 @@ Small tools in `scripts/` (run from the repository root, after `pip install -e .
 | Script | Purpose |
 |--------|---------|
 | `add_evidence_spans.py` | Optional: add evidence spans to a question file so the span metrics can be computed. |
+| `check_chunk_bound.py` | Read-only: per tokenizer, chunks over its limit, token-count ratio against cl100k, the largest chunks, text retained, and a calibration of the cl100k ceiling, for a collection or a staged directory. |
 | `embedder_smoke_test.py` | Embed a few sample texts with every locally hosted embedder and report dimension, throughput and truncation. |
 | `estimate_embedding_cost.py` | Estimate what re-embedding a collection would cost through OpenRouter (prices are a dated snapshot; `--refresh-pricing` fetches live ones). |
 | `time_embedding_throughput.py` | Measure local embedding throughput on real chunk texts from an existing collection. |
