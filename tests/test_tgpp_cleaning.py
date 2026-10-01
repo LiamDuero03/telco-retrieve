@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import re
 
+import pytest
+
 from open_telco_rag.sources.tgpp import TPPSource
 
 clean = TPPSource().clean
@@ -74,3 +76,55 @@ def test_a_generated_document_keeps_almost_all_of_its_text():
 def test_adjacent_latex_maths_without_a_space_is_untouched():
     text = "a $x^{2}$$y^{3}$ b"
     assert clean(text) == text
+
+
+# ── the cover match belongs to the start of the document and stops at every form of the Scope heading ──────────
+
+COVER = "3rd Generation Partnership Project; Technical Specification Group Example"
+
+
+def _body(n: int, label: str = "Body") -> str:
+    return "\n\n".join(f"{label} paragraph {i} of the synthetic document says the function shall act." for i in range(n))
+
+
+def test_a_citation_deep_in_the_document_does_not_start_a_cover_match():
+    text = (f"# Title\n\n## 1 Scope\n\nThe present document specifies things.\n\n{_body(120)}\n\n"
+            f"## 2 References\n\n[5] {COVER}, Release 99.\n\n{_body(150, 'Later')}\n\n"
+            "## 9 End\n\nThe present document ends here.")
+    assert clean(text) == text
+
+
+def test_a_cover_phrase_far_from_the_start_is_not_a_cover_even_without_a_scope_heading():
+    text = f"{_body(100)}\n\nSee {COVER} for details.\n\n{_body(100, 'More')}\n\nThe present document is informative."
+    assert clean(text) == text
+
+
+def test_a_cover_whose_present_document_is_too_far_away_removes_nothing():
+    text = f"{COVER}\n\n{_body(400, 'Contents')}\n\nThe present document follows."
+    assert clean(text) == text
+
+
+@pytest.mark.parametrize("heading", ["# --- 1 Scope", "## **1 Scope**", "1 Scope", "# 1 Scope", "## ---- **1 Scope**",
+                                     "### ***1 Scope***", "# Scope", "# --- Scope"])
+def test_every_form_of_the_scope_heading_stops_the_cover(heading):
+    text = f"{COVER}\n\nForeword text of the cover.\n\n{heading}\n\nThe present document covers the synthetic subject."
+    out = clean(text)
+    assert heading in out and "The present document covers the synthetic subject." in out and "Foreword text" in out
+
+
+def test_the_legacy_cover_with_a_scope_heading_after_it_is_still_removed():
+    text = (f"# Title\n\n{COVER}\n\nKeywords: x\n\nThe present document has been developed within the project.\n\n"
+            "# --- 1 Scope\n\nBody of the scope.")
+    out = clean(text)
+    assert "Keywords" not in out and out.startswith("# Title") and "# --- 1 Scope" in out and "Body of the scope." in out
+
+
+def test_a_generated_long_document_with_a_late_citation_keeps_its_text_and_scope_heading():
+    parts = ["# Title", "", COVER, "", "Cover text.", "", "The present document has been developed within the project.", "",
+             "# --- 1 Scope", "", "The present document specifies a synthetic interface.", ""]
+    for i in range(1, 300):
+        parts += [f"## {i + 1} Clause {i}", "", f"Text of clause {i}, ordinary prose that must survive cleaning.", ""]
+    parts += ["## 301 References", "", f"[1] {COVER}: a citation.", "", "The present document ends here."]
+    raw = "\n".join(parts)
+    out = clean(raw)
+    assert len(out) >= 0.95 * len(raw) and "# --- 1 Scope" in out and "[1] 3rd Generation Partnership Project" in out

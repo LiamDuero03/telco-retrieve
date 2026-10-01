@@ -10,6 +10,18 @@ from open_telco_rag.core.cleaning import base_clean
 # Converter output filename reused across every spec's folder (e.g. 28312-i11/raw.md).
 _GENERIC_FILENAME_STEMS = {"raw", "output", "converted"}
 
+# The cover page is the first page of the document: its phrase has to start within the first
+# _COVER_START characters (a title heading or an image reference may come before it; a citation of
+# the specification series deep in the text does not count) and the span up to "The present document"
+# is at most _COVER_SPAN characters and never crosses a Scope heading. A Scope heading is a line of
+# optional #..###### markers, optional dashes or rule fragments, optional bold, an optional "1", "Scope".
+_COVER_START = 2000
+_COVER_SPAN = 8000
+_SCOPE_HEADING = (r"^[ \t]*(?:\#{1,6}[ \t]*)?(?:[-\u2013\u2014*_]{2,}[ \t]*)?(?:\*\*\*?|__)?[ \t]*"
+                  r"(?:1[ \t]+)?Scope(?:\*\*\*?|__)?[ \t]*$")
+_COVER = re.compile(r"3rd Generation Partnership Project(?:(?!" + _SCOPE_HEADING + r").){0," + str(_COVER_SPAN) + r"}?The present document",
+                    re.DOTALL | re.MULTILINE)
+
 
 class TPPSource:
     """Loads, cleans and extracts metadata from 3GPP TSpec-LLM Markdown files."""
@@ -49,12 +61,10 @@ class TPPSource:
         text = re.sub(r'\{[^}\n]*width=[^}\n]*\}', '', text)
         # Remove standalone media references
         text = re.sub(r"media/image\d+\.\w+", "", text)
-        # Remove 3GPP document cover table boilerplate, never past the Scope heading
-        text = re.sub(
-            r"3rd Generation Partnership Project(?:(?!^(?:#{1,6}\s*)?1\s+Scope\b).)*?The present document",
-            "The present document",
-            text, flags=re.DOTALL | re.MULTILINE
-        )
+        # Remove 3GPP document cover table boilerplate (start of the document only, see _COVER_START)
+        cover = _COVER.search(text)
+        if cover and cover.start() <= _COVER_START:
+            text = text[:cover.start()] + "The present document" + text[cover.end():]
         text = re.sub(r"\n{3,}", "\n\n", text)
         return text.strip()
 
