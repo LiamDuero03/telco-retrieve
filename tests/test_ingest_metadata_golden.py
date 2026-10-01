@@ -54,12 +54,26 @@ def compute() -> dict:
     return json.loads(json.dumps(out, sort_keys=True, default=str))
 
 
+def _posix_ids(rows: list[dict]) -> list[dict]:
+    """chunk ids start with the path relative to the data directory, written with the operating system's
+    separator; the golden was generated on Windows, so compare with forward slashes on both sides"""
+    return [{**row, "id": row["id"].replace("\\", "/")} for row in rows]
+
+
 def test_default_ingest_metadata_matches_golden():
     expected = json.loads(GOLDEN.read_text(encoding="utf8"))
     actual = compute()
     assert actual.keys() == expected.keys()
     for key in expected:
-        assert actual[key] == expected[key], f"stored metadata changed for {key}"
+        assert _posix_ids(actual[key]) == _posix_ids(expected[key]), f"stored metadata changed for {key}"
+
+
+def test_the_comparison_does_not_depend_on_the_path_separator():
+    expected = json.loads(GOLDEN.read_text(encoding="utf8"))
+    as_on_linux = {key: [{**row, "id": row["id"].replace("\\", "/")} for row in rows] for key, rows in expected.items()}
+    assert any("\\" in row["id"] for rows in expected.values() for row in rows), "the golden holds Windows separators"
+    for key in expected:
+        assert _posix_ids(as_on_linux[key]) == _posix_ids(expected[key])
 
 
 if __name__ == "__main__":
