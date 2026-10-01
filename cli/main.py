@@ -126,6 +126,12 @@ def main(argv: list[str] | None = None) -> None:
     p_ingest.add_argument("--bound-margin", type=int, default=None,
                           help="Optional: tokens reserved for special tokens: chunks are cut at --bound-tokens minus this "
                                "(default 2, so a 512 limit gives 510).")
+    p_ingest.add_argument("--bound-verify", default=None,
+                          help="Optional: check the chunks against other embedders after the bound pass, as name=limit pairs "
+                               "(e.g. bge-m3=512,minilm=256; names as for --bound-tokenizer). Needs --bound-tokens.")
+    p_ingest.add_argument("--bound-outliers", choices=["warn", "split"], default=None,
+                          help="Optional: a chunk still over a --bound-verify limit is only reported (warn, the default) "
+                               "or cut further (split). Needs --bound-verify.")
     p_ingest.add_argument("--no-resume",  action="store_true",    help="Disable resume")
     p_ingest.add_argument("--collection", default=None,
                           help="Override collection name (default: source_type_model)")
@@ -637,12 +643,14 @@ def _run_ingest(args) -> None:
     bound_tokens = getattr(args, "bound_tokens", None)
     bound_tokenizer = getattr(args, "bound_tokenizer", None)
     bound_margin = getattr(args, "bound_margin", None)
-    if bound_tokens is None and (bound_tokenizer is not None or bound_margin is not None):
-        sys.exit("error: --bound-tokenizer and --bound-margin require --bound-tokens.")
+    bound_verify = getattr(args, "bound_verify", None)
+    bound_outliers = getattr(args, "bound_outliers", None)
+    if bound_tokens is None and any(v is not None for v in (bound_tokenizer, bound_margin, bound_verify, bound_outliers)):
+        sys.exit("error: --bound-tokenizer, --bound-margin, --bound-verify and --bound-outliers require --bound-tokens.")
     if bound_tokens is not None:
         from open_telco_rag.core.chunk_bound import validate_bound
         try:
-            limit = validate_bound(bound_tokens, bound_tokenizer, bound_margin)
+            limit = validate_bound(bound_tokens, bound_tokenizer, bound_margin, bound_verify, bound_outliers)
         except ValueError as e:
             sys.exit(f"error: {e}")
         chunk_kwargs["bound_tokens"] = bound_tokens
@@ -650,6 +658,9 @@ def _run_ingest(args) -> None:
             chunk_kwargs["bound_tokenizer"] = bound_tokenizer
         if bound_margin is not None:
             chunk_kwargs["bound_margin"] = bound_margin
+        if bound_verify is not None:
+            chunk_kwargs["bound_verify"] = bound_verify
+            chunk_kwargs["bound_outliers"] = bound_outliers or "warn"
         from open_telco_rag.core.chunk_bound import DEFAULT_TOKENIZER
         print(f"  Token bound: {limit} tokens per chunk ({bound_tokens} minus margin, tokenizer: {bound_tokenizer or DEFAULT_TOKENIZER})")
 

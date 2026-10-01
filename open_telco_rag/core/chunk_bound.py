@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import re
 from collections.abc import Callable
 from pathlib import Path
@@ -15,6 +16,7 @@ from typing import Any
 
 from open_telco_rag.types import Chunk
 
+logger = logging.getLogger(__name__)
 DEFAULT_TOKENIZER = "tiktoken:cl100k_base"
 DEFAULT_MARGIN = 2
 Counter = Callable[[str], int]
@@ -237,15 +239,66 @@ def split_to_bound(text: str, limit: int, count: Counter, hint: str | None = Non
     return _split(text, 0, len(text), limit, count, 0, hint)
 
 
-def enforce_bound(chunks: list[Chunk], limit: int, tokenizer: str | Counter | None = None) -> list[Chunk]:
-    """split every chunk of more than `limit` tokens; chunks within the bound are the same objects.
-    Heading, source type and any metadata are kept; token offsets are kept exact for token-sized chunks.
-    chunk_index is renumbered when anything was split."""
+def _make_chunks(chunk: Chunk, pieces: list[Piece]) -> list[Chunk]:
+    """chunks for the pieces of `chunk`: same heading, source type and metadata; exact offsets when it had them"""
     from open_telco_rag.core.chunking import _count_tokens
 
+    out = []
+    for piece, start, end in pieces:
+        new = Chunk(text=piece, heading=chunk.heading, chunk_index=0, source_type=chunk.source_type)
+        if getattr(chunk, "metadata", None):
+            new.metadata = copy.deepcopy(chunk.metadata)
+        if chunk.char_start >= 0:
+            new.char_start = chunk.char_start + start
+            new.char_end = chunk.char_start + end
+            new.n_tokens = _count_tokens(piece)
+        out.append(new)
+    return out
+
+
+def parse_verify(spec: str | None) -> list[tuple[str, int]]:
+    """"bge-m3=512,minilm=256" -> [("bge-m3", 512), ("minilm", 256)]: verification tokenizers and their limits"""
+    out = []
+    for item in (spec or "").split(","):
+        if not item.strip():
+            continue
+        name, sep, limit = item.rpartition("=")
+        if not sep or not name.strip() or not limit.strip().isdigit() or int(limit) <= 0:
+            raise ValueError(f"bound_verify entries look like name=limit (a positive integer), got {item!r}")
+        out.append((name.strip(), int(limit)))
+    return out
+
+
+def _verify_chunks(chunks: list[Chunk], verify: list[tuple[str | Counter, int]], outliers: str, margin: int) -> list[Chunk]:
+    """chunks that still exceed a verification limit (after the main pass) are split further ("split") or only
+    logged ("warn"); each verification limit loses `margin` tokens for special tokens, like the main bound"""
+    for name, vlimit in verify:
+        count, eff = get_counter(name), vlimit - margin
+        over = [c for c in chunks if count(c.text) > eff]
+        if not over:
+            continue
+        label = name if isinstance(name, str) else getattr(name, "__name__", "tokenizer")
+        if outliers != "split":
+            logger.warning("bound: %d of %d chunk(s) exceed the %s limit of %d tokens (largest: %d); "
+                           "bound_outliers=split cuts them", len(over), len(chunks), label, eff, max(count(c.text) for c in over))
+            continue
+        out: list[Chunk] = []
+        for chunk in chunks:
+            out.extend(_make_chunks(chunk, split_to_bound(chunk.text, eff, count)) if count(chunk.text) > eff else [chunk])
+        chunks = out
+    return chunks
+
+
+def enforce_bound(chunks: list[Chunk], limit: int, tokenizer: str | Counter | None = None,
+                  verify: list[tuple[str | Counter, int]] | None = None, outliers: str = "warn", margin: int = 0) -> list[Chunk]:
+    """split every chunk of more than `limit` tokens; chunks within the bound are the same objects.
+    Heading, source type and any metadata are kept; token offsets are kept exact for token-sized chunks.
+    chunk_index is renumbered when anything was split.
+
+    verify: (tokenizer, limit) pairs checked after the main pass; a chunk over one of them is split further
+    (outliers="split") or logged (outliers="warn", the default). They never change chunks that fit."""
     count = get_counter(tokenizer)
     out: list[Chunk] = []
-    changed = False
     carry: str | None = None                # header of a table that the previous chunk ended inside
     for chunk in chunks:
         text = chunk.text
@@ -254,25 +307,19 @@ def enforce_bound(chunks: list[Chunk], limit: int, tokenizer: str | Counter | No
             carry = None
         if count(text) <= limit:
             out.append(chunk)
-            continue
-        changed = True
-        for piece, start, end in split_to_bound(text, limit, count, previous):
-            new = Chunk(text=piece, heading=chunk.heading, chunk_index=0, source_type=chunk.source_type)
-            if getattr(chunk, "metadata", None):
-                new.metadata = copy.deepcopy(chunk.metadata)
-            if chunk.char_start >= 0:
-                new.char_start = chunk.char_start + start
-                new.char_end = chunk.char_start + end
-                new.n_tokens = _count_tokens(piece)
-            out.append(new)
-    if changed:
+        else:
+            out.extend(_make_chunks(chunk, split_to_bound(text, limit, count, previous)))
+    if verify:
+        out = _verify_chunks(out, verify, outliers, margin)
+    if len(out) != len(chunks) or any(a is not b for a, b in zip(out, chunks)):
         for i, chunk in enumerate(out):
             chunk.chunk_index = i
     return out
 
 
-def validate_bound(bound_tokens: Any, bound_tokenizer: Any, bound_margin: Any) -> int:
-    """check the three settings and return the effective limit (bound minus margin)"""
+def validate_bound(bound_tokens: Any, bound_tokenizer: Any, bound_margin: Any, bound_verify: Any = None,
+                   bound_outliers: Any = None) -> int:
+    """check the settings and return the effective limit (bound minus margin)"""
     if isinstance(bound_tokens, bool) or not isinstance(bound_tokens, int) or bound_tokens <= 0:
         raise ValueError(f"bound_tokens must be a positive integer, got {bound_tokens!r}")
     margin = DEFAULT_MARGIN if bound_margin is None else bound_margin
@@ -280,4 +327,11 @@ def validate_bound(bound_tokens: Any, bound_tokenizer: Any, bound_margin: Any) -
         raise ValueError(f"bound_margin must be an integer from 0 to bound_tokens - 1, got {bound_margin!r}")
     if bound_tokenizer is not None and not (isinstance(bound_tokenizer, str) and bound_tokenizer) and not callable(bound_tokenizer):
         raise ValueError(f"bound_tokenizer must be a name, a tokenizer.json path or a callable, got {bound_tokenizer!r}")
+    if bound_verify is not None and not isinstance(bound_verify, str):
+        raise ValueError(f"bound_verify must be a string like 'bge-m3=512,minilm=256', got {bound_verify!r}")
+    parse_verify(bound_verify)
+    if bound_outliers not in (None, "warn", "split"):
+        raise ValueError(f"bound_outliers must be 'warn' or 'split', got {bound_outliers!r}")
+    if bound_outliers is not None and not bound_verify:
+        raise ValueError("bound_outliers requires bound_verify")
     return bound_tokens - margin

@@ -74,6 +74,8 @@ def _ingest_settings(store: Any, embedder: Any, min_length: int, chunk_kwargs: d
         from open_telco_rag.core.chunk_bound import DEFAULT_MARGIN, DEFAULT_TOKENIZER
         chunk_kwargs = {"bound_tokenizer": DEFAULT_TOKENIZER, "bound_margin": DEFAULT_MARGIN, **{
             k: v for k, v in chunk_kwargs.items() if v is not None}}
+        if chunk_kwargs.get("bound_verify"):
+            chunk_kwargs.setdefault("bound_outliers", "warn")
     for key, value in sorted(chunk_kwargs.items()):
         if key in _NON_CONTENT_KWARGS or _SECRET_KEY.search(key):
             continue
