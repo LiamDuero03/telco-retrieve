@@ -275,6 +275,40 @@ from open_telco_rag.core.chunking import chunk_document
 chunks = chunk_document(text, "text_baseline", target_tokens=200, max_tokens=256)
 ```
 
+### Optional: hard token bound
+
+Embedding models cut their input at a fixed length (512 tokens for many of them), and the text past it
+is silently ignored. `--bound-tokens N` guarantees that no stored chunk is longer than N tokens, for
+every strategy and with character or token sizing; without it nothing changes.
+
+```bash
+open-telco-rag ingest 3gpp --model bge-m3 --strategy hierarchical_markdown \
+  --target-tokens 400 --bound-tokens 512 --bound-tokenizer bge-m3
+```
+
+- A chunk over the bound is split after chunking at the coarsest boundary that works: paragraphs, then
+  table and text blocks, then sentences, then lines, and last a cut by token count. A markdown table is
+  split by rows and its header rows are repeated at the top of every part (those parts are not exact
+  slices of the source). The heading and the metadata stay on every piece; chunks within the bound are
+  untouched.
+- `--bound-tokenizer` names the tokenizer that does the counting: an embedding model key from
+  `configs/embedding_models.json`, a Hugging Face model name, a `tokenizer.json` path or
+  `tiktoken:<encoding>`. Only tokenizer files are downloaded, never model weights; the default is
+  `cl100k_base`, the encoding the other token options use. Use the tokenizer of the embedding model
+  that will read the chunks: on technical text the counts differ by 10-20%.
+- `--bound-margin K` reserves K tokens for special tokens (default 2: a 512 limit cuts at 510).
+- The bound is part of the resume record: changing `--bound-tokens`, `--bound-tokenizer` or
+  `--bound-margin` starts a new ingest instead of skipping finished files.
+- Enrichment (`--enrichment`) adds text after chunking, and `--resolve-parents` returns the parent
+  text; neither is bounded. Leave room with `--bound-margin` when enrichment is on.
+- Check a collection or a staged directory against a bound, for several tokenizers, without changing
+  anything: `python scripts/check_chunk_bound.py --collection NAME --tokenizers cl100k bge-m3 --bound 512`.
+
+```python
+from open_telco_rag.core.chunking import chunk_document
+chunks = chunk_document(text, "text_baseline", chunk_size=2000, bound_tokens=512, bound_tokenizer="bge-m3")
+```
+
 ### Embedding models and prefixes
 
 `--model` takes any key from `configs/embedding_models.json`. Besides the
@@ -841,6 +875,7 @@ Small tools in `scripts/` (run from the repository root, after `pip install -e .
 | Script | Purpose |
 |--------|---------|
 | `add_evidence_spans.py` | Optional: add evidence spans to a question file so the span metrics can be computed. |
+| `check_chunk_bound.py` | Read-only: chunk count, mean / p95 / max tokens, chunks over a token bound and text retained, per tokenizer, for a collection or a staged directory. |
 | `embedder_smoke_test.py` | Embed a few sample texts with every locally hosted embedder and report dimension, throughput and truncation. |
 | `estimate_embedding_cost.py` | Estimate what re-embedding a collection would cost through OpenRouter (prices are a dated snapshot; `--refresh-pricing` fetches live ones). |
 | `time_embedding_throughput.py` | Measure local embedding throughput on real chunk texts from an existing collection. |
