@@ -1,13 +1,29 @@
 """CLI: --bound-* flags on ingest are opt-in and validated."""
-# ruff: noqa: F811  (the cli_ingest fixture is imported and then used as an argument)
 from __future__ import annotations
+
+from types import SimpleNamespace
 
 import pytest
 
-from tests.test_chunking_opt_in import (
-    _cli_args,
-    cli_ingest,
-)
+from tests.test_chunking_opt_in import _cli_args
+
+
+@pytest.fixture
+def cli_ingest(monkeypatch):
+    import cli.main as cli_main
+    from open_telco_rag.core import pipeline
+
+    captured = {}
+
+    def fake_ingest(**kw):
+        captured.update(kw)
+        return SimpleNamespace(files_processed=0, chunks_stored=0, skipped_files=0, error_files=0)
+
+    monkeypatch.setattr(pipeline, "ingest", fake_ingest)
+    monkeypatch.setattr(cli_main, "_get_source", lambda *a, **k: object())
+    monkeypatch.setattr(cli_main, "_get_embedder", lambda *a, **k: object())
+    monkeypatch.setattr(cli_main, "_get_store", lambda *a, **k: SimpleNamespace(collection_name="c"))
+    return cli_main, captured
 
 
 def test_without_the_flags_nothing_bound_related_reaches_ingest(cli_ingest):
@@ -61,7 +77,7 @@ def test_verify_and_outliers_reach_ingest_with_warn_as_the_default(cli_ingest):
     ({"bound_tokens": 400, "bound_outliers": "split"}, "bound_outliers requires bound_verify"),
     ({"bound_tokens": 400, "bound_verify": "oops"}, "name=limit"),
 ])
-def test_invalid_verify_flags_exit_with_an_error(cli_ingest, kwargs, message):  # noqa: F811
+def test_invalid_verify_flags_exit_with_an_error(cli_ingest, kwargs, message):
     cli_main, _ = cli_ingest
     with pytest.raises(SystemExit, match=message):
         cli_main._run_ingest(_cli_args(**kwargs))
