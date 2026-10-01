@@ -130,7 +130,9 @@ def _paragraph_spans(text: str) -> list[tuple[int, int]]:
     return spans
 
 
-_SENTENCE_RE = re.compile(r"[^.!?\n]*[.!?]+(?:\s+|$)|[^.!?\n]+$")
+# a line without closing punctuation (a table row, a list item, a code line) is its own span; with
+# `$` alone such a line in the middle of the text matched nothing and was dropped from the chunks
+_SENTENCE_RE = re.compile(r"[^.!?\n]*[.!?]+(?:\s+|$)|[^.!?\n]+(?=\n|$)")
 
 
 def _sentence_spans(text: str) -> list[tuple[int, int]]:
