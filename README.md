@@ -303,10 +303,18 @@ open-telco-rag ingest 3gpp --model bge-m3 --strategy hierarchical_markdown \
 - The bound, the tokenizer name and the margin (with their defaults filled in) are part of the resume
   record and of the settings sidecar: changing any of them starts a new ingest instead of skipping
   finished files.
+- `--bound-verify NAME=LIMIT,...` (for example `bge-m3=512,minilm=256`) names other embedders to check
+  the chunks against after the cl100k pass. A chunk still over one of those limits is only logged
+  (`--bound-outliers warn`, the default) or cut further (`--bound-outliers split`). Nothing happens
+  without `--bound-verify`.
 - Enrichment (`--enrichment`) adds text after chunking, and `--resolve-parents` returns the parent
   text; neither is bounded. Leave room with `--bound-margin` when enrichment is on.
-- Check a collection or a staged directory against a bound, for several tokenizers, without changing
-  anything: `python scripts/check_chunk_bound.py --collection NAME --tokenizers cl100k bge-m3 --bound 512`.
+- Check a collection or a staged directory without changing anything:
+  `python scripts/check_chunk_bound.py --data-dir DIR --source-type 3gpp --tokenizers minilm bge bge-m3 --calibrate`
+  reports, per tokenizer, chunks over its limit, how its token counts compare with cl100k (p50, p99,
+  p99.9, max), the largest chunks and what makes them long, the text retained by the bound pass and by
+  the `min_length` filter, and with `--calibrate` the largest cl100k ceiling that leaves no chunk (or at
+  most 0.1%) over each limit, so the ceiling is chosen from your data.
 
 ```python
 from open_telco_rag.core.chunking import chunk_document
@@ -879,7 +887,7 @@ Small tools in `scripts/` (run from the repository root, after `pip install -e .
 | Script | Purpose |
 |--------|---------|
 | `add_evidence_spans.py` | Optional: add evidence spans to a question file so the span metrics can be computed. |
-| `check_chunk_bound.py` | Read-only: chunk count, mean / p95 / max tokens, chunks over a token bound and text retained, per tokenizer, for a collection or a staged directory. |
+| `check_chunk_bound.py` | Read-only: per tokenizer, chunks over its limit, token-count ratio against cl100k, the largest chunks, text retained, and a calibration of the cl100k ceiling, for a collection or a staged directory. |
 | `embedder_smoke_test.py` | Embed a few sample texts with every locally hosted embedder and report dimension, throughput and truncation. |
 | `estimate_embedding_cost.py` | Estimate what re-embedding a collection would cost through OpenRouter (prices are a dated snapshot; `--refresh-pricing` fetches live ones). |
 | `time_embedding_throughput.py` | Measure local embedding throughput on real chunk texts from an existing collection. |
