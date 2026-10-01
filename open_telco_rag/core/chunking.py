@@ -130,23 +130,28 @@ def _paragraph_spans(text: str) -> list[tuple[int, int]]:
     return spans
 
 
-_SENTENCE_RE = re.compile(r"[^.!?\n]*[.!?]+(?:\s+|$)|[^.!?\n]+$")
+# a sentence ends at closing punctuation followed by whitespace or the end of the line. Sentences never
+# cross a line, and whatever follows the last sentence end of a line is a span of its own, so every
+# non-blank character belongs to a span (a table row, a list item, a code line, or the part of a line
+# before an internal "4.2.1" or "3.5", which an earlier pattern dropped)
+_SENTENCE_END = re.compile(r"[.!?]+(?=\s|$)")
 
 
 def _sentence_spans(text: str) -> list[tuple[int, int]]:
     """offsets of sentences (punctuation-based, best effort); only the fallback when a paragraph
     exceeds max_tokens"""
     spans = []
-    for m in _SENTENCE_RE.finditer(text):
-        seg = m.group(0)
-        if not seg.strip():
-            continue
-        lstripped = len(seg) - len(seg.lstrip())
-        rstripped = len(seg) - len(seg.rstrip())
-        s = m.start() + lstripped
-        e = m.end() - rstripped
-        if s < e:
-            spans.append((s, e))
+    for line in re.finditer(r"[^\n]+", text):
+        start, line_end = line.span()
+        for end in [m.end() for m in _SENTENCE_END.finditer(text, start, line_end)] + [line_end]:
+            s, e = start, end
+            while s < e and text[s].isspace():
+                s += 1
+            while e > s and text[e - 1].isspace():
+                e -= 1
+            if s < e:
+                spans.append((s, e))
+            start = end
     return spans
 
 
