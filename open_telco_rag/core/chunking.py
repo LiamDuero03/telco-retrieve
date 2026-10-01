@@ -11,6 +11,7 @@ from collections.abc import Callable
 from typing import Any
 import tiktoken
 
+from open_telco_rag.core.chunk_bound import enforce_bound, parse_verify, validate_bound
 from open_telco_rag.types import Chunk
 
 logger = logging.getLogger(__name__)
@@ -1030,6 +1031,16 @@ def chunk_document(
 
     is_structured = kwargs.pop("is_structured", False)
 
+    # opt-in hard bound, applied after the strategy (see core/chunk_bound.py)
+    bound = kwargs.pop("bound_tokens", None)
+    bound_tokenizer = kwargs.pop("bound_tokenizer", None)
+    bound_margin = kwargs.pop("bound_margin", None)
+    bound_verify = kwargs.pop("bound_verify", None)
+    bound_outliers = kwargs.pop("bound_outliers", None)
+    if bound is None and any(v is not None for v in (bound_tokenizer, bound_margin, bound_verify, bound_outliers)):
+        raise ValueError("bound_tokenizer, bound_margin, bound_verify and bound_outliers require bound_tokens")
+    bound_limit = None if bound is None else validate_bound(bound, bound_tokenizer, bound_margin, bound_verify, bound_outliers)
+
     # None = not set
     for _opt in ("target_tokens", "max_tokens"):
         if kwargs.get(_opt) is None:
@@ -1079,4 +1090,8 @@ def chunk_document(
         if "overlap" in kwargs: del kwargs["overlap"]
 
     chunker_function = _STRATEGY_MAP[strategy]
-    return chunker_function(text, **kwargs)
+    chunks = chunker_function(text, **kwargs)
+    if bound_limit is not None:
+        chunks = enforce_bound(chunks, bound_limit, bound_tokenizer, parse_verify(bound_verify),
+                               bound_outliers or "warn", bound - bound_limit)
+    return chunks

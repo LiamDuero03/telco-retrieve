@@ -50,7 +50,7 @@ def _span_metadata(chunk) -> dict:
 # the progress file lists fully ingested files and is tied to a fingerprint of the
 # non-secret settings that decide what gets stored
 
-_SECRET_KEY = re.compile(r"key|secret|token(?!s)|password|authorization|credential", re.IGNORECASE)
+_SECRET_KEY = re.compile(r"key|secret|token(?!s|izer)|password|authorization|credential", re.IGNORECASE)
 _NON_CONTENT_KWARGS = {"batch_size", "write_batch_size", "resume", "log_dir", "on_progress"}
 
 
@@ -70,6 +70,12 @@ def _json_safe(value: Any) -> Any:
 def _ingest_settings(store: Any, embedder: Any, min_length: int, chunk_kwargs: dict) -> dict:
     """non-secret settings that determine which chunks a run stores"""
     chunking = {}
+    if chunk_kwargs.get("bound_tokens") is not None:        # record the defaults the bound resolves to, not just what was typed
+        from open_telco_rag.core.chunk_bound import DEFAULT_MARGIN, DEFAULT_TOKENIZER
+        chunk_kwargs = {"bound_tokenizer": DEFAULT_TOKENIZER, "bound_margin": DEFAULT_MARGIN, **{
+            k: v for k, v in chunk_kwargs.items() if v is not None}}
+        if chunk_kwargs.get("bound_verify"):
+            chunk_kwargs.setdefault("bound_outliers", "warn")
     for key, value in sorted(chunk_kwargs.items()):
         if key in _NON_CONTENT_KWARGS or _SECRET_KEY.search(key):
             continue
