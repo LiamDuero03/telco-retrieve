@@ -190,3 +190,15 @@ def test_a_real_tokenizer_bounds_the_chunks_in_its_own_tokens():
     chunks = chunk_document(CASES["giant_table"] + CASES["long_section"], "text_baseline", source_type="x", chunk_size=2000, overlap=0,
                             bound_tokens=128, bound_tokenizer="sentence-transformers/all-MiniLM-L6-v2")
     assert max(counter(c.text) for c in chunks) <= 126
+
+
+def test_the_rest_of_a_table_that_an_earlier_chunk_started_gets_that_tables_header():
+    rows = TABLE.split("\n")
+    first = Chunk(text="\n".join(rows[:12]), heading="H", chunk_index=0, source_type="x")
+    second = Chunk(text="\n".join(rows[12:]), heading="H", chunk_index=1, source_type="x")
+    out = enforce_bound([first, second], LIMIT, count)
+    continued = [c.text for c in out if "| field_30 |" in c.text or "| field_60 |" in c.text]
+    assert continued and all(t.startswith(HEADER) for t in continued)
+    assert all(count(c.text) <= LIMIT for c in out)
+    body = [line for c in out for line in c.text.split("\n") if line.startswith("| field_")]
+    assert body == [r for r in rows if r.startswith("| field_")], "every row once, in order"
