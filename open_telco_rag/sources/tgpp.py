@@ -3,12 +3,25 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 from open_telco_rag.core.cleaning import base_clean
 
 # Converter output filename reused across every spec's folder (e.g. 28312-i11/raw.md).
 _GENERIC_FILENAME_STEMS = {"raw", "output", "converted"}
+
+# The cover page is the first page of the document: its phrase has to start within the first
+# _COVER_START characters (a title heading or an image reference may come before it; a citation of
+# the specification series deep in the text does not count) and the span up to "The present document"
+# is at most _COVER_SPAN characters and never crosses a Scope heading. A Scope heading is a line of
+# optional #..###### markers, optional dashes or rule fragments, optional bold, an optional "1", "Scope".
+_COVER_START = 2000
+_COVER_SPAN = 8000
+_SCOPE_HEADING = (r"^[ \t]*(?:\#{1,6}[ \t]*)?(?:[-\u2013\u2014*_]{2,}[ \t]*)?(?:\*\*\*?|__)?[ \t]*"
+                  r"(?:1[ \t]+)?Scope(?:\*\*\*?|__)?[ \t]*$")
+_COVER = re.compile(r"3rd Generation Partnership Project(?:(?!" + _SCOPE_HEADING + r").){0," + str(_COVER_SPAN) + r"}?The present document",
+                    re.DOTALL | re.MULTILINE)
 
 
 class TPPSource:
@@ -36,26 +49,36 @@ class TPPSource:
             return self._load_docx(path)
         raise ValueError(f"Unsupported file type: {path.suffix}")
 
+    def clean_steps(self) -> list[tuple[str, Callable[[str], str]]]:
+        """the steps clean() applies after base_clean, in order, as (name, function); scripts/check_cleaning.py
+        reports what each of them removes"""
+        def remove(pattern: str, flags: int = 0) -> Callable[[str], str]:
+            return lambda text: re.sub(pattern, "", text, flags=flags)
+
+        def cover(text: str) -> str:
+            # 3GPP document cover table boilerplate: start of the document only, see _COVER_START
+            match = _COVER.search(text)
+            if match and match.start() <= _COVER_START:
+                return text[:match.start()] + "The present document" + text[match.end():]
+            return text
+
+        return [
+            ("table header blocks", remove(r"(\+[-=+]+\+\n)(\|.*?\n)+(\+[-=+]+\+\n?)+")),
+            ("image references", remove(r"!\[.*?\]\(.*?\)(\{.*?\})?")),
+            # pandoc superscripts (^x^): one line, no spaces, no $, so LaTeX exponents ($10^{-5}$) survive
+            ("superscripts", remove(r"\^[^^\s$]+\^")),
+            # width/height attributes left over from image conversion
+            ("width attributes", remove(r"\{[^}\n]*width=[^}\n]*\}")),
+            ("media references", remove(r"media/image\d+\.\w+")),
+            ("cover boilerplate", cover),
+            ("blank lines", lambda text: re.sub(r"\n{3,}", "\n\n", text)),
+        ]
+
     def clean(self, text: str) -> str:
         """Apply 3GPP specific cleaning on top of base cleaning."""
         text = base_clean(text)
-        # Remove markdown table header blocks (pipe table format)
-        text = re.sub(r"(\+[-=+]+\+\n)(\|.*?\n)+(\+[-=+]+\+\n?)+", "", text)
-        # Remove image references
-        text = re.sub(r"!\[.*?\]\(.*?\)(\{.*?\})?", "", text)
-        # Remove pandoc superscripts (^x^): one line, no spaces, no $, so LaTeX exponents ($10^{-5}$) survive
-        text = re.sub(r"\^[^^\s$]+\^", "", text)
-        # Remove width/height attributes left over from image conversion
-        text = re.sub(r'\{[^}\n]*width=[^}\n]*\}', '', text)
-        # Remove standalone media references
-        text = re.sub(r"media/image\d+\.\w+", "", text)
-        # Remove 3GPP document cover table boilerplate, never past the Scope heading
-        text = re.sub(
-            r"3rd Generation Partnership Project(?:(?!^(?:#{1,6}\s*)?1\s+Scope\b).)*?The present document",
-            "The present document",
-            text, flags=re.DOTALL | re.MULTILINE
-        )
-        text = re.sub(r"\n{3,}", "\n\n", text)
+        for _, step in self.clean_steps():
+            text = step(text)
         return text.strip()
 
     def metadata(self, path: Path) -> dict:
