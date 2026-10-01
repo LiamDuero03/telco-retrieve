@@ -120,8 +120,9 @@ def main(argv: list[str] | None = None) -> None:
                           help="Optional: no stored chunk may exceed this many tokens; chunks over the bound are split "
                                "after chunking (paragraph, block, sentence, line, token). Works with every strategy and sizing.")
     p_ingest.add_argument("--bound-tokenizer", default=None,
-                          help="Optional: tokenizer that measures --bound-tokens: an embedding model key (e.g. bge-m3), a "
-                               "Hugging Face model name, a tokenizer.json path or tiktoken:<encoding> (default: cl100k_base).")
+                          help="Optional: tokenizer that measures --bound-tokens: tiktoken:<encoding>, an embedding model key "
+                               "(e.g. bge-m3), a Hugging Face model name or a tokenizer.json path (default: tiktoken:cl100k_base). "
+                               "The bound only guarantees chunks fit in these tokens; other embedders count differently.")
     p_ingest.add_argument("--bound-margin", type=int, default=None,
                           help="Optional: tokens reserved for special tokens: chunks are cut at --bound-tokens minus this "
                                "(default 2, so a 512 limit gives 510).")
@@ -649,7 +650,8 @@ def _run_ingest(args) -> None:
             chunk_kwargs["bound_tokenizer"] = bound_tokenizer
         if bound_margin is not None:
             chunk_kwargs["bound_margin"] = bound_margin
-        print(f"  Token bound: {limit} tokens per chunk ({bound_tokens} minus margin, tokenizer: {bound_tokenizer or 'cl100k_base'})")
+        from open_telco_rag.core.chunk_bound import DEFAULT_TOKENIZER
+        print(f"  Token bound: {limit} tokens per chunk ({bound_tokens} minus margin, tokenizer: {bound_tokenizer or DEFAULT_TOKENIZER})")
 
     stats = ingest(**chunk_kwargs)
 

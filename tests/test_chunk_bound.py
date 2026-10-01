@@ -202,3 +202,37 @@ def test_the_rest_of_a_table_that_an_earlier_chunk_started_gets_that_tables_head
     assert all(count(c.text) <= LIMIT for c in out)
     body = [line for c in out for line in c.text.split("\n") if line.startswith("| field_")]
     assert body == [r for r in rows if r.startswith("| field_")], "every row once, in order"
+
+
+def test_the_resolved_defaults_are_recorded_and_equal_to_typing_them():
+    class Store:
+        path, collection_name = "db", "c"
+
+    class Emb:
+        model_key = "m"
+
+    base = {"strategy": "text_baseline", "chunk_size": 300, "overlap": 0}
+    implicit = pipeline._ingest_settings(Store, Emb, 100, {**base, "bound_tokens": 512})
+    explicit = pipeline._ingest_settings(Store, Emb, 100, {**base, "bound_tokens": 512, "bound_tokenizer": "tiktoken:cl100k_base",
+                                                           "bound_margin": 2})
+    assert implicit["chunking"]["bound_tokenizer"] == "tiktoken:cl100k_base" and implicit["chunking"]["bound_margin"] == 2
+    assert implicit == explicit and pipeline._fingerprint(implicit) == pipeline._fingerprint(explicit)
+
+
+def test_the_ingest_sidecar_records_the_bound_tokenizer_and_margin(tmp_path):
+    from open_telco_rag.core.pipeline import ingest
+    from open_telco_rag.evaluation.provenance import read_index_settings
+    from open_telco_rag.sources.tgpp import TPPSource
+    from open_telco_rag.stores.chroma import ChromaStore
+    from tests.test_retrieval_methods import BagOfWordsEmbedder
+
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "23501-j00.md").write_text(CASES["long_section"], encoding="utf8")
+    store = ChromaStore(path=tmp_path / "db", collection_name="coll_a", metadata={"hnsw:space": "cosine"})
+    ingest(source=TPPSource(), store=store, embedder=BagOfWordsEmbedder(), data_dir=str(data), resume=False,
+           log_dir=str(tmp_path / "logs"), strategy="text_baseline", chunk_size=300, overlap=0, min_length=10,
+           bound_tokens=64, bound_margin=4)
+    chunking = read_index_settings(store.path, "coll_a")["settings"]["chunking"]
+    assert chunking["bound_tokens"] == 64 and chunking["bound_margin"] == 4
+    assert chunking["bound_tokenizer"] == "tiktoken:cl100k_base"

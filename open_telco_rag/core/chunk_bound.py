@@ -15,6 +15,8 @@ from typing import Any
 
 from open_telco_rag.types import Chunk
 
+DEFAULT_TOKENIZER = "tiktoken:cl100k_base"
+DEFAULT_MARGIN = 2
 Counter = Callable[[str], int]
 _COUNTERS: dict[str, Counter] = {}
 _SEPARATOR_ROW = re.compile(r"^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$")
@@ -32,13 +34,13 @@ def _registry_model_name(name: str) -> str:
 def get_counter(tokenizer: str | Counter | None = None) -> Counter:
     """a function counting the tokens of a text.
 
-    None is cl100k_base, the encoding of the other token paths. "tiktoken:<encoding>" is any tiktoken
+    None is "tiktoken:cl100k_base", the encoding of the other token paths. "tiktoken:<encoding>" is any tiktoken
     encoding. Anything else is an embedding registry key, a Hugging Face model name (only its
     tokenizer.json is fetched, never the weights) or the path of a tokenizer.json. A callable is used as is.
     Special tokens are not counted: the bound's margin reserves room for them."""
     if callable(tokenizer):
         return tokenizer
-    if tokenizer is None:
+    if tokenizer is None or tokenizer == DEFAULT_TOKENIZER:
         from open_telco_rag.core.chunking import _count_tokens
         return _count_tokens
     if tokenizer in _COUNTERS:
@@ -273,7 +275,7 @@ def validate_bound(bound_tokens: Any, bound_tokenizer: Any, bound_margin: Any) -
     """check the three settings and return the effective limit (bound minus margin)"""
     if isinstance(bound_tokens, bool) or not isinstance(bound_tokens, int) or bound_tokens <= 0:
         raise ValueError(f"bound_tokens must be a positive integer, got {bound_tokens!r}")
-    margin = 2 if bound_margin is None else bound_margin
+    margin = DEFAULT_MARGIN if bound_margin is None else bound_margin
     if isinstance(margin, bool) or not isinstance(margin, int) or margin < 0 or margin >= bound_tokens:
         raise ValueError(f"bound_margin must be an integer from 0 to bound_tokens - 1, got {bound_margin!r}")
     if bound_tokenizer is not None and not (isinstance(bound_tokenizer, str) and bound_tokenizer) and not callable(bound_tokenizer):

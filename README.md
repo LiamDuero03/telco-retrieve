@@ -291,14 +291,18 @@ open-telco-rag ingest 3gpp --model bge-m3 --strategy hierarchical_markdown \
   split by rows and its header rows are repeated at the top of every part (those parts are not exact
   slices of the source). The heading and the metadata stay on every piece; chunks within the bound are
   untouched.
-- `--bound-tokenizer` names the tokenizer that does the counting: an embedding model key from
-  `configs/embedding_models.json`, a Hugging Face model name, a `tokenizer.json` path or
-  `tiktoken:<encoding>`. Only tokenizer files are downloaded, never model weights; the default is
-  `cl100k_base`, the encoding the other token options use. Use the tokenizer of the embedding model
-  that will read the chunks: on technical text the counts differ by 10-20%.
+- **The bound is counted in one tokenizer, `tiktoken:cl100k_base` by default, and only guarantees that
+  chunks fit in those tokens.** Other embedders count differently (on technical text 4-20% more than
+  cl100k), so set the ceiling with headroom for the strictest embedder you use, and verify it with
+  `scripts/check_chunk_bound.py`, which reports chunks over each model's own limit and can calibrate the
+  ceiling from your data.
+- `--bound-tokenizer` changes the counting tokenizer: `tiktoken:<encoding>`, an embedding model key from
+  `configs/embedding_models.json`, a Hugging Face model name or a `tokenizer.json` path. Only tokenizer
+  files are downloaded, never model weights.
 - `--bound-margin K` reserves K tokens for special tokens (default 2: a 512 limit cuts at 510).
-- The bound is part of the resume record: changing `--bound-tokens`, `--bound-tokenizer` or
-  `--bound-margin` starts a new ingest instead of skipping finished files.
+- The bound, the tokenizer name and the margin (with their defaults filled in) are part of the resume
+  record and of the settings sidecar: changing any of them starts a new ingest instead of skipping
+  finished files.
 - Enrichment (`--enrichment`) adds text after chunking, and `--resolve-parents` returns the parent
   text; neither is bounded. Leave room with `--bound-margin` when enrichment is on.
 - Check a collection or a staged directory against a bound, for several tokenizers, without changing
