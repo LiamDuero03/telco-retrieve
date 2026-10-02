@@ -111,6 +111,51 @@ those folder and file names (`28312-i11.md` is TS 28.312, Rel-18). Files whose n
 still ingest but may lack `spec_number`. All releases are millions of chunks: see "Resume" below and ingest one
 release at a time if you want the smallest possible restart unit.
 
+### Preparing the GSMA/3GPP Rel-19 data
+
+`scripts/stage_3gpp.py` downloads the Markdown conversions of the Rel-19 specifications from the
+[`GSMA/3GPP`](https://huggingface.co/datasets/GSMA/3GPP) dataset, checks them, and stages them under names that the 3GPP
+loader reads (`<NN>_series/<spec>-<version>.md`). It downloads only `marked/Rel-19/**/raw.md` and
+`conversion_log.jsonl`, never the ~32,760 figure images. It is opt-in: the loader and the default behaviour are unchanged.
+The files are downloaded from the original source onto your machine; this repository does not contain or redistribute
+them. Read the dataset's licence and the 3GPP terms before you use the data.
+
+```bash
+python scripts/stage_3gpp.py --revision a056f6018a7e8e67052aa68a702e272d0ae95d75 --out data/3gpp/staged --dry-run   # plan only
+python scripts/stage_3gpp.py --revision a056f6018a7e8e67052aa68a702e272d0ae95d75 --out data/3gpp/staged
+python scripts/stage_3gpp.py --revision a056f6018a7e8e67052aa68a702e272d0ae95d75 --out data/3gpp/staged --verify    # offline re-check
+open-telco-rag ingest 3gpp --data data/3gpp/staged --strategy hierarchical_markdown
+```
+
+- `--revision` must be a 40-character commit hash (a branch name is refused), so that everyone stages the same files.
+  The one above is the revision the counts below were measured on.
+- Expected for that revision: 1,566 conversion-log rows (1,557 OK, 9 ERROR), 1,557 `raw.md` files and 1,557 staged files;
+  67 multi-part specs; 20 specs with a `_cover` file name; 49 `.doc` log rows; 7 specs whose first conversion failed and
+  a later one worked; one spec with only failed conversions and no file (TS 25.331); 11 files under the default
+  `--stub-bytes 5120` (flagged `is_stub`, still staged).
+- Disk: about 0.73 GB to download (`<out>_raw`, next to `--out`, not inside it, so `ingest --data <out>` never reads it) and
+  the same again for the staged copy, so about 1.5 GB. Listing the tree takes several minutes; the files then download in parallel
+  (`--workers`) with retries and backoff, and a run that stops can be started again.
+- The dataset is public. If you set `HF_TOKEN` in the environment it is used; the script never prints it.
+- For each spec the last conversion-log row with status OK decides the version (`38300-j20.docx` is V19.2.0). The
+  version is compared with a `V<major>.<minor>.<patch>` string in the first 40 lines of the file; a mismatch is
+  counted in the manifest, never an error.
+- `manifest.json` (deterministic, no timestamps or local paths) records for every file its source path, staged name, size,
+  sha256, version and part, and lists excluded specs; run details are in `staging_run.json`.
+- `--source DIR` stages from an already downloaded tree with the dataset's layout, offline.
+
+Known limitations:
+
+- The loader allows one suffix after the five digits. A spec that has a part (for example `32111-1`) is staged as
+  `32111-1.md`, so its chunk metadata has `doc_part` but no `version`; the version is only in the manifest.
+  For study reports (`23700-75`) the "part" is a study-item number, marked `doc_part_kind: study_item_number` in the manifest
+  (a rule of thumb: spec numbers x.700 to x.899).
+- The loader reads the release and the series from any `Rel-NN` or `NN_series` folder in the whole path, so do not put `--out`
+  below such a folder (the script warns).
+- Files under 5 KB are stubs (cover and contents only). They are staged and flagged; filter them from the manifest if
+  you do not want them.
+- Only Rel-19 has been tested.
+
 ### 3. Ingest
 
 ```bash
@@ -890,6 +935,7 @@ Small tools in `scripts/` (run from the repository root, after `pip install -e .
 | `check_chunk_bound.py` | Read-only: per tokenizer, chunks over its limit, token-count ratio against cl100k, the largest chunks, text retained, and a calibration of the cl100k ceiling, for a collection or a staged directory. |
 | `embedder_smoke_test.py` | Embed a few sample texts with every locally hosted embedder and report dimension, throughput and truncation. |
 | `estimate_embedding_cost.py` | Estimate what re-embedding a collection would cost through OpenRouter (prices are a dated snapshot; `--refresh-pricing` fetches live ones). |
+| `stage_3gpp.py` | Download the GSMA/3GPP Rel-19 Markdown files (only `raw.md` and the conversion log) from a pinned revision and stage them under names the 3GPP loader reads, with a manifest. See "Preparing the GSMA/3GPP Rel-19 data". |
 | `time_embedding_throughput.py` | Measure local embedding throughput on real chunk texts from an existing collection. |
 | `time_openrouter_embedding.py` | Same for OpenRouter. Makes real, paid API calls, so keep `--sample-size` small. |
 
