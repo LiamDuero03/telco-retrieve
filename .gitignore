@@ -78,6 +78,7 @@ scripts/*
 !scripts/check_cleaning.py
 !scripts/check_chunk_bound.py
 !scripts/embedder_smoke_test.py
+!scripts/stage_3gpp.py
 !scripts/estimate_embedding_cost.py
 !scripts/time_embedding_throughput.py
 !scripts/time_openrouter_embedding.py
