@@ -9,7 +9,13 @@ import sqlite3
 import pytest
 
 from open_telco_rag.stores.fts import FTSStore
-from tests.test_ingest_checkpoint import Killed, SlowEmbedder, _run, _store, data  # noqa: F401  (data is a fixture)
+from tests.test_ingest_checkpoint import (  # noqa: F401  (data is a fixture)
+    Killed,
+    SlowEmbedder,
+    _run,
+    _store,
+    data,
+)
 
 BOUNDED = {"bound_tokens": 30}          # splits the test chunks: same ids, different texts and more of them
 
