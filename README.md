@@ -69,12 +69,31 @@ pip install -e ".[local-embed,pdf,docx]"
 
 If a release is published, `pip install open-telco-rag[local-embed,pdf,docx]` installs the same extras.
 
-For GPU-accelerated embedding (recommended for large corpus ingestion):
+### NVIDIA, AMD ROCm or CPU: install PyTorch first
+
+The `local-embed` extra depends on `torch`. If you install the package first, pip pulls the default PyTorch build from
+PyPI, which on Linux is a CUDA build of several GB. That is the wrong build on an AMD GPU and a waste on a machine
+without a GPU, and replacing it afterwards means a forced reinstall. So install PyTorch **first**, from the index that
+matches your hardware, then the package, then check:
 
 ```bash
+# 1. PyTorch first. The index URL names the build; take the exact name for your CUDA or ROCm version from
+#    https://pytorch.org/get-started/locally/ (the version numbers below are examples)
+pip install torch --index-url https://download.pytorch.org/whl/cu128      # NVIDIA, CUDA 12.8 (cu126, cu130, ... to match your driver)
+pip install torch --index-url https://download.pytorch.org/whl/rocm6.4    # AMD, ROCm 6.4 (to match your ROCm)
+pip install torch --index-url https://download.pytorch.org/whl/cpu        # no GPU
+
+# 2. then the package: it finds torch already installed and leaves it alone
 pip install -e ".[local-embed,pdf,docx]"
-# Then install PyTorch with ROCm or CUDA — see https://pytorch.org/get-started/locally/
+
+# 3. check which build you have
+python -c "import torch; print('gpu:', torch.cuda.is_available(), '| cuda:', torch.version.cuda, '| hip:', torch.version.hip)"
 ```
+
+Run only the line of step 1 that matches your machine. NVIDIA prints `gpu: True | cuda: 12.x | hip: None`. An AMD ROCm
+build also answers `torch.cuda.is_available()`, so it prints `gpu: True | cuda: None | hip: 6.x`. A CPU build prints
+`gpu: False | cuda: None | hip: None`. If you have a GPU and see `gpu: False`, or the wrong one of `cuda` and `hip`, the wrong
+build is installed: run the matching line of step 1 again with `--force-reinstall`.
 
 ---
 
@@ -115,45 +134,75 @@ release at a time if you want the smallest possible restart unit.
 
 `scripts/stage_3gpp.py` downloads the Markdown conversions of the Rel-19 specifications from the
 [`GSMA/3GPP`](https://huggingface.co/datasets/GSMA/3GPP) dataset, checks them, and stages them under names that the 3GPP
-loader reads (`<NN>_series/<spec>-<version>.md`). It downloads only `marked/Rel-19/**/raw.md` and
+loader reads: `<out>/Rel-19/<NN>_series/<spec>-<version>.md`. It downloads only `marked/Rel-19/**/raw.md` and
 `conversion_log.jsonl`, never the ~32,760 figure images. It is opt-in: the loader and the default behaviour are unchanged.
 The files are downloaded from the original source onto your machine; this repository does not contain or redistribute
 them. Read the dataset's licence and the 3GPP terms before you use the data.
+
+Install the package first (`pip install -e ".[local-embed,pdf,docx]"` from the repository root, see "Installation"): the
+script imports `open_telco_rag`, and without the install it stops with `ModuleNotFoundError`.
 
 ```bash
 python scripts/stage_3gpp.py --revision a056f6018a7e8e67052aa68a702e272d0ae95d75 --out data/3gpp/staged --dry-run   # plan only
 python scripts/stage_3gpp.py --revision a056f6018a7e8e67052aa68a702e272d0ae95d75 --out data/3gpp/staged
 python scripts/stage_3gpp.py --revision a056f6018a7e8e67052aa68a702e272d0ae95d75 --out data/3gpp/staged --verify    # offline re-check
-open-telco-rag ingest 3gpp --data data/3gpp/staged --strategy hierarchical_markdown
+open-telco-rag ingest 3gpp --data data/3gpp/staged --model bge-m3 \
+  --strategy hierarchical_markdown --chunk-size 2048 --enrichment none --distance-metric cosine \
+  --bound-tokens 512 \
+  --bound-verify minilm=256,bge=512,bge-m3=512,qwen3-embedding-0.6b=512,embeddinggemma-300m=512 \
+  --bound-outliers split
 ```
+
+**Why the bound.** Without `--bound-tokens`, chunks of the staged set reach about 89,000 tokens and 46.6% of them exceed
+minilm's 256-token limit (measured on the Rel-19 set in a GPU test run; I have not re-measured them since). The options
+above cut every chunk to at most 512 tokens and, with `--bound-verify ... --bound-outliers split`, cut further any chunk
+that is still over another embedder's limit. Repeat the command for each embedder and change only `--model`: the
+`--bound-*` options, with the same `--bound-verify` list, must be identical for every embedder, so that all collections
+hold identical chunks and their results can be compared.
 
 - `--revision` must be a 40-character commit hash (a branch name is refused), so that everyone stages the same files.
   The one above is the revision the counts below were measured on.
 - Expected for that revision: 1,566 conversion-log rows (1,557 OK, 9 ERROR), 1,557 `raw.md` files and 1,557 staged files;
   67 multi-part specs; 20 specs with a `_cover` file name; 49 `.doc` log rows; 7 specs whose first conversion failed and
-  a later one worked; one spec with only failed conversions and no file (TS 25.331); 11 files under the default
-  `--stub-bytes 5120` (flagged `is_stub`, still staged).
-- Disk: about 0.73 GB to download (`<out>_raw`, next to `--out`, not inside it, so `ingest --data <out>` never reads it) and
-  the same again for the staged copy, so about 1.5 GB. Listing the tree takes several minutes; the files then download in parallel
-  (`--workers`) with retries and backoff, and a run that stops can be started again.
-- The dataset is public. If you set `HF_TOKEN` in the environment it is used; the script never prints it.
+  a later one worked; one spec with only failed conversions and no file (TS 25.331).
+- Stubs: files smaller than `--stub-bytes` (default 5,120 bytes) are flagged `is_stub` in the manifest and still staged.
+  8 specs are under 5,000 bytes (38.460, 38.462, 38.461, 25.461, 37.481, 22.242, 25.431, 38.421) and 11 under 5,120 bytes
+  (the same eight plus 38.471, 41.101 and 25.421). They hold little more than a cover and a contents list.
+- Time and disk: `--dry-run` takes about 6 to 7 minutes, because it lists the whole tree (about 34,000 files, in pages of
+  50) to read the size and hash of each spec file; it downloads no spec file. The real run then downloads about 0.73 GB in
+  parallel (`--workers`) into `<out>_raw`, next to `--out`, not inside it, so that `ingest --data <out>` never reads it, and
+  stages the same again: about 1.5 GB in total. A run that stops can be started again.
+- The dataset is public. If you set `HF_TOKEN` in the environment it is used and never printed. A token does not
+  prevent HTTP 429 (rate limit) answers: the script, and the Hugging Face library under it, retry with backoff, and the
+  retries are counted in `staging_run.json`.
 - For each spec the last conversion-log row with status OK decides the version (`38300-j20.docx` is V19.2.0). The
   version is compared with a `V<major>.<minor>.<patch>` string in the first 40 lines of the file; a mismatch is
   counted in the manifest, never an error.
-- `manifest.json` (deterministic, no timestamps or local paths) records for every file its source path, staged name, size,
-  sha256, version and part, and lists excluded specs; run details are in `staging_run.json`.
+- `manifest.json` records for every file its source path, staged name, size, sha256, version and part, and lists the excluded
+  specs. It has no timestamps, no local paths and no run-dependent numbers: for the same revision it is byte-identical
+  whether the files were downloaded or staged with `--source` from an already downloaded tree (with the same `raw.md` files
+  and log). What differs from run to run (finish time, retry counts, the number of figure files in the listing) is in
+  `staging_run.json`.
 - `--source DIR` stages from an already downloaded tree with the dataset's layout, offline.
 
-Known limitations:
+#### Known limitations
 
-- The loader allows one suffix after the five digits. A spec that has a part (for example `32111-1`) is staged as
-  `32111-1.md`, so its chunk metadata has `doc_part` but no `version`; the version is only in the manifest.
-  For study reports (`23700-75`) the "part" is a study-item number, marked `doc_part_kind: study_item_number` in the manifest
-  (a rule of thumb: spec numbers x.700 to x.899).
-- The loader reads the release and the series from any `Rel-NN` or `NN_series` folder in the whole path, so do not put `--out`
-  below such a folder (the script warns).
-- Files under 5 KB are stubs (cover and contents only). They are staged and flagged; filter them from the manifest if
-  you do not want them.
+- **minilm's 256-token limit sets the chunk size for everyone.** With the verify list above, every collection gets the same
+  chunks, cut so that none is over any listed embedder's limit; minilm's 256 is the strictest, so the other models also get
+  chunks that are shorter than the 512 tokens they could take. If you do not need minilm, take it out of the list, for
+  every embedder.
+- **Multi-part specs have no version in the chunk metadata.** The loader allows one suffix after the five digits, so a spec
+  with a part (for example `32111-1`) is staged as `32111-1.md`: its chunk metadata has `doc_part` but no `version`; the
+  version is only in the manifest. For study reports (`23700-75`) the "part" is a study-item number, marked
+  `doc_part_kind: study_item_number` in the manifest (a rule of thumb: spec numbers x.700 to x.899).
+- **The cleaning leaves noise.** The cover page and contents list are kept in about 170 specs (the cover pattern is
+  deliberately limited to the start of a document), and table separator rows (long runs of `-`) and dot leaders in contents
+  tables are not collapsed. They cost tokens, and are why a few chunks are mostly formatting.
+- **float16 on a GPU, and EmbeddingGemma.** Embedders load in float16 on a GPU. `embeddinggemma-300m` returned NaN vectors in a
+  GPU test. Until the per-key `dtype` option and the `embeddinggemma-300m-fp32` key are merged, do not rely on it on a GPU. On
+  the current main a NaN batch is rejected by Chroma while the BM25 index keeps its rows, and ingest still exits with code 0.
+- **Paths.** The loader reads the release and the series from any `Rel-NN` or `NN_series` folder in the whole path, so do not
+  put `--out` below such a folder (the script warns).
 - Only Rel-19 has been tested.
 
 ### 3. Ingest
