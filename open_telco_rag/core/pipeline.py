@@ -329,6 +329,54 @@ def _process_file_worker(args: tuple) -> dict:
         return result
 
 
+class EmbeddingError(RuntimeError):
+    """the embedder returned something that must not be stored"""
+
+
+def _check_embeddings(embeds: Any, ids: list[str], dimensions: int | None = None) -> None:
+    """raise EmbeddingError, naming the chunk ids, unless there is one finite vector per chunk and all vectors
+    have the same length (the embedder's declared `dimensions`, when it has one); called before any write"""
+    import numpy as np
+
+    def named(rows: list[int]) -> str:
+        shown = ", ".join(ids[i] for i in rows[:5])
+        return shown + (f" (and {len(rows) - 5} more)" if len(rows) > 5 else "")
+
+    if len(embeds) != len(ids):
+        raise EmbeddingError(f"the embedder returned {len(embeds)} vector(s) for {len(ids)} chunk(s); expected one vector "
+                             f"per chunk. Nothing from this batch was written. First chunks: {named(list(range(len(ids))))}")
+    try:
+        matrix = np.asarray(embeds, dtype=float)
+    except (ValueError, TypeError):
+        matrix = None
+    width = dimensions or (len(embeds[0]) if len(embeds) else 0)
+    if matrix is None or matrix.ndim != 2 or matrix.shape[1] != width:
+        wrong = [i for i, v in enumerate(embeds) if len(v) != width] or list(range(len(ids)))
+        raise EmbeddingError(f"the embedder returned vectors of the wrong length (expected {width} values per vector) for "
+                             f"chunk(s): {named(wrong)}. Nothing from this batch was written.")
+    bad = np.flatnonzero(~np.isfinite(matrix).all(axis=1)).tolist()
+    if bad:
+        raise EmbeddingError(f"the embedder returned {len(bad)} vector(s) with NaN or infinite values (for example from "
+                             f"a half-precision overflow) for chunk(s): {named(bad)}. Nothing from this batch was written.")
+
+
+def _files_not_fully_stored(file_ends: list[tuple[str, int]], confirmed: list[tuple[int, int]]) -> int:
+    """how many files have a chunk row outside every confirmed range; file_ends is (file, index after its last
+    row) in row order, confirmed is (first row, end) ranges whose writes all succeeded"""
+    merged: list[list[int]] = []
+    for lo, hi in sorted(confirmed):
+        if merged and lo <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], hi)
+        else:
+            merged.append([lo, hi])
+    failed, start = 0, 0
+    for _, end in file_ends:
+        if end > start and not any(lo <= start and end <= hi for lo, hi in merged):
+            failed += 1
+        start = end
+    return failed
+
+
 def _locked_add(lock: threading.Lock, fn, *args: Any) -> None:
     """Run a store.add() call under a per-store lock (serialises same-store
     SQLite writes)."""
@@ -494,6 +542,25 @@ def ingest(
     # Serialise same-store writes; see _locked_add().
     store_lock = threading.Lock()
     fts_lock = threading.Lock()
+    # one task per sub-batch writes Chroma first and the BM25 index second, so the index never holds a row whose
+    # vector is missing; rows whose two writes both succeeded are what chunks_stored and the failed-file count
+    # are based on. After the first failed write nothing new is dispatched.
+    stats_lock = threading.Lock()
+    written: list[tuple[int, int]] = []
+    abort = threading.Event()
+
+    def _write_batch(lo: int, hi: int, ids: list[str], embeds: list, texts: list[str], metas: list[dict]) -> None:
+        if abort.is_set():
+            return
+        try:
+            _locked_add(store_lock, store.add, ids, embeds, texts, metas)
+            _locked_add(fts_lock, fts_store.add, *_unseen(ids, texts, fts_seen))
+        except BaseException:
+            abort.set()
+            raise
+        with stats_lock:
+            written.append((lo, hi))
+            stats.chunks_stored += hi - lo
 
     # Cap write-call size at the store's real limit; buffering size stays separate.
     max_write_batch = min(write_batch_size, getattr(store, "max_batch_size", write_batch_size) or write_batch_size)
@@ -537,36 +604,35 @@ def ingest(
                 for start in range(0, n, max_write_batch):
                     end = min(start + max_write_batch, n)
                     db_futures.append(db_writer.submit(
-                        _locked_add, store_lock, store.add,
+                        _write_batch, dispatched + start, dispatched + end,
                         ids[start:end], embeds[start:end], texts[start:end], metas[start:end],
-                    ))
-                    db_futures.append(db_writer.submit(
-                        _locked_add, fts_lock, fts_store.add, *_unseen(ids[start:end], texts[start:end], fts_seen),
                     ))
                 dispatched += n
                 flush_marks.append((dispatched, db_futures[first_future:]))
 
             for start in range(0, total_chunks, batch_size):
+                if abort.is_set():          # a write failed: stop embedding and dispatching
+                    break
                 end = min(start + batch_size, total_chunks)
                 batch_texts = all_texts[start:end]
                 batch_ids   = all_ids[start:end]
                 batch_metas = all_metas[start:end]
 
                 embeds = embedder.embed(batch_texts)
+                _check_embeddings(embeds, batch_ids, getattr(embedder, "dimensions", None))
 
                 write_ids.extend(batch_ids)
                 write_embeds.extend(embeds)
                 write_texts.extend(batch_texts)
                 write_metas.extend(batch_metas)
 
-                stats.chunks_stored += len(batch_texts)
                 chunk_bar.update(len(batch_texts))
 
-                while len(write_ids) >= write_batch_size:
+                while len(write_ids) >= write_batch_size and not abort.is_set():
                     _flush_writes(write_batch_size)
                 _checkpoint()
 
-            if write_ids:
+            if write_ids and not abort.is_set():
                 _flush_writes(len(write_ids))
 
             tqdm.write("  Flushing database writes to disk...")
@@ -575,7 +641,8 @@ def ingest(
 
     except Exception as e:
         print(f"\n[ERROR] Bulk Indexing failed: {e}")
-        stats.error_files += len(files_processed_this_run)
+        stats.error_files += _files_not_fully_stored(file_ends, written)
+        stats.failed = True
         return stats
 
     # Separate from the write-critical section: a bookkeeping failure isn't data loss.

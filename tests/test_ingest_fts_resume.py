@@ -19,9 +19,9 @@ def _fts_rows(tmp_path):
         "SELECT COUNT(*), COUNT(DISTINCT doc_id) FROM bm25_index").fetchone()
 
 
-def test_fts_rows_equal_chroma_chunks_after_a_killed_and_resumed_run(tmp_path, data):  # noqa: F811
+def test_fts_rows_equal_chroma_chunks_after_a_failed_write_and_after_the_resume(tmp_path, data):  # noqa: F811
     class FlakyStore(ChromaStore):
-        """the Chroma write of one flush fails while its FTS write succeeds: FTS is ahead of Chroma"""
+        """the Chroma write of one flush fails: the BM25 write of the same rows must not happen either"""
         adds = 0
 
         def add(self, *args, **kwargs):
@@ -32,7 +32,7 @@ def test_fts_rows_equal_chroma_chunks_after_a_killed_and_resumed_run(tmp_path, d
 
     _run(tmp_path, data, _store(tmp_path, cls=FlakyStore))
     rows, distinct = _fts_rows(tmp_path)
-    assert rows > distinct or rows != _store(tmp_path).count(), "the failed run leaves FTS and Chroma out of step"
+    assert rows == distinct == _store(tmp_path).count(), "the failed run leaves FTS and Chroma in step"
 
     store = _store(tmp_path)
     _run(tmp_path, data, store)
