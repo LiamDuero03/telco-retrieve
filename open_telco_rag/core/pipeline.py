@@ -542,23 +542,25 @@ def ingest(
     # Serialise same-store writes; see _locked_add().
     store_lock = threading.Lock()
     fts_lock = threading.Lock()
-    # rows whose Chroma write and FTS write both succeeded: what chunks_stored and the failed-file count are based on
+    # one task per sub-batch writes Chroma first and the BM25 index second, so the index never holds a row whose
+    # vector is missing; rows whose two writes both succeeded are what chunks_stored and the failed-file count
+    # are based on. After the first failed write nothing new is dispatched.
     stats_lock = threading.Lock()
-    written: dict[tuple[int, int], int] = {}
+    written: list[tuple[int, int]] = []
+    abort = threading.Event()
 
-    def _confirm(lo: int, hi: int) -> None:
+    def _write_batch(lo: int, hi: int, ids: list[str], embeds: list, texts: list[str], metas: list[dict]) -> None:
+        if abort.is_set():
+            return
+        try:
+            _locked_add(store_lock, store.add, ids, embeds, texts, metas)
+            _locked_add(fts_lock, fts_store.add, *_unseen(ids, texts, fts_seen))
+        except BaseException:
+            abort.set()
+            raise
         with stats_lock:
-            written[(lo, hi)] = written.get((lo, hi), 0) + 1
-            if written[(lo, hi)] == 2:
-                stats.chunks_stored += hi - lo
-
-    def _store_write(lo: int, hi: int, *args: Any) -> None:
-        _locked_add(store_lock, store.add, *args)
-        _confirm(lo, hi)
-
-    def _fts_write(lo: int, hi: int, *args: Any) -> None:
-        _locked_add(fts_lock, fts_store.add, *args)
-        _confirm(lo, hi)
+            written.append((lo, hi))
+            stats.chunks_stored += hi - lo
 
     # Cap write-call size at the store's real limit; buffering size stays separate.
     max_write_batch = min(write_batch_size, getattr(store, "max_batch_size", write_batch_size) or write_batch_size)
@@ -602,16 +604,15 @@ def ingest(
                 for start in range(0, n, max_write_batch):
                     end = min(start + max_write_batch, n)
                     db_futures.append(db_writer.submit(
-                        _store_write, dispatched + start, dispatched + end,
+                        _write_batch, dispatched + start, dispatched + end,
                         ids[start:end], embeds[start:end], texts[start:end], metas[start:end],
-                    ))
-                    db_futures.append(db_writer.submit(
-                        _fts_write, dispatched + start, dispatched + end, *_unseen(ids[start:end], texts[start:end], fts_seen),
                     ))
                 dispatched += n
                 flush_marks.append((dispatched, db_futures[first_future:]))
 
             for start in range(0, total_chunks, batch_size):
+                if abort.is_set():          # a write failed: stop embedding and dispatching
+                    break
                 end = min(start + batch_size, total_chunks)
                 batch_texts = all_texts[start:end]
                 batch_ids   = all_ids[start:end]
@@ -627,11 +628,11 @@ def ingest(
 
                 chunk_bar.update(len(batch_texts))
 
-                while len(write_ids) >= write_batch_size:
+                while len(write_ids) >= write_batch_size and not abort.is_set():
                     _flush_writes(write_batch_size)
                 _checkpoint()
 
-            if write_ids:
+            if write_ids and not abort.is_set():
                 _flush_writes(len(write_ids))
 
             tqdm.write("  Flushing database writes to disk...")
@@ -640,7 +641,7 @@ def ingest(
 
     except Exception as e:
         print(f"\n[ERROR] Bulk Indexing failed: {e}")
-        stats.error_files += _files_not_fully_stored(file_ends, [rng for rng, n in written.items() if n == 2])
+        stats.error_files += _files_not_fully_stored(file_ends, written)
         stats.failed = True
         return stats
 

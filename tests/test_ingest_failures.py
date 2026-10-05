@@ -162,3 +162,51 @@ def test_good_vectors_pass_through_unchanged(tmp_path, data):  # noqa: F811
     store = _store(tmp_path)
     stats = _run(tmp_path, data, store)
     assert stats.failed is False and stats.error_files == 0 and stats.chunks_stored == store.count() == _fts(tmp_path)
+
+
+# ── commit 3: Chroma first, then BM25, one task per sub-batch; stop after the first failure ──
+
+def test_the_bm25_index_never_runs_ahead_of_chroma_after_a_failed_write(tmp_path, data):  # noqa: F811
+    store = _store(tmp_path, cls=FlakyStore)
+    stats = _run(tmp_path, data, store)
+    assert stats.failed is True
+    assert _fts(tmp_path) == store.count() == stats.chunks_stored, "every BM25 row has its Chroma row"
+
+
+def test_bm25_rows_are_written_only_after_the_chroma_write_of_the_same_rows(tmp_path, data, monkeypatch):  # noqa: F811
+    store = _store(tmp_path)
+    seen = []
+
+    class CheckedFTS(pipeline_module.FTSStore):
+        def add(self, ids, documents):
+            seen.append(len(ids))
+            assert set(ids) <= set(store._collection.get(ids=list(ids), include=[])["ids"]), "BM25 write before its Chroma write"
+            return super().add(ids, documents)
+
+    monkeypatch.setattr(pipeline_module, "FTSStore", CheckedFTS)
+    stats = _run(tmp_path, data, store)
+    assert seen and stats.failed is False and _fts(tmp_path) == store.count()
+
+
+def test_no_further_writes_or_embedding_calls_are_started_after_the_first_failure(tmp_path, data):  # noqa: F811
+    clean = tmp_path / "clean"
+    clean.mkdir()
+    clean_store, clean_embedder = _store(clean, cls=FlakyStore), SlowEmbedder()
+    FlakyStore.fail_on = 10**6
+    try:
+        _run(clean, data, clean_store, embedder=clean_embedder)
+    finally:
+        FlakyStore.fail_on = 3
+    failed_store, failed_embedder = _store(tmp_path, cls=FlakyStore), SlowEmbedder()
+    stats = _run(tmp_path, data, failed_store, embedder=failed_embedder)
+    assert stats.failed is True
+    assert failed_store.adds < clean_store.adds, "writes stopped being dispatched"
+    assert failed_embedder.calls < clean_embedder.calls, "embedding stopped too"
+
+
+def test_a_failed_run_can_be_resumed_to_a_complete_consistent_index(tmp_path, data, expected):  # noqa: F811
+    _run(tmp_path, data, _store(tmp_path, cls=FlakyStore))
+    store = _store(tmp_path)
+    stats = _run(tmp_path, data, store)
+    assert stats.failed is False and _per_file(store) == expected
+    assert _fts(tmp_path) == store.count()
