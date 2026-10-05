@@ -11,7 +11,15 @@ import pytest
 import cli.main as cli_main
 import open_telco_rag.core.pipeline as pipeline_module
 from open_telco_rag.stores.chroma import ChromaStore
-from tests.test_ingest_checkpoint import N_FILES, SlowEmbedder, _per_file, _run, _store, data, expected  # noqa: F401  (fixtures)
+from tests.test_ingest_checkpoint import (  # noqa: F401  (fixtures)
+    N_FILES,
+    SlowEmbedder,
+    _per_file,
+    _run,
+    _store,
+    data,
+    expected,
+)
 
 
 def _fts(tmp_path) -> int:
