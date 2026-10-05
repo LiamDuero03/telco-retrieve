@@ -130,7 +130,8 @@ def test_manifest_content(tree, tmp_path):
     assert {("25331", "error_only"), ("28000", "no_raw_md"), ("29999", "no_ok_row"), ("22242", "stub_staged"),
             ("27001", "version_code_not_loadable"), ("21111", "invalid_log_row")} <= reasons
     assert m["counts"]["h1_version_check"] == {"match": 7, "mismatch": 1, "absent": 1}
-    assert m["counts"]["other_files_in_listing_not_downloaded"] == 1 and m["counts"]["doc_rows"] == 4
+    assert "other_files_in_listing_not_downloaded" not in m["counts"] and m["counts"]["doc_rows"] == 4
+    assert json.loads((out / "staging_run.json").read_text())["listing_files_not_downloaded"] == 1
 
 
 def test_hostile_log_values_never_reach_the_disk_or_the_names(tree, tmp_path):
@@ -315,3 +316,69 @@ def test_the_next_step_names_the_ingest_command(tree, tmp_path, capsys):
     out = tmp_path / "out"
     run(tree, out)
     assert f"open-telco-rag ingest 3gpp --data {out}" in capsys.readouterr().out
+
+
+# ── the retry count and the "same manifest from a download and from --source" statement ──
+
+class RetryingHub(FakeHub):
+    """like FakeHub, but a fetch fails with HTTP 429 `throttled` times first (through the script's own retry wrapper),
+    and the Hub library's own retries are simulated with its log message `hub_retries` times"""
+    def __init__(self, root, throttled=0, hub_retries=0, extra_listing=()):
+        super().__init__(root)
+        self.throttled, self.hub_retries, self.extra_listing = throttled, hub_retries, extra_listing
+
+    def listing(self, release):
+        out = super().listing(release)
+        out.update({path: stage.Entry(10, None, None) for path in self.extra_listing})     # more files in the Hub listing
+        return out
+
+    def fetch(self, path, raw_dir):
+        import logging
+
+        class Throttled(Exception):
+            response = SimpleNamespace(status_code=429)
+
+        def attempt():
+            if path.endswith("38300/raw.md") and self.throttled > 0:
+                self.throttled -= 1
+                raise Throttled()
+            return super(RetryingHub, self).fetch(path, raw_dir)
+        if path.endswith("32111-1/raw.md"):
+            for n in range(self.hub_retries):
+                logging.getLogger("huggingface_hub.utils._http").warning(
+                    "'429 Too Many Requests' thrown while requesting GET https://example.invalid/x. Retrying in 1s [Retry %d/5].", n + 1)
+        return stage.with_retries(attempt)
+
+
+def test_staging_run_records_the_real_retry_count(tree, tmp_path, monkeypatch):
+    monkeypatch.setattr(stage, "_sleep", lambda s: None)
+    out = tmp_path / "out"
+    hub = RetryingHub(tree, throttled=2, hub_retries=3)
+    assert stage.main(["--revision", REVISION, "--out", str(out)], source=hub) == 0
+    run = json.loads((out / "staging_run.json").read_text())
+    assert run["retries_script"] == 2 and run["retries_hub"] == 3 and run["retries"] == 5
+
+
+def test_the_retry_count_is_per_run_not_per_process(tree, tmp_path, monkeypatch):
+    monkeypatch.setattr(stage, "_sleep", lambda s: None)
+    stage.main(["--revision", REVISION, "--out", str(tmp_path / "one")], source=RetryingHub(tree, throttled=1, hub_retries=1))
+    stage.main(["--revision", REVISION, "--out", str(tmp_path / "two")], source=RetryingHub(tree))
+    assert json.loads((tmp_path / "two" / "staging_run.json").read_text())["retries"] == 0
+
+
+def test_a_run_without_retries_records_zero(tree, tmp_path):
+    run_ = tmp_path / "out"
+    run(tree, run_)
+    info = json.loads((run_ / "staging_run.json").read_text())
+    assert (info["retries"], info["retries_script"], info["retries_hub"]) == (0, 0, 0)
+
+
+def test_the_manifest_is_identical_from_a_download_and_from_a_source_tree(tree, tmp_path):
+    """the listing of a real download holds many figure files that a staged source tree does not: they must not
+    reach the manifest. They are counted in staging_run.json."""
+    run(tree, tmp_path / "from_tree")
+    hub = RetryingHub(tree, extra_listing=[f"marked/Rel-19/38_series/38300/image{n}.jpg" for n in range(2, 50)])
+    assert stage.main(["--revision", REVISION, "--out", str(tmp_path / "from_hub")], source=hub) == 0
+    assert (tmp_path / "from_tree" / "manifest.json").read_bytes() == (tmp_path / "from_hub" / "manifest.json").read_bytes()
+    assert json.loads((tmp_path / "from_hub" / "staging_run.json").read_text())["listing_files_not_downloaded"] == 49
+    assert json.loads((tmp_path / "from_tree" / "staging_run.json").read_text())["listing_files_not_downloaded"] == 1
