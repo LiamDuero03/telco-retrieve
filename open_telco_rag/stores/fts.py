@@ -59,10 +59,6 @@ class FTSStore:
         )
         conn.commit()
 
-    def existing_hashes(self) -> dict[str, int]:
-        """doc_id -> hash of its text for every indexed row; hashes are only comparable within one process"""
-        return {doc_id: hash(text) for doc_id, text in self._get_conn().execute("SELECT doc_id, text FROM bm25_index")}
-
     def load_rows(self) -> dict[str, list[tuple[int, int]]]:
         """doc_id -> [(rowid, hash of its text)] for every indexed row, read once; sync() works from this in memory.
         hashes are only comparable within one process"""
