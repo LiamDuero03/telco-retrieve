@@ -329,6 +329,37 @@ def _process_file_worker(args: tuple) -> dict:
         return result
 
 
+class EmbeddingError(RuntimeError):
+    """the embedder returned something that must not be stored"""
+
+
+def _check_embeddings(embeds: Any, ids: list[str], dimensions: int | None = None) -> None:
+    """raise EmbeddingError, naming the chunk ids, unless there is one finite vector per chunk and all vectors
+    have the same length (the embedder's declared `dimensions`, when it has one); called before any write"""
+    import numpy as np
+
+    def named(rows: list[int]) -> str:
+        shown = ", ".join(ids[i] for i in rows[:5])
+        return shown + (f" (and {len(rows) - 5} more)" if len(rows) > 5 else "")
+
+    if len(embeds) != len(ids):
+        raise EmbeddingError(f"the embedder returned {len(embeds)} vector(s) for {len(ids)} chunk(s); expected one vector "
+                             f"per chunk. Nothing from this batch was written. First chunks: {named(list(range(len(ids))))}")
+    try:
+        matrix = np.asarray(embeds, dtype=float)
+    except (ValueError, TypeError):
+        matrix = None
+    width = dimensions or (len(embeds[0]) if len(embeds) else 0)
+    if matrix is None or matrix.ndim != 2 or matrix.shape[1] != width:
+        wrong = [i for i, v in enumerate(embeds) if len(v) != width] or list(range(len(ids)))
+        raise EmbeddingError(f"the embedder returned vectors of the wrong length (expected {width} values per vector) for "
+                             f"chunk(s): {named(wrong)}. Nothing from this batch was written.")
+    bad = np.flatnonzero(~np.isfinite(matrix).all(axis=1)).tolist()
+    if bad:
+        raise EmbeddingError(f"the embedder returned {len(bad)} vector(s) with NaN or infinite values (for example from "
+                             f"a half-precision overflow) for chunk(s): {named(bad)}. Nothing from this batch was written.")
+
+
 def _files_not_fully_stored(file_ends: list[tuple[str, int]], confirmed: list[tuple[int, int]]) -> int:
     """how many files have a chunk row outside every confirmed range; file_ends is (file, index after its last
     row) in row order, confirmed is (first row, end) ranges whose writes all succeeded"""
@@ -587,6 +618,7 @@ def ingest(
                 batch_metas = all_metas[start:end]
 
                 embeds = embedder.embed(batch_texts)
+                _check_embeddings(embeds, batch_ids, getattr(embedder, "dimensions", None))
 
                 write_ids.extend(batch_ids)
                 write_embeds.extend(embeds)

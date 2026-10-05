@@ -115,3 +115,50 @@ def _help_of(command: str) -> str:
     with contextlib.redirect_stdout(buf), pytest.raises(SystemExit):
         cli_main.main([command, "--help"])
     return buf.getvalue()
+
+
+# ── commit 2: check the embedder's output before anything is written ─────────
+
+class BadVectorEmbedder(SlowEmbedder):
+    """returns a bad vector for every text containing `marker`; `kind` picks what is wrong"""
+
+    def __init__(self, marker="function 3 ", kind="nan"):
+        super().__init__()
+        self.marker, self.kind = marker, kind
+
+    def embed(self, texts, is_query=False):
+        out = super().embed(texts, is_query)
+        bad = []
+        for text, vec in zip(texts, out):
+            if self.marker in text and self.kind != "missing":
+                vec = {"nan": [float("nan")] + vec[1:], "inf": [float("inf")] + vec[1:], "short": vec[:-1]}[self.kind]
+            bad.append(vec)
+        return bad[:-1] if self.kind == "missing" else bad
+
+
+@pytest.mark.parametrize("kind", ["nan", "inf"])
+def test_a_non_finite_vector_stops_the_run_before_its_batch_is_written(tmp_path, data, kind, capsys):  # noqa: F811
+    store = _store(tmp_path)
+    stats = _run(tmp_path, data, store, embedder=BadVectorEmbedder(kind=kind))
+    out = capsys.readouterr().out
+    assert stats.failed is True and stats.error_files > 0
+    assert "NaN or infinite" in out and "23003-j00.md::bow::" in out, "the message names the chunk ids"
+    ids = store._collection.get(include=[])["ids"]
+    assert not any(i.startswith("23003-j00.md::") for i in ids), "nothing of the bad batch reached Chroma"
+    assert _fts(tmp_path) == store.count() == stats.chunks_stored, "the two stores stay in step"
+
+
+def test_a_vector_of_the_wrong_length_or_a_missing_vector_is_refused(tmp_path, data, capsys):  # noqa: F811
+    for number, kind in enumerate(("short", "missing")):
+        work = tmp_path / kind
+        work.mkdir()
+        stats = _run(work, data, _store(work), embedder=BadVectorEmbedder(kind=kind))
+        out = capsys.readouterr().out
+        assert stats.failed is True, kind
+        assert "expected" in out and "vector" in out, out
+
+
+def test_good_vectors_pass_through_unchanged(tmp_path, data):  # noqa: F811
+    store = _store(tmp_path)
+    stats = _run(tmp_path, data, store)
+    assert stats.failed is False and stats.error_files == 0 and stats.chunks_stored == store.count() == _fts(tmp_path)
