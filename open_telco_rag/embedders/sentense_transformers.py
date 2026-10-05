@@ -10,6 +10,17 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# dtypes a registry entry may ask for; without one a GPU run uses float16 (unchanged)
+DTYPE_NAMES = ("float16", "bfloat16", "float32")
+
+
+def check_dtype_name(name: str | None, where: str) -> str | None:
+    """None or one of DTYPE_NAMES; anything else is refused with the allowed values"""
+    if name is not None and name not in DTYPE_NAMES:
+        raise ValueError(f"{where}: dtype must be one of {', '.join(DTYPE_NAMES)}, got {name!r}.")
+    return name
+
+
 
 class SentenceTransformerEmbedder:
     """Embeds text using a local sentence-transformers model."""
@@ -41,6 +52,8 @@ class SentenceTransformerEmbedder:
         # either this or the plain prefixes, never both
         self._query_prompt_name    = available[model_key].get("query_prompt_name")
         self._document_prompt_name = available[model_key].get("document_prompt_name")
+        # optional torch dtype for a GPU run (float16, bfloat16, float32); absent means float16, as always
+        self._dtype = check_dtype_name(available[model_key].get("dtype"), f"embedding model '{model_key}'")
         self._model       = None
         self._first_embed_done = False
         # off by default: counting truncation tokenizes every batch a second time
@@ -88,7 +101,7 @@ class SentenceTransformerEmbedder:
                 self._model = SentenceTransformer(
                     self._model_name,
                     device="cuda",
-                    model_kwargs={"torch_dtype": torch.float16}
+                    model_kwargs={"torch_dtype": getattr(torch, self._dtype or "float16")}
                 )
             else:
                 self._model = SentenceTransformer(
@@ -153,9 +166,10 @@ class SentenceTransformerEmbedder:
                   f"pass in this process, may be slower than subsequent batches...")
             embed_start = time.perf_counter()
 
-        if torch.cuda.is_available():
-            # autocast forces Tensor Core dispatch while keeping sensitive ops fp32.
-            with torch.autocast(device_type="cuda", dtype=torch.float16):
+        if torch.cuda.is_available() and self._dtype != "float32":
+            # autocast forces Tensor Core dispatch while keeping sensitive ops fp32; its dtype is the key's
+            # (float16 unless the registry says otherwise). float32 runs without autocast.
+            with torch.autocast(device_type="cuda", dtype=getattr(torch, self._dtype or "float16")):
                 embeddings = self._model.encode(
                     texts,
                     batch_size=optimal_batch_size,

@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -69,7 +70,19 @@ class Entry(NamedTuple):
 # ── small helpers ─────────────────────────────────────────────────────────────
 
 _retry_lock = threading.Lock()
-_retries = 0
+_retries = 0            # retries made by with_retries() in this run
+_hub_retries = 0        # retries the huggingface_hub library made itself (it logs "Retrying in ...") in this run
+
+
+class _HubRetryCounter(logging.Handler):
+    """counts the retries huggingface_hub does inside its own calls (HTTP 429 and 5xx included): it logs each one"""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        global _hub_retries
+        if "Retrying in" in record.getMessage():
+            with _retry_lock:
+                _hub_retries += 1
+
 _sleep = time.sleep
 
 
@@ -390,6 +403,9 @@ def build_manifest(args, plan: dict, rows: list[dict], listing: dict[str, Entry]
             "version_source", "version_in_filename", "h1_version_check", "doc_part", "doc_part_kind", "is_stub",
             "log_status", "log_filename")
     counts = count_summary(rows, plan, listing)
+    # the number of figure files in the listing depends on where the listing came from (the Hub, or a tree on disk),
+    # so it goes to staging_run.json: the manifest is the same for a download and for --source
+    counts.pop("other_files_in_listing_not_downloaded")
     counts["h1_version_check"] = {k: sum(f["h1_version_check"] == k for f in files) for k in ("match", "mismatch", "absent")}
     return {
         "manifest_schema_version": SCHEMA_VERSION, "dataset_repo": DATASET_REPO, "revision": args.revision,
@@ -468,6 +484,18 @@ def main(argv: list[str] | None = None, source=None) -> int:
     if any(RELEASE.match(p) or SERIES.match(p) for p in out.resolve().parts):
         print("warning: --out has a Rel-NN or NN_series folder in its path; the loader would read it as the release/series", file=sys.stderr)
 
+    global _retries, _hub_retries
+    _retries = _hub_retries = 0
+    hub_counter = _HubRetryCounter()
+    hub_logger = logging.getLogger("huggingface_hub")
+    hub_logger.addHandler(hub_counter)
+    try:
+        return _run(args, out, raw_dir, source)
+    finally:
+        hub_logger.removeHandler(hub_counter)
+
+
+def _run(args, out: Path, raw_dir: Path, source) -> int:
     if args.verify:
         problems = verify_staged(out)
         for line in problems:
@@ -508,7 +536,9 @@ def main(argv: list[str] | None = None, source=None) -> int:
         manifest_bytes = dump_manifest(build_manifest(args, plan, rows, listing, log_sha, len(log_bytes)))
         write_atomic(out / "manifest.json", data=manifest_bytes)
         run = {"tool": "scripts/stage_3gpp.py", "finished_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-               "python": sys.version.split()[0], "workers": args.workers, "retries": _retries,
+               "python": sys.version.split()[0], "workers": args.workers,
+               "retries": _retries + _hub_retries, "retries_script": _retries, "retries_hub": _hub_retries,
+               "listing_files_not_downloaded": count_summary(rows, plan, listing)["other_files_in_listing_not_downloaded"],
                "files_staged": len(plan["staged"]), "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest()}
         write_atomic(out / "staging_run.json", data=(json.dumps(run, sort_keys=True, indent=1) + "\n").encode("ascii"))
     except StageError as exc:

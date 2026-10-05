@@ -81,5 +81,13 @@
         "description": "Google EmbeddingGemma, 300M params — Matryoshka-truncatable to 512/256/128 dims, prompt-name-based query/document distinction (verified 2026-09-21 via HF model card + Google AI docs)",
         "query_prompt_name": "Retrieval-query",
         "document_prompt_name": "Retrieval-document"
+    },
+    "embeddinggemma-300m-fp32": {
+        "model_name": "google/embeddinggemma-300m",
+        "dimensions": 768,
+        "description": "The same model as embeddinggemma-300m, loaded in float32 without autocast: float16 can overflow to NaN vectors on some GPUs. A separate key, so its chunk ids and collection differ from embeddinggemma-300m",
+        "dtype": "float32",
+        "query_prompt_name": "Retrieval-query",
+        "document_prompt_name": "Retrieval-document"
     }
 }
