@@ -37,6 +37,8 @@ def load_reranker(model_key: str = "ms-marco-minilm"):
             otel_kwargs["query_max_chars"] = cfg["query_max_chars"]
         if "doc_max_chars" in cfg:
             otel_kwargs["doc_max_chars"] = cfg["doc_max_chars"]
+        if "dtype" in cfg:
+            otel_kwargs["dtype"] = cfg["dtype"]
         return OTelReranker(model=cfg["model_name"], **otel_kwargs)
     else:
         return CrossEncoderReranker(model_name=cfg["model_name"])
@@ -125,7 +127,11 @@ class OTelReranker:
         device: str = "auto",
         query_max_chars: int = 512,
         doc_max_chars:   int = 1024,
+        dtype: str | None = None,
     ):
+        from open_telco_rag.embedders.sentense_transformers import check_dtype_name
+        # None keeps the default: float16 on a GPU, float32 on a CPU
+        self._dtype = check_dtype_name(dtype, f"reranker '{model}'")
         self.model_name  = model
         self.device      = device
         self.query_max_chars = query_max_chars
@@ -162,7 +168,8 @@ class OTelReranker:
                 ("cuda" if torch.cuda.is_available() else "cpu")
                 if self.device == "auto" else self.device
             )
-            dtype = torch.float16 if resolved_device != "cpu" else torch.float32
+            dtype = getattr(torch, self._dtype) if self._dtype else (
+                torch.float16 if resolved_device != "cpu" else torch.float32)
             # device_map={"": device} (not .to()): accelerate materialises meta tensors properly.
             model = AutoModelForSequenceClassification.from_pretrained(
                 self.model_name,

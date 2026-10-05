@@ -163,7 +163,8 @@ def test_only_the_intended_registry_keys_carry_prefix_settings():
     prefix_keys = {"query_prefix", "document_prefix", "query_prompt_name", "document_prompt_name"}
     with_prefixes = {k for k, v in available.items() if prefix_keys & set(v)}
     assert with_prefixes == {"e5-prefixed", "bge-prefixed", "qwen3-embedding-0.6b",
-                             "qwen3-embedding-8b", "embeddinggemma-300m"}
+                             "qwen3-embedding-8b", "embeddinggemma-300m",
+                             "embeddinggemma-300m-fp32"}
 
 
 def test_retrieval_works_with_an_embedder_that_has_no_is_query_parameter():

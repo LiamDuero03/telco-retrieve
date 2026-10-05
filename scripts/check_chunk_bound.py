@@ -43,7 +43,7 @@ from open_telco_rag.core.chunk_bound import (
 
 # documented max_seq_length of the models in configs/embedding_models.json, used when the registry has no value
 KNOWN_LIMITS = {"minilm": 256, "mpnet": 384, "e5": 512, "bge": 512, "bge-m3": 8192, "qwen3-embedding-0.6b": 32768,
-                "embeddinggemma-300m": 2048}
+                "embeddinggemma-300m": 2048, "embeddinggemma-300m-fp32": 2048}
 REGISTRY = Path(__file__).resolve().parents[1] / "configs" / "embedding_models.json"
 CL100K = "cl100k"
 _QUERY = """select e.embedding_id, m.string_value from embeddings e
