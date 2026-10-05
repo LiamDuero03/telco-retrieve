@@ -63,20 +63,6 @@ def test_repeated_rows_from_an_older_interrupted_run_are_removed(tmp_path, data,
     assert "Removed 4 repeated BM25 rows" in capsys.readouterr().out
 
 
-def test_rows_with_different_text_are_kept_and_reported(tmp_path, data, capsys):  # noqa: F811
-    store = _store(tmp_path)
-    _run(tmp_path, data, store)
-    fts = FTSStore(path=tmp_path / "db", collection_name="coll")
-    doc_id = fts._get_conn().execute("SELECT doc_id FROM bm25_index LIMIT 1").fetchone()[0]
-    fts.add([doc_id], ["text from some other chunking configuration"])
-    capsys.readouterr()
-
-    _run(tmp_path, data, store)
-    rows, distinct = _fts_rows(tmp_path)
-    assert rows == store.count() + 1 and rows - distinct == 1, "nothing was dropped"
-    assert "1 BM25 rows repeat a chunk id with different text" in capsys.readouterr().out
-
-
 def test_an_uninterrupted_run_and_a_no_resume_rebuild_are_unchanged(tmp_path, data):  # noqa: F811
     store = _store(tmp_path)
     _run(tmp_path, data, store)

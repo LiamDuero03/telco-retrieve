@@ -59,9 +59,46 @@ class FTSStore:
         )
         conn.commit()
 
-    def existing_hashes(self) -> dict[str, int]:
-        """doc_id -> hash of its text for every indexed row; hashes are only comparable within one process"""
-        return {doc_id: hash(text) for doc_id, text in self._get_conn().execute("SELECT doc_id, text FROM bm25_index")}
+    def load_rows(self) -> dict[str, list[tuple[int, int]]]:
+        """doc_id -> [(rowid, hash of its text)] for every indexed row, read once; sync() works from this in memory.
+        hashes are only comparable within one process"""
+        state: dict[str, list[tuple[int, int]]] = {}
+        for rowid, doc_id, text in self._get_conn().execute("SELECT rowid, doc_id, text FROM bm25_index"):
+            state.setdefault(doc_id, []).append((rowid, hash(text)))
+        return state
+
+    def sync(self, ids: list[str], documents: list[str], state: dict[str, list[tuple[int, int]]]) -> int:
+        """make the index mirror these (id, text) pairs: a row whose text is unchanged is kept, rows of the id with
+        any other text (and repeats of the same text) are deleted by rowid, and a missing text is inserted.
+        `state` is what load_rows() returned; it is updated, so calls can follow each other. one transaction, no
+        lookup in the table. returns how many rows were deleted"""
+        stale: list[int] = []
+        insert: list[tuple[str, str]] = []
+        for doc_id, text in zip(ids, documents):
+            digest = hash(text)
+            rows = state.get(doc_id, [])
+            keep = next((row for row in rows if row[1] == digest), None)
+            stale.extend(rowid for rowid, h in rows if (rowid, h) != keep and rowid is not None)
+            if keep is None:
+                insert.append((doc_id, text))
+                state[doc_id] = [(None, digest)]          # inserted below; a later write of this id replaces it in memory only
+            else:
+                state[doc_id] = [keep]
+        if not stale and not insert:
+            return 0
+        conn = self._get_conn()
+        with conn:
+            for start in range(0, len(stale), 500):
+                chunk = stale[start:start + 500]
+                conn.execute(f"DELETE FROM bm25_index WHERE rowid IN ({','.join('?' * len(chunk))})", chunk)
+            if insert:
+                conn.executemany("INSERT INTO bm25_index(doc_id, text) VALUES (?, ?)", insert)
+        return len(stale)
+
+    def repeated_row_count(self) -> int:
+        """rows beyond the first of each doc_id (rows that repeat an id)"""
+        total, distinct = self._get_conn().execute("SELECT COUNT(*), COUNT(DISTINCT doc_id) FROM bm25_index").fetchone()
+        return total - distinct
 
     def remove_exact_duplicates(self) -> tuple[int, int]:
         """delete rows that repeat both the doc_id and the text of an earlier row (left by an ingest that was

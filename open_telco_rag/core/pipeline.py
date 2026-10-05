@@ -184,10 +184,14 @@ def _record_index_settings(store: Any, fingerprint: str, settings: dict) -> None
         print(f"\n[WARN] Could not record the index settings ({e}); the ingest itself succeeded.")
 
 
-def _unseen(ids: list[str], texts: list[str], seen: dict[str, int]) -> tuple[list[str], list[str]]:
-    """the (id, text) pairs not already in the BM25 index with the same text"""
-    new = [(i, t) for i, t in zip(ids, texts) if seen.get(i) != hash(t)]
-    return [i for i, _ in new], [t for _, t in new]
+def _report_repeated_rows(fts_store: Any) -> None:
+    """rows that still repeat a chunk id, with different text, after the writes: their files were not written again
+    in this run, so nothing says which text is current"""
+    repeated = fts_store.repeated_row_count()
+    if repeated:
+        print(f"\n[WARN] {repeated} BM25 rows repeat a chunk id with different text (chunks from different "
+              f"settings whose files were not written again in this run); they were left in place. Rebuild the "
+              f"collection with --no-resume to remove them.")
 
 
 def _write_progress(progress_file: Path, fingerprint: str, settings: dict, completed: set[str]) -> None:
@@ -446,19 +450,16 @@ def ingest(
     store_col  = getattr(store, "collection_name", "documents")
     fts_store  = FTSStore(path=store_path, collection_name=store_col)
 
-    fts_seen: dict[str, int] = {}
+    fts_seen: dict[str, list[tuple[int, int]]] = {}
     if not resume:
         fts_store.clear()
     else:
         # a run that was killed after some FTS writes but before the matching Chroma writes would
         # otherwise insert those rows a second time
-        removed, repeated = fts_store.remove_exact_duplicates()
+        removed, _ = fts_store.remove_exact_duplicates()
         if removed:
             print(f"\n[INFO] Removed {removed} repeated BM25 rows (same chunk id and text) left by an earlier interrupted run.")
-        if repeated:
-            print(f"\n[WARN] {repeated} BM25 rows repeat a chunk id with different text (chunks from different "
-                  f"settings); they were left in place. Rebuild the collection with --no-resume to remove them.")
-        fts_seen = fts_store.existing_hashes()
+        fts_seen = fts_store.load_rows()
 
     max_workers = max(1, (os.cpu_count() or 2) - 1)
     
@@ -475,6 +476,7 @@ def ingest(
         ))
 
     if not tasks:
+        _report_repeated_rows(fts_store)
         return stats
 
     # ── PHASE 1: PARSING ── (two-phase, not pipelined: CPU parse, then embed+write)
@@ -545,16 +547,19 @@ def ingest(
     # one task per sub-batch writes Chroma first and the BM25 index second, so the index never holds a row whose
     # vector is missing; rows whose two writes both succeeded are what chunks_stored and the failed-file count
     # are based on. After the first failed write nothing new is dispatched.
+    replaced_rows = 0
     stats_lock = threading.Lock()
     written: list[tuple[int, int]] = []
     abort = threading.Event()
 
     def _write_batch(lo: int, hi: int, ids: list[str], embeds: list, texts: list[str], metas: list[dict]) -> None:
+        nonlocal replaced_rows
         if abort.is_set():
             return
         try:
-            _locked_add(store_lock, store.add, ids, embeds, texts, metas)
-            _locked_add(fts_lock, fts_store.add, *_unseen(ids, texts, fts_seen))
+            _locked_add(store_lock, store.add, ids, embeds, texts, metas)          # Chroma first
+            with fts_lock:
+                replaced_rows += fts_store.sync(ids, texts, fts_seen)              # then BM25 by rowid
         except BaseException:
             abort.set()
             raise
@@ -644,6 +649,10 @@ def ingest(
         stats.error_files += _files_not_fully_stored(file_ends, written)
         stats.failed = True
         return stats
+
+    if replaced_rows:
+        print(f"\n[INFO] Replaced {replaced_rows} BM25 rows whose text had changed since they were indexed.")
+    _report_repeated_rows(fts_store)
 
     # Separate from the write-critical section: a bookkeeping failure isn't data loss.
     try:

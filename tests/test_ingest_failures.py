@@ -186,10 +186,10 @@ def test_bm25_rows_are_written_only_after_the_chroma_write_of_the_same_rows(tmp_
     seen = []
 
     class CheckedFTS(pipeline_module.FTSStore):
-        def add(self, ids, documents):
+        def sync(self, ids, documents, state):
             seen.append(len(ids))
             assert set(ids) <= set(store._collection.get(ids=list(ids), include=[])["ids"]), "BM25 write before its Chroma write"
-            return super().add(ids, documents)
+            return super().sync(ids, documents, state)
 
     monkeypatch.setattr(pipeline_module, "FTSStore", CheckedFTS)
     stats = _run(tmp_path, data, store)
