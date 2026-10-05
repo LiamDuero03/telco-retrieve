@@ -329,6 +329,23 @@ def _process_file_worker(args: tuple) -> dict:
         return result
 
 
+def _files_not_fully_stored(file_ends: list[tuple[str, int]], confirmed: list[tuple[int, int]]) -> int:
+    """how many files have a chunk row outside every confirmed range; file_ends is (file, index after its last
+    row) in row order, confirmed is (first row, end) ranges whose writes all succeeded"""
+    merged: list[list[int]] = []
+    for lo, hi in sorted(confirmed):
+        if merged and lo <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], hi)
+        else:
+            merged.append([lo, hi])
+    failed, start = 0, 0
+    for _, end in file_ends:
+        if end > start and not any(lo <= start and end <= hi for lo, hi in merged):
+            failed += 1
+        start = end
+    return failed
+
+
 def _locked_add(lock: threading.Lock, fn, *args: Any) -> None:
     """Run a store.add() call under a per-store lock (serialises same-store
     SQLite writes)."""
@@ -494,6 +511,23 @@ def ingest(
     # Serialise same-store writes; see _locked_add().
     store_lock = threading.Lock()
     fts_lock = threading.Lock()
+    # rows whose Chroma write and FTS write both succeeded: what chunks_stored and the failed-file count are based on
+    stats_lock = threading.Lock()
+    written: dict[tuple[int, int], int] = {}
+
+    def _confirm(lo: int, hi: int) -> None:
+        with stats_lock:
+            written[(lo, hi)] = written.get((lo, hi), 0) + 1
+            if written[(lo, hi)] == 2:
+                stats.chunks_stored += hi - lo
+
+    def _store_write(lo: int, hi: int, *args: Any) -> None:
+        _locked_add(store_lock, store.add, *args)
+        _confirm(lo, hi)
+
+    def _fts_write(lo: int, hi: int, *args: Any) -> None:
+        _locked_add(fts_lock, fts_store.add, *args)
+        _confirm(lo, hi)
 
     # Cap write-call size at the store's real limit; buffering size stays separate.
     max_write_batch = min(write_batch_size, getattr(store, "max_batch_size", write_batch_size) or write_batch_size)
@@ -537,11 +571,11 @@ def ingest(
                 for start in range(0, n, max_write_batch):
                     end = min(start + max_write_batch, n)
                     db_futures.append(db_writer.submit(
-                        _locked_add, store_lock, store.add,
+                        _store_write, dispatched + start, dispatched + end,
                         ids[start:end], embeds[start:end], texts[start:end], metas[start:end],
                     ))
                     db_futures.append(db_writer.submit(
-                        _locked_add, fts_lock, fts_store.add, *_unseen(ids[start:end], texts[start:end], fts_seen),
+                        _fts_write, dispatched + start, dispatched + end, *_unseen(ids[start:end], texts[start:end], fts_seen),
                     ))
                 dispatched += n
                 flush_marks.append((dispatched, db_futures[first_future:]))
@@ -559,7 +593,6 @@ def ingest(
                 write_texts.extend(batch_texts)
                 write_metas.extend(batch_metas)
 
-                stats.chunks_stored += len(batch_texts)
                 chunk_bar.update(len(batch_texts))
 
                 while len(write_ids) >= write_batch_size:
@@ -575,7 +608,8 @@ def ingest(
 
     except Exception as e:
         print(f"\n[ERROR] Bulk Indexing failed: {e}")
-        stats.error_files += len(files_processed_this_run)
+        stats.error_files += _files_not_fully_stored(file_ends, [rng for rng, n in written.items() if n == 2])
+        stats.failed = True
         return stats
 
     # Separate from the write-critical section: a bookkeeping failure isn't data loss.

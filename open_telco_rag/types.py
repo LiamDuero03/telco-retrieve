@@ -98,6 +98,7 @@ class IngestStats:
     chunks_stored:   int = 0
     skipped_files:   int = 0
     error_files:     int = 0
+    failed:          bool = False   # the run stopped because a write or the embedder failed
     errors:          list[dict] = field(default_factory=list)
     total_chunking_time_sec: float = 0.0
     total_raw_chars:          int = 0

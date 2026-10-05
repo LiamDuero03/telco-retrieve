@@ -1,0 +1,117 @@
+"""What ingest() and the ingest command report when something fails: counts that match what was stored, a failed flag,
+an opt-in exit code, and a check of the embedder's output before anything is written. Fake embedders only."""
+from __future__ import annotations
+
+import argparse
+import sqlite3
+from types import SimpleNamespace
+
+import pytest
+
+import cli.main as cli_main
+import open_telco_rag.core.pipeline as pipeline_module
+from open_telco_rag.stores.chroma import ChromaStore
+from tests.test_ingest_checkpoint import N_FILES, SlowEmbedder, _per_file, _run, _store, data, expected  # noqa: F401  (fixtures)
+
+
+def _fts(tmp_path) -> int:
+    conn = sqlite3.connect(str(tmp_path / "db" / "coll_fts.db"))
+    try:
+        return conn.execute("SELECT COUNT(*) FROM bm25_index").fetchone()[0]
+    finally:
+        conn.close()
+
+
+class FlakyStore(ChromaStore):
+    """the Chroma write of one flush fails (the n-th add call)"""
+    fail_on = 3
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.adds = 0
+
+    def add(self, *args, **kwargs):
+        self.adds += 1
+        if self.adds == self.fail_on:
+            raise RuntimeError("disk full")
+        return super().add(*args, **kwargs)
+
+
+# ── commit 1: honest counts, the failed flag, --fail-on-error ────────────────
+
+def test_chunks_stored_is_what_chroma_confirmed_after_a_failed_write(tmp_path, data):  # noqa: F811
+    store = _store(tmp_path, cls=FlakyStore)
+    stats = _run(tmp_path, data, store)
+    assert store.count() > 0
+    assert stats.chunks_stored == store.count()
+
+
+def test_error_files_counts_only_the_files_that_did_not_get_all_their_chunks(tmp_path, data, expected):  # noqa: F811
+    store = _store(tmp_path, cls=FlakyStore)
+    stats = _run(tmp_path, data, store)
+    stored = _per_file(store)
+    incomplete = [name for name, n in expected.items() if stored.get(name, 0) != n]
+    assert 0 < len(incomplete) < N_FILES, "some files failed and some did not"
+    assert stats.error_files == len(incomplete)
+
+
+def test_a_failed_run_is_flagged_and_a_clean_run_is_not(tmp_path, data):  # noqa: F811
+    assert _run(tmp_path, data, _store(tmp_path, cls=FlakyStore)).failed is True
+    clean = tmp_path / "clean"
+    clean.mkdir()
+    assert _run(clean, data, _store(clean)).failed is False
+
+
+def test_the_existing_error_message_is_kept(tmp_path, data, capsys):  # noqa: F811
+    _run(tmp_path, data, _store(tmp_path, cls=FlakyStore))
+    assert "[ERROR] Bulk Indexing failed: Database write failed during ingest: disk full" in capsys.readouterr().out
+
+
+def _ingest_args(**extra):
+    base = {"source_type": "oran", "use_marker": False, "model": "minilm", "strategy": "text_baseline", "enrichment": "none",
+            "data": None, "db_path": "db", "no_resume": True, "collection": None, "chunk_size": None, "overlap": None,
+            "target_tokens": None, "max_tokens": None, "overlap_tokens": None}
+    return argparse.Namespace(**{**base, **extra})
+
+
+@pytest.fixture
+def stub_ingest(monkeypatch):
+    def install(**stats):
+        monkeypatch.setattr(cli_main, "_get_embedder", lambda *a, **k: object())
+        monkeypatch.setattr(cli_main, "_get_source", lambda *a, **k: object())
+        monkeypatch.setattr(cli_main, "_get_store", lambda *a, **k: SimpleNamespace(collection_name="c"))
+        monkeypatch.setattr(pipeline_module, "ingest", lambda **kw: SimpleNamespace(
+            **{"files_processed": 0, "chunks_stored": 0, "skipped_files": 0, "error_files": 0, **stats}))
+    return install
+
+
+def test_the_exit_code_is_unchanged_without_the_flag(stub_ingest):
+    stub_ingest(error_files=3, failed=True)
+    cli_main._run_ingest(_ingest_args())                      # returns: the process exits 0, as before
+
+
+@pytest.mark.parametrize("stats", [{"error_files": 3}, {"failed": True}, {"error_files": 1, "failed": True}])
+def test_fail_on_error_exits_with_code_4_when_files_failed_or_the_run_failed(stub_ingest, stats):
+    stub_ingest(**stats)
+    with pytest.raises(SystemExit) as exc:
+        cli_main._run_ingest(_ingest_args(fail_on_error=True))
+    assert exc.value.code == cli_main.EXIT_INGEST_FAILED == 4
+
+
+def test_fail_on_error_does_nothing_on_a_clean_run(stub_ingest):
+    stub_ingest(failed=False)
+    cli_main._run_ingest(_ingest_args(fail_on_error=True))
+
+
+def test_fail_on_error_is_an_ingest_option_and_off_by_default():
+    assert "--fail-on-error" in _help_of("ingest")
+    assert "--fail-on-error" not in _help_of("search")
+
+
+def _help_of(command: str) -> str:
+    import contextlib
+    import io
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf), pytest.raises(SystemExit):
+        cli_main.main([command, "--help"])
+    return buf.getvalue()

@@ -75,6 +75,7 @@ def _enrichment_requires_llm(enrichment: str) -> bool:
 
 # exit status of `evaluate` when every question of a corpus failed (1 stays "error")
 EXIT_ALL_QUESTIONS_FAILED = 3
+EXIT_INGEST_FAILED = 4
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -133,6 +134,8 @@ def main(argv: list[str] | None = None) -> None:
                           help="Optional: a chunk still over a --bound-verify limit is only reported (warn, the default) "
                                "or cut further (split). Needs --bound-verify.")
     p_ingest.add_argument("--no-resume",  action="store_true",    help="Disable resume")
+    p_ingest.add_argument("--fail-on-error", action="store_true", default=False,
+                          help="Exit with code 4 when any file failed or the run stopped on an error (default: exit 0 as before).")
     p_ingest.add_argument("--collection", default=None,
                           help="Override collection name (default: source_type_model)")
     p_ingest.add_argument("--use-marker", action="store_true", default=False,
@@ -670,6 +673,9 @@ def _run_ingest(args) -> None:
     print(f"Chunks stored:   {stats.chunks_stored}")
     print(f"Skipped:         {stats.skipped_files}")
     print(f"Errors:          {stats.error_files}")
+    if getattr(args, "fail_on_error", False) and (getattr(stats, "failed", False) or stats.error_files):
+        print(f"\n[ERROR] Ingest finished with failures; exiting with code {EXIT_INGEST_FAILED} (--fail-on-error).")
+        sys.exit(EXIT_INGEST_FAILED)
 
 def _run_search(args) -> None:
     import math
