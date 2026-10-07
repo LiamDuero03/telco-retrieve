@@ -9,6 +9,8 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+import pytest
+
 from open_telco_rag.evaluation.provenance import index_settings_file
 from open_telco_rag.stores.chroma import ChromaStore
 from open_telco_rag.stores.fts import FTSStore
@@ -56,6 +58,23 @@ def make_collection(db_path, name: str, rows: list[dict], embedder: FakeEmbedder
         index_settings_file(db_path, name).write_text(
             json.dumps({"version": 1, "latest": entry, "history": [entry]}), encoding="utf8")
     return store
+
+
+@pytest.fixture(autouse=True)
+def in_memory_chroma(monkeypatch):
+    """Chroma 1.5 writes its index to disk in the background. A client that reads collections written
+    moments ago in the same process can fail for good with 'Nothing found on disk' (about 1 run in 5
+    for these tests); a real search runs in a process of its own, long after the ingest, and the
+    existing tests only ever read through the client that wrote. These tests are about our logic, so
+    they use one in-memory Chroma instead of the disk (the BM25 index and sidecars stay on disk)."""
+    import chromadb
+    from chromadb.config import Settings
+
+    client = chromadb.EphemeralClient(settings=Settings(allow_reset=True, anonymized_telemetry=False))
+    client.reset()
+    monkeypatch.setattr(chromadb, "PersistentClient", lambda *args, **kwargs: client)
+    yield client
+    client.reset()
 
 
 def registry(path: Path, entries: dict) -> Path:

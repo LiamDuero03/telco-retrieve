@@ -73,8 +73,15 @@ def _model_problem(name: str, recorded: str, wanted: str) -> str | None:
 
 
 def _stored_dimension(store: Any) -> int | None:
-    got = store._collection.get(limit=1, include=["embeddings"])
-    emb = got["embeddings"]
+    """vector length of a collection: what Chroma recorded when the first vectors were added, else
+    one stored vector; None if neither can be read"""
+    recorded = getattr(getattr(store._collection, "_model", None), "dimension", None)
+    if recorded:
+        return int(recorded)
+    try:
+        emb = store._collection.get(limit=1, include=["embeddings"])["embeddings"]
+    except Exception:  # noqa: BLE001 - Chroma may still be building the index of fresh data
+        return None
     return len(emb[0]) if emb is not None and len(emb) else None
 
 
@@ -126,6 +133,8 @@ def open_collections(db_path: str | Path, names: list[str], embedder: Any,
             say(f"[NOTE] collection {c.name!r} is empty and contributes nothing.")
             continue
         c.dimension = _stored_dimension(c.store)
+        if c.dimension is None:
+            say(f"[WARN] could not read the vector size of collection {c.name!r}; its dimension was not checked.")
     sized = [c for c in opened if c.dimension is not None]
     for c in sized:
         if expected is not None and c.dimension != expected:
