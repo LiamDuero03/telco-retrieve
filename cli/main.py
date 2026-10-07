@@ -743,7 +743,8 @@ def _run_search(args) -> None:
     displayed = 0
     for r in results:
         collection = r.metadata.get("collection", "")
-        key = f"{collection}::{r.metadata.get('source','')}::{r.metadata.get('heading','')}" if several             else f"{r.metadata.get('source','')}::{r.metadata.get('heading','')}"
+        key = (f"{collection}::{r.metadata.get('source','')}::{r.metadata.get('heading','')}" if several
+               else f"{r.metadata.get('source','')}::{r.metadata.get('heading','')}")
         if key in seen:
             continue
         seen.add(key)
