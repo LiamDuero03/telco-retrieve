@@ -10,7 +10,11 @@ import cli.main as cli_main
 from open_telco_rag.core import multi_search as ms
 from open_telco_rag.types import SearchResult
 from tests.fake_collections import (  # noqa: F401  (the fixture applies to every test of this file)
-    FakeEmbedder, make_collection, in_memory_chroma, registry)
+    FakeEmbedder,
+    in_memory_chroma,
+    make_collection,
+    registry,
+)
 
 QUERY = "registration mobility"
 
