@@ -180,9 +180,11 @@ def multi_search(
     rerank_top_k: int = 5,
     search_method: str = "dense",
     resolve_parents: bool = False,
+    **retrieval_kwargs,
 ) -> list[SearchResult]:
     """one query, one embedding, every store searched with search_method, lists fused by rank,
-    then rerank / top_k / parent resolution as in a single-collection search"""
+    then rerank / top_k / parent resolution as in a single-collection search.
+    retrieval_kwargs are passed on to execute_retrieval for every collection"""
     from open_telco_rag.core.retrieval import _resolve_parent_chunks
 
     method = search_method.lower()
@@ -192,7 +194,8 @@ def multi_search(
 
     ranked = []
     for store in stores:
-        hits = execute_retrieval(query, store, shared, top_k=depth, search_method=method)
+        hits = execute_retrieval(query, store, shared, top_k=depth, search_method=method,
+                                 **retrieval_kwargs)
         ranked.append([_tag(r, store.collection_name) for r in hits])
     fused = fuse_collections(ranked)
 

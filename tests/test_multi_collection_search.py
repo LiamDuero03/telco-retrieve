@@ -405,3 +405,18 @@ def test_sidecar_helper_writes_the_format_the_checks_read(db, embedder):
     make_collection(db, "col_a", ROWS_A, embedder)
     data = json.loads(next(__import__("pathlib").Path(db).glob(".ingest_settings_col_a.json")).read_text("utf8"))
     assert data["latest"]["settings"]["model_key"] == "fake64"
+
+
+def test_extra_retrieval_kwargs_are_forwarded_to_every_collection(three, embedder, monkeypatch):
+    calls = []
+    real = ms.execute_retrieval
+
+    def spy(*args, **kwargs):
+        calls.append(kwargs)
+        kwargs.pop("marker")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(ms, "execute_retrieval", spy)
+    opened = _open(three, ["col_a", "col_b"], embedder)
+    ms.multi_search(QUERY, [c.store for c in opened], embedder, top_k=2, marker=True)
+    assert len(calls) == 2
