@@ -522,7 +522,7 @@ open-telco-rag ask "What does TS 28.312 define for intent?" \
 | `--rerank` | off | Enable reranking after retrieval |
 | `--reranker-model` | `ms-marco-minilm` | Reranker key from `configs/reranker_models.json` |
 | `--rerank-top-k` | 5 | Chunks to keep after reranking |
-| `--collection` | `source_model` | Override collection name |
+| `--collection` | `source_model` | Override collection name. Repeat it to search several collections of one database with the same embedder: the query is embedded once, each collection is searched with `--search-method`, and the ranked lists are fused by rank (reciprocal rank fusion, k=60). Collections must agree on model, prefixes and distance space; a name cannot contain a comma |
 | `--embed-backend` | `local` | Backend for computing vector embeddings (`local` or `openrouter`) |
 | `--resolve-parents` | off | Expand retrieved child chunks into full parent contexts |
 
