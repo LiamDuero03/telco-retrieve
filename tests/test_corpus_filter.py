@@ -9,7 +9,7 @@ import cli.main as cli_main
 from open_telco_rag.core import source_filter
 from open_telco_rag.core.pipeline import search
 from open_telco_rag.core.retrieval import execute_retrieval
-from tests.fake_collections import FakeEmbedder, make_collection
+from tests.fake_collections import FakeEmbedder, in_memory_chroma, make_collection  # noqa: F401
 
 QUERY = "registration session device"
 
@@ -70,7 +70,7 @@ def test_hybrid_filters_before_fusion(mixed, embedder):
         seen["where"] = real(types)
         return seen["where"]
 
-    import open_telco_rag.core.retrieval as retrieval
+    from open_telco_rag.core import retrieval
     retrieval.chroma_where = spy
     try:
         results = execute_retrieval(QUERY, mixed, embedder, top_k=3, search_method="hybrid",
@@ -146,7 +146,7 @@ def test_bm25_with_a_rare_source_returns_a_short_list_and_warns(rare, embedder, 
 
 def test_a_larger_overfetch_recovers_the_rare_source(rare, embedder, monkeypatch, caplog):
     monkeypatch.setattr(source_filter, "BM25_OVERFETCH", 30)
-    import open_telco_rag.core.retrieval as retrieval
+    from open_telco_rag.core import retrieval
     monkeypatch.setattr(retrieval, "BM25_OVERFETCH", 30)
     with caplog.at_level(logging.WARNING):
         results = search("orchid quartz", store=rare, embedder=embedder, top_k=3, search_method="bm25",
