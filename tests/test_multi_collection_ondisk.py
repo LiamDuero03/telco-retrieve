@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def _cli(cwd, *args):
     env = {**os.environ, "PYTHONPATH": str(ROOT)}
     return subprocess.run([sys.executable, "-m", "tests.cli_fake_embedder", *map(str, args)], cwd=cwd, env=env,
-                          capture_output=True, text=True, timeout=300)
+                          capture_output=True, text=True, timeout=300, check=False)
 
 
 def test_real_cli_ingests_two_sources_and_searches_one_and_two_collections(tmp_path):
