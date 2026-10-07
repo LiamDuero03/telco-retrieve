@@ -224,5 +224,5 @@ def test_filter_across_two_collections(db, embedder, monkeypatch, capsys):
     cli_main.main(["search", QUERY, "--db-path", db, "--model", "fake64", "--collection", "col_a",
                    "--collection", "col_b", "--where-source-type", "camara", "--top-k", "9"])
     out = capsys.readouterr().out
-    assert "README.md" in out and "zsm.md" not in out and "28" not in out.replace("fake64", "")
+    assert "README.md" in out and "zsm.md" not in out and "280.md" not in out and "281.md" not in out
     assert "| col_a |" in out and "| col_b |" in out
