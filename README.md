@@ -814,6 +814,35 @@ usage and cost) appear only when the components report them.
 
 ---
 
+### Searching one or several collections
+
+A database folder (`--db-path`) can hold many collections. A collection holds chunks made with **one embedder and
+one distance space**; it can hold the chunks of one source or of several.
+
+| Setup | Search one asset | Search all assets |
+|---|---|---|
+| One collection, several sources (e.g. `3gpp` and `camara` ingested into `--collection docs_bge`) | not possible | `search ... --collection docs_bge` |
+| One collection per source, same embedder and distance space | `--collection camara_bge` | `--collection 3gpp_bge --collection camara_bge` |
+| One collection per source, **different embedders** | `--collection X --model <its model>` | not possible: one query vector cannot be compared with vectors of another model |
+| Same embedder, **different distance space** (`l2` vs `cosine`, set at ingest with `--distance-metric`) | works | refused, naming the collection; re-ingest one with the same `--distance-metric` |
+| Same model name, different prefixes | works | refused |
+| A collection that does not exist | | an error naming it; nothing is created |
+
+How several collections are combined: each collection is searched with `--search-method` (`dense`, `bm25` or
+`hybrid`; hybrid still fuses inside the collection). The query is embedded once. The ranked lists are then merged
+by reciprocal rank fusion (k=60), keyed by collection and chunk id, so equal ids in two collections never merge.
+Only ranks are used. Distances and BM25 scores are not mixed because they are not comparable: the same chunk
+scored 1.31 in an `l2` collection and 0.66 in a `cosine` one, and a BM25 score depends on what else is in the
+collection. `--top-k`, `--rerank`, `--rerank-top-k` and `--resolve-parents` apply after the merge. Each result
+shows its collection, and the distance label shows that collection's real space (`L2`, `COSINE`, `IP`). A
+collection without an `.ingest_settings_*.json` file is checked by its stored vector size only, with a warning;
+an empty collection contributes nothing and prints a note.
+
+```bash
+open-telco-rag search "near-RT RIC control loop" --model bge --db-path chroma_db \
+  --collection oran_bge --collection 3gpp_bge --top-k 8
+```
+
 ### Delete collection options
 
 ```bash
