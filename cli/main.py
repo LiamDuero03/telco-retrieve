@@ -78,6 +78,10 @@ EXIT_ALL_QUESTIONS_FAILED = 3
 EXIT_INGEST_FAILED = 4
 
 
+class _DefaultStr(str):
+    """a default value that argparse hands back as-is, so an explicit --source-type can be told apart"""
+
+
 def main(argv: list[str] | None = None) -> None:
     # Force UTF-8 so emoji don't crash cp1252 consoles.
     if hasattr(sys.stdout, "reconfigure"):
@@ -208,7 +212,7 @@ def main(argv: list[str] | None = None) -> None:
     # ── ask ───────────────────────────────────────────────────────────────────
     p_ask = sub.add_parser("ask", help="Ask a question (search + generate)")
     p_ask.add_argument("question",                                   help="Your question")
-    p_ask.add_argument("--source-type",    default="oran",          help="Source type")
+    p_ask.add_argument("--source-type",    default=_DefaultStr("oran"), help="Source type")
     p_ask.add_argument("--model",          default="minilm",        help="Embedding model key")
     p_ask.add_argument("--db-path",        default="chroma_db",     help="ChromaDB path")
     p_ask.add_argument("--top-k",          type=int, default=8,     help="Chunks to retrieve")
@@ -224,6 +228,11 @@ def main(argv: list[str] | None = None) -> None:
                       help="Backend for computing embeddings (default: local)")
     p_ask.add_argument("--resolve-parents", action="store_true",
                    help="Expand retrieved child chunks into full parent contexts")
+    p_ask.add_argument("--label-sources", action="store_true",
+                       help="Optional: put a one-line label (collection, source type, file, release or "
+                            "version, heading) in front of each passage, build the 'technical expert' "
+                            "label of the prompt from the sources retrieved (unless --source-type is "
+                            "given) and list collection and file per passage under Sources. Off by default.")
     p_ask.add_argument("--generator", choices=["claude", "openrouter", "local"], default="openrouter",
                        help="LLM backend for the answer (default: openrouter). 'local' talks to any "
                             "OpenAI-compatible server via --llm-base-url/--llm-api-key.")
@@ -762,10 +771,19 @@ def _run_ask(args) -> None:
         base_url = getattr(args, "llm_base_url", None),
         api_key  = getattr(args, "llm_api_key", None),
     )
-    answer = generate(args.question, results, generator=generator, source_type=args.source_type)
+    sources = None
+    source_type = args.source_type
+    if getattr(args, "label_sources", False):
+        from open_telco_rag.generators import _labels
+        collection = store.collection_name
+        if isinstance(source_type, _DefaultStr):
+            source_type = _labels.system_label(results, collection) or source_type
+        sources = _labels.source_entries(results, collection)
+        results = _labels.label_results(results, collection)
+    answer = generate(args.question, results, generator=generator, source_type=source_type)
 
     print(f"\nAnswer:\n{answer['answer']}")
-    print(f"\nSources:     {answer['sources']}")
+    print(f"\nSources:     {sources if sources is not None else answer['sources']}")
     print(f"Chunks used: {answer['chunks_used']}")
 
 

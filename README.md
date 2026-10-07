@@ -512,6 +512,8 @@ open-telco-rag ask "What does TS 28.312 define for intent?" \
   --rerank-top-k 5
 ```
 
+`ask --label-sources` (off by default) puts a one-line label in front of each passage (collection, source type, file, release or version, heading), builds the "technical expert" label of the prompt from the sources retrieved unless `--source-type` is given, and lists collection and file per passage under `Sources:` (the file's path when two retrieved files share a name).
+
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--source-type` | `oran` | Source type |
