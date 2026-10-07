@@ -11,7 +11,7 @@ from open_telco_rag.sources.camara import CAMARASource
 from open_telco_rag.sources.tgpp import TPPSource
 from open_telco_rag.stores.chroma import ChromaStore
 from open_telco_rag.stores.fts import FTSStore
-from tests.fake_collections import FakeEmbedder, make_collection
+from tests.fake_collections import FakeEmbedder, in_memory_chroma, make_collection  # noqa: F401
 from tests.test_retrieval_methods import BagOfWordsEmbedder
 
 ROWS = [{"id": "a.md::fake64::0", "text": "the amf handles registration", "source": "a.md"}]
@@ -153,7 +153,7 @@ def test_no_resume_of_a_second_source_keeps_the_first_sources_bm25_rows(tmp_path
 
 
 def test_no_resume_reports_how_many_bm25_rows_it_removed(tmp_path, two_sources, capsys):
-    gpp, cam = two_sources
+    gpp, _ = two_sources
     store, _ = _ingest(tmp_path, TPPSource(), gpp)
     capsys.readouterr()
     _, _ = _ingest(tmp_path, TPPSource(), gpp, resume=False)
@@ -176,7 +176,7 @@ def test_second_source_with_the_same_relative_path_is_skipped_with_a_warning(tmp
     for d, word in ((a, "alpha"), (b, "beta")):
         d.mkdir()
         (d / "README.md").write_text(f"# {word}\n\n" + f"The {word} routine records orchid events. " * 8, encoding="utf8")
-    store, first = _ingest(tmp_path, TPPSource(), a)
+    store, _ = _ingest(tmp_path, TPPSource(), a)
     capsys.readouterr()
     store, second = _ingest(tmp_path, CAMARASource(), b)
     out = capsys.readouterr().out
