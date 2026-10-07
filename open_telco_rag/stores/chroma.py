@@ -66,11 +66,14 @@ class ChromaStore:
         self,
         embedding: list[float],
         n_results: int = 5,
+        where:     dict | None = None,
     ) -> list[SearchResult]:
+        extra = {"where": where} if where else {}
         results = self._collection.query(
             query_embeddings=[embedding],
             n_results=n_results,
             include=["documents", "metadatas", "distances"],
+            **extra,
         )
         return [
             SearchResult(

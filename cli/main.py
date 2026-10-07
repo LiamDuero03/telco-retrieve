@@ -204,6 +204,9 @@ def main(argv: list[str] | None = None) -> None:
                       help="Backend for computing embeddings (default: local)")
     p_search.add_argument("--resolve-parents", action="store_true",
                       help="Expand retrieved child chunks into full parent contexts")
+    p_search.add_argument("--where-source-type", action="append", default=None, metavar="NAME",
+                          help="Optional: only chunks of this source type (the source_type chunk metadata, "
+                               "e.g. 3gpp or camara); repeat for several. Off by default.")
 
     # ── ask ───────────────────────────────────────────────────────────────────
     p_ask = sub.add_parser("ask", help="Ask a question (search + generate)")
@@ -224,6 +227,9 @@ def main(argv: list[str] | None = None) -> None:
                       help="Backend for computing embeddings (default: local)")
     p_ask.add_argument("--resolve-parents", action="store_true",
                    help="Expand retrieved child chunks into full parent contexts")
+    p_ask.add_argument("--where-source-type", action="append", default=None, metavar="NAME",
+                       help="Optional: only chunks of this source type (the source_type chunk metadata, "
+                            "e.g. 3gpp or camara); repeat for several. Off by default.")
     p_ask.add_argument("--generator", choices=["claude", "openrouter", "local"], default="openrouter",
                        help="LLM backend for the answer (default: openrouter). 'local' talks to any "
                             "OpenAI-compatible server via --llm-base-url/--llm-api-key.")
@@ -677,6 +683,19 @@ def _run_ingest(args) -> None:
         print(f"\n[ERROR] Ingest finished with failures; exiting with code {EXIT_INGEST_FAILED} (--fail-on-error).")
         sys.exit(EXIT_INGEST_FAILED)
 
+def _source_filter_kwargs(args, *stores) -> dict:
+    """search() kwargs for --where-source-type; empty (so nothing changes) when it is not given"""
+    source_types = getattr(args, "where_source_type", None)
+    if not source_types:
+        return {}
+    from open_telco_rag.core.source_filter import SourceTypeError, check_source_types
+    try:
+        check_source_types(list(stores), source_types)
+    except SourceTypeError as e:
+        sys.exit(f"error: {e}")
+    return {"source_types": source_types}
+
+
 def _run_search(args) -> None:
     import math
     from open_telco_rag.core.pipeline import search
@@ -701,6 +720,7 @@ def _run_search(args) -> None:
         rerank_top_k = args.rerank_top_k,
         search_method = getattr(args, "search_method", "dense"),
         resolve_parents = getattr(args, "resolve_parents", False),
+        **_source_filter_kwargs(args, store),
     )
 
     if not results:
@@ -755,6 +775,7 @@ def _run_ask(args) -> None:
         rerank_top_k = args.rerank_top_k,
         search_method = getattr(args, "search_method", "dense"),
         resolve_parents = getattr(args, "resolve_parents", False),
+        **_source_filter_kwargs(args, store),
     )
     generator = _get_generator(
         getattr(args, "generator", "openrouter"),
