@@ -677,14 +677,26 @@ def _run_ingest(args) -> None:
         print(f"\n[ERROR] Ingest finished with failures; exiting with code {EXIT_INGEST_FAILED} (--fail-on-error).")
         sys.exit(EXIT_INGEST_FAILED)
 
+def _require_collection(db_path: str, name: str) -> None:
+    """search and ask only read: exit with the available collections instead of creating an empty one"""
+    import chromadb
+    if not Path(db_path).is_dir():
+        sys.exit(f"error: database '{db_path}' does not exist")
+    existing = [c.name for c in chromadb.PersistentClient(path=str(db_path)).list_collections()]
+    if name not in existing:
+        sys.exit(f"error: collection '{name}' does not exist in '{db_path}' "
+                 f"(available: {', '.join(existing) or 'none'}); pass --collection NAME")
+
+
 def _run_search(args) -> None:
     import math
     from open_telco_rag.core.pipeline import search
 
     embed_backend = getattr(args, "embed_backend", "local")
     embedder = _get_embedder(args.model, backend=embed_backend)
-    store    = _get_store(args.source_type, args.model, args.db_path,
-                          collection=getattr(args, "collection", None))
+    collection = getattr(args, "collection", None)
+    _require_collection(args.db_path, collection or f"{args.source_type}_{args.model}")
+    store    = _get_store(args.source_type, args.model, args.db_path, collection=collection)
 
     reranker = None
     if args.rerank:
@@ -737,8 +749,9 @@ def _run_ask(args) -> None:
 
     embed_backend = getattr(args, "embed_backend", "local")
     embedder = _get_embedder(args.model, backend=embed_backend)
-    store    = _get_store(args.source_type, args.model, args.db_path,
-                          collection=getattr(args, "collection", None))
+    collection = getattr(args, "collection", None)
+    _require_collection(args.db_path, collection or f"{args.source_type}_{args.model}")
+    store    = _get_store(args.source_type, args.model, args.db_path, collection=collection)
 
     reranker = None
     if args.rerank:
@@ -1089,6 +1102,10 @@ def _run_info(args) -> None:
     import chromadb
     client      = chromadb.PersistentClient(path=args.db_path)
     collections = client.list_collections()
+    if args.collection:
+        collections = [c for c in collections if c.name == args.collection]
+        if not collections:
+            sys.exit(f"error: collection '{args.collection}' does not exist in '{args.db_path}'")
     print(f"\nDatabase: {args.db_path}")
     print(f"Collections ({len(collections)}):")
     for col in collections:
@@ -1109,7 +1126,7 @@ def _run_delete_collection(args) -> None:
         if args.collection not in existing_collections:
             print(f"Error: Collection '{args.collection}' does not exist.")
             print(f"Available collections: {', '.join(existing_collections) if existing_collections else 'None'}")
-            return
+            sys.exit(1)
 
         client.delete_collection(name=args.collection)
         from open_telco_rag.evaluation.provenance import index_settings_file

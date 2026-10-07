@@ -95,6 +95,22 @@ class FTSStore:
                 conn.executemany("INSERT INTO bm25_index(doc_id, text) VALUES (?, ?)", insert)
         return len(stale)
 
+    def delete_ids(self, ids: list[str]) -> int:
+        """delete every row of these doc_ids (one scan of the table, whatever the number of ids);
+        returns how many rows were removed"""
+        ids = list(dict.fromkeys(ids))
+        if not ids:
+            return 0
+        conn = self._get_conn()
+        before = conn.execute("SELECT COUNT(*) FROM bm25_index").fetchone()[0]
+        with conn:
+            conn.execute("CREATE TEMP TABLE IF NOT EXISTS gone_ids(id TEXT PRIMARY KEY)")
+            conn.execute("DELETE FROM gone_ids")
+            conn.executemany("INSERT INTO gone_ids(id) VALUES (?)", ((i,) for i in ids))
+            conn.execute("DELETE FROM bm25_index WHERE doc_id IN (SELECT id FROM gone_ids)")
+            conn.execute("DROP TABLE gone_ids")
+        return before - conn.execute("SELECT COUNT(*) FROM bm25_index").fetchone()[0]
+
     def repeated_row_count(self) -> int:
         """rows beyond the first of each doc_id (rows that repeat an id)"""
         total, distinct = self._get_conn().execute("SELECT COUNT(*), COUNT(DISTINCT doc_id) FROM bm25_index").fetchone()
