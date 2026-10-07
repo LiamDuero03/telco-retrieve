@@ -134,10 +134,10 @@ def test_dense_ranking_interleaves_by_rank(three, embedder):
 def test_query_is_embedded_once_for_all_collections(three, embedder):
     opened = _open(three, ["col_a", "col_b", "col_empty"], embedder)
     embedder.calls.clear()
-    ms.multi_search(QUERY, [c.store for c in opened if c.count], embedder, top_k=4, search_method="hybrid")
+    ms.multi_search(QUERY, [c.store for c in opened if not c.empty], embedder, top_k=4, search_method="hybrid")
     assert embedder.calls == [([QUERY], True)]
     embedder.calls.clear()
-    ms.multi_search(QUERY, [c.store for c in opened if c.count], embedder, top_k=4, search_method="bm25")
+    ms.multi_search(QUERY, [c.store for c in opened if not c.empty], embedder, top_k=4, search_method="bm25")
     assert embedder.calls == []
 
 
@@ -176,7 +176,7 @@ def test_parent_ids_are_not_merged_across_collections(db, embedder):
 def test_empty_collection_contributes_nothing_and_prints_a_note(three, embedder):
     notes = []
     opened = _open(three, ["col_a", "col_empty", "col_b"], embedder, notes)
-    assert [c.count for c in opened][1] == 0
+    assert [c.empty for c in opened] == [False, True, False]
     assert any("col_empty" in n and "empty" in n for n in notes)
 
 

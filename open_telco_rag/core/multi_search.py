@@ -33,7 +33,7 @@ class OpenCollection:
     name: str
     store: Any
     space: str
-    count: int
+    empty: bool
     dimension: int | None
 
 
@@ -72,12 +72,15 @@ def _model_problem(name: str, recorded: str, wanted: str) -> str | None:
     return f"collection {name!r} was ingested with model {recorded!r} but this search uses {wanted!r}"
 
 
-def _stored_dimension(store: Any) -> int | None:
-    """vector length of a collection: what Chroma recorded when the first vectors were added, else
-    one stored vector; None if neither can be read"""
+def _recorded_dimension(store: Any) -> int | None:
+    """vector length Chroma recorded when the first vectors were added; None for a collection that
+    never held any"""
     recorded = getattr(getattr(store._collection, "_model", None), "dimension", None)
-    if recorded:
-        return int(recorded)
+    return int(recorded) if recorded else None
+
+
+def _stored_dimension(store: Any) -> int | None:
+    """vector length read from one stored vector; None if it cannot be read"""
     try:
         emb = store._collection.get(limit=1, include=["embeddings"])["embeddings"]
     except Exception:  # noqa: BLE001 - Chroma may still be building the index of fresh data
@@ -107,7 +110,7 @@ def open_collections(db_path: str | Path, names: list[str], embedder: Any,
     for name in names:
         store = ChromaStore(path=db_path, collection_name=name)
         space = ((store._collection.metadata or {}).get("hnsw:space") or "l2").lower()
-        opened.append(OpenCollection(name, store, space, store.count(), None))
+        opened.append(OpenCollection(name, store, space, False, None))
 
     for c in opened:
         settings = read_index_settings(db_path, c.name)
@@ -129,10 +132,16 @@ def open_collections(db_path: str | Path, names: list[str], embedder: Any,
 
     expected = getattr(embedder, "dimensions", None)
     for c in opened:
-        if c.count == 0:
+        c.dimension = _recorded_dimension(c.store)
+        if c.dimension is None:
+            # Chroma records the vector size with the first vectors, so only a collection without one
+            # needs a count (count() on a fresh handle just before a query made Chroma fail now and then)
+            c.empty = c.store.count() == 0
+        if c.empty:
             say(f"[NOTE] collection {c.name!r} is empty and contributes nothing.")
             continue
-        c.dimension = _stored_dimension(c.store)
+        if c.dimension is None:
+            c.dimension = _stored_dimension(c.store)
         if c.dimension is None:
             say(f"[WARN] could not read the vector size of collection {c.name!r}; its dimension was not checked.")
     sized = [c for c in opened if c.dimension is not None]

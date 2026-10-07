@@ -702,7 +702,7 @@ def _retrieve(args, query: str):
             opened = ms.open_collections(args.db_path, names, embedder)
         except ms.CollectionSetupError as e:
             sys.exit(f"error: {e}")
-        stores = [c.store for c in opened if c.count]
+        stores = [c.store for c in opened if not c.empty]
         spaces = {c.name: c.space for c in opened}
     else:
         store = _get_store(args.source_type, args.model, args.db_path,
