@@ -9,7 +9,7 @@ import pytest
 import cli.main as cli_main
 from open_telco_rag.generators import _labels
 from open_telco_rag.types import SearchResult
-from tests.fake_collections import FakeEmbedder, make_collection
+from tests.fake_collections import FakeEmbedder, in_memory_chroma, make_collection  # noqa: F401
 
 
 def _res(doc_id, text, collection=None, **meta):
@@ -90,6 +90,7 @@ def _sent_openrouter(monkeypatch, results, source_type):
 
 def _sent_local(monkeypatch, results, source_type):
     import requests
+
     from open_telco_rag.generators.local import LocalGenerator
     seen = {}
 
