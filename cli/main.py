@@ -197,7 +197,9 @@ def main(argv: list[str] | None = None) -> None:
     p_search.add_argument("--reranker-model", default="ms-marco-minilm",
                           help="Reranker model key from configs/reranker_models.json "
                                "(default: ms-marco-minilm, telecom: otel-reranker-0.6b)")
-    p_search.add_argument("--collection",     default=None,        help="Override collection name")
+    p_search.add_argument("--collection",     action="append",     default=None,
+                          help="Override collection name; repeat to search several collections of "
+                               "one database with the same embedder (results are fused by rank)")
     p_search.add_argument("--search-method", choices=["dense", "bm25", "hybrid"], default="dense",
                           help="Multi-method search routing pass algorithm selection.")
     p_search.add_argument("--embed-backend", choices=["local", "openrouter"], default="local",
@@ -217,7 +219,9 @@ def main(argv: list[str] | None = None) -> None:
     p_ask.add_argument("--reranker-model", default="ms-marco-minilm",
                        help="Reranker model key from configs/reranker_models.json "
                             "(default: ms-marco-minilm, telecom: otel-reranker-0.6b)")
-    p_ask.add_argument("--collection",     default=None,            help="Override collection name")
+    p_ask.add_argument("--collection",     action="append",         default=None,
+                       help="Override collection name; repeat to search several collections of "
+                            "one database with the same embedder (results are fused by rank)")
     p_ask.add_argument("--search-method", choices=["dense", "bm25", "hybrid"], default="dense",
                           help="Multi-method search routing pass algorithm selection.")
     p_ask.add_argument("--embed-backend", choices=["local", "openrouter"], default="local",
@@ -677,14 +681,34 @@ def _run_ingest(args) -> None:
         print(f"\n[ERROR] Ingest finished with failures; exiting with code {EXIT_INGEST_FAILED} (--fail-on-error).")
         sys.exit(EXIT_INGEST_FAILED)
 
-def _run_search(args) -> None:
-    import math
+_SPACE_LABELS = {"l2": "L2", "cosine": "COSINE", "ip": "IP"}
+
+
+def _retrieve(args, query: str):
+    """shared retrieval of search and ask: (results, space per collection, several collections?)"""
+    from open_telco_rag.core import multi_search as ms
     from open_telco_rag.core.pipeline import search
+
+    try:
+        names = ms.validate_collection_names(getattr(args, "collection", None))
+    except ms.CollectionSetupError as e:
+        sys.exit(f"error: {e}")
 
     embed_backend = getattr(args, "embed_backend", "local")
     embedder = _get_embedder(args.model, backend=embed_backend)
-    store    = _get_store(args.source_type, args.model, args.db_path,
-                          collection=getattr(args, "collection", None))
+    several = len(names) > 1
+    if several:
+        try:
+            opened = ms.open_collections(args.db_path, names, embedder)
+        except ms.CollectionSetupError as e:
+            sys.exit(f"error: {e}")
+        stores = [c.store for c in opened if not c.empty]
+        spaces = {c.name: c.space for c in opened}
+    else:
+        store = _get_store(args.source_type, args.model, args.db_path,
+                           collection=names[0] if names else None)
+        meta = getattr(getattr(store, "_collection", None), "metadata", None) or {}
+        spaces = {store.collection_name: (meta.get("hnsw:space") or "l2").lower()}
 
     reranker = None
     if args.rerank:
@@ -692,16 +716,24 @@ def _run_search(args) -> None:
         print(f"Reranking enabled ({args.reranker_model}) — "
               f"{args.top_k * 3} candidates -> top {args.rerank_top_k}")
 
-    results = search(
-        args.query,
-        store        = store,
-        embedder     = embedder,
+    options = dict(
         top_k        = args.top_k,
         reranker     = reranker,
         rerank_top_k = args.rerank_top_k,
         search_method = getattr(args, "search_method", "dense"),
         resolve_parents = getattr(args, "resolve_parents", False),
     )
+    if several:
+        results = ms.multi_search(query, stores, embedder, **options)
+    else:
+        results = search(query, store=store, embedder=embedder, **options)
+    return results, spaces, several
+
+
+def _run_search(args) -> None:
+    import math
+
+    results, spaces, several = _retrieve(args, args.query)
 
     if not results:
         print("No results found.")
@@ -710,7 +742,9 @@ def _run_search(args) -> None:
     seen = set()
     displayed = 0
     for r in results:
-        key = f"{r.metadata.get('source','')}::{r.metadata.get('heading','')}"
+        collection = r.metadata.get("collection", "")
+        key = (f"{collection}::{r.metadata.get('source','')}::{r.metadata.get('heading','')}" if several
+               else f"{r.metadata.get('source','')}::{r.metadata.get('heading','')}")
         if key in seen:
             continue
         seen.add(key)
@@ -722,40 +756,22 @@ def _run_search(args) -> None:
         similarity   = round(math.exp(-r.distance), 3)
         rerank_score = r.metadata.get("rerank_score", "")
         rerank_str   = f" | rerank {rerank_score}" if rerank_score != "" else ""
-        print(f"\n--- Result {displayed} | {source}"
+        space        = spaces[collection] if several else next(iter(spaces.values()))
+        label        = _SPACE_LABELS.get(space, space.upper())
+        print(f"\n--- Result {displayed}{' | ' + collection if several else ''} | {source}"
               f"{' | ' + wg if wg else ''}"
               f"{' | ' + release if release else ''}"
               f"{' | ' + heading if heading else ''}"
-              f" | similarity {similarity} | L2 {r.distance:.3f}{rerank_str} ---")
+              f" | similarity {similarity} | {label} {r.distance:.3f}{rerank_str} ---")
         print(r.text[:600])
 
     print(f"\n{displayed} results returned for: '{args.query}'")
 
 
 def _run_ask(args) -> None:
-    from open_telco_rag.core.pipeline import generate, search
+    from open_telco_rag.core.pipeline import generate
 
-    embed_backend = getattr(args, "embed_backend", "local")
-    embedder = _get_embedder(args.model, backend=embed_backend)
-    store    = _get_store(args.source_type, args.model, args.db_path,
-                          collection=getattr(args, "collection", None))
-
-    reranker = None
-    if args.rerank:
-        reranker = _get_reranker(args.reranker_model)
-        print(f"Reranking enabled ({args.reranker_model}) — "
-              f"{args.top_k * 3} candidates -> top {args.rerank_top_k}")
-
-    results = search(
-        args.question,
-        store        = store,
-        embedder     = embedder,
-        top_k        = args.top_k,
-        reranker     = reranker,
-        rerank_top_k = args.rerank_top_k,
-        search_method = getattr(args, "search_method", "dense"),
-        resolve_parents = getattr(args, "resolve_parents", False),
-    )
+    results, _, _ = _retrieve(args, args.question)
     generator = _get_generator(
         getattr(args, "generator", "openrouter"),
         model    = getattr(args, "generator_model", None),

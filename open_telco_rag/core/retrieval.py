@@ -135,7 +135,7 @@ def _resolve_parent_chunks(results: list[SearchResult]) -> list[SearchResult]:
     substitute child text with full parent text and deduplicate by parent_id.
     """
     resolved: list[SearchResult] = []
-    seen_parents: set[str] = set()
+    seen_parents: set[tuple] = set()
 
     for r in results:
         meta = r.metadata or {}
@@ -143,9 +143,11 @@ def _resolve_parent_chunks(results: list[SearchResult]) -> list[SearchResult]:
         full_parent_text = meta.get("full_parent_text")
 
         if parent_id and full_parent_text:
-            if parent_id in seen_parents:
+            # the collection key only exists in multi-collection results
+            parent_key = (meta.get("collection"), parent_id)
+            if parent_key in seen_parents:
                 continue
-            seen_parents.add(parent_id)
+            seen_parents.add(parent_key)
             if "parent_char_start" in meta:
                 # token-sized parent_child: the text is now the parent's, so
                 # its offsets are too (the span metrics read these)
