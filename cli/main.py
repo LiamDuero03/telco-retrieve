@@ -78,6 +78,10 @@ EXIT_ALL_QUESTIONS_FAILED = 3
 EXIT_INGEST_FAILED = 4
 
 
+class _DefaultStr(str):
+    """a default value that argparse hands back as-is, so an explicit --source-type can be told apart"""
+
+
 def main(argv: list[str] | None = None) -> None:
     # Force UTF-8 so emoji don't crash cp1252 consoles.
     if hasattr(sys.stdout, "reconfigure"):
@@ -197,18 +201,23 @@ def main(argv: list[str] | None = None) -> None:
     p_search.add_argument("--reranker-model", default="ms-marco-minilm",
                           help="Reranker model key from configs/reranker_models.json "
                                "(default: ms-marco-minilm, telecom: otel-reranker-0.6b)")
-    p_search.add_argument("--collection",     default=None,        help="Override collection name")
+    p_search.add_argument("--collection",     action="append",     default=None,
+                          help="Override collection name; repeat to search several collections of "
+                               "one database with the same embedder (results are fused by rank)")
     p_search.add_argument("--search-method", choices=["dense", "bm25", "hybrid"], default="dense",
                           help="Multi-method search routing pass algorithm selection.")
     p_search.add_argument("--embed-backend", choices=["local", "openrouter"], default="local",
                       help="Backend for computing embeddings (default: local)")
     p_search.add_argument("--resolve-parents", action="store_true",
                       help="Expand retrieved child chunks into full parent contexts")
+    p_search.add_argument("--where-source-type", action="append", default=None, metavar="NAME",
+                          help="Optional: only chunks of this source type (the source_type chunk metadata, "
+                               "e.g. 3gpp or camara); repeat for several. Off by default.")
 
     # ── ask ───────────────────────────────────────────────────────────────────
     p_ask = sub.add_parser("ask", help="Ask a question (search + generate)")
     p_ask.add_argument("question",                                   help="Your question")
-    p_ask.add_argument("--source-type",    default="oran",          help="Source type")
+    p_ask.add_argument("--source-type",    default=_DefaultStr("oran"), help="Source type")
     p_ask.add_argument("--model",          default="minilm",        help="Embedding model key")
     p_ask.add_argument("--db-path",        default="chroma_db",     help="ChromaDB path")
     p_ask.add_argument("--top-k",          type=int, default=8,     help="Chunks to retrieve")
@@ -217,13 +226,23 @@ def main(argv: list[str] | None = None) -> None:
     p_ask.add_argument("--reranker-model", default="ms-marco-minilm",
                        help="Reranker model key from configs/reranker_models.json "
                             "(default: ms-marco-minilm, telecom: otel-reranker-0.6b)")
-    p_ask.add_argument("--collection",     default=None,            help="Override collection name")
+    p_ask.add_argument("--collection",     action="append",         default=None,
+                       help="Override collection name; repeat to search several collections of "
+                            "one database with the same embedder (results are fused by rank)")
     p_ask.add_argument("--search-method", choices=["dense", "bm25", "hybrid"], default="dense",
                           help="Multi-method search routing pass algorithm selection.")
     p_ask.add_argument("--embed-backend", choices=["local", "openrouter"], default="local",
                       help="Backend for computing embeddings (default: local)")
     p_ask.add_argument("--resolve-parents", action="store_true",
                    help="Expand retrieved child chunks into full parent contexts")
+    p_ask.add_argument("--where-source-type", action="append", default=None, metavar="NAME",
+                       help="Optional: only chunks of this source type (the source_type chunk metadata, "
+                            "e.g. 3gpp or camara); repeat for several. Off by default.")
+    p_ask.add_argument("--label-sources", action="store_true",
+                       help="Optional: put a one-line label (collection, source type, file, release or "
+                            "version, heading) in front of each passage, build the 'technical expert' "
+                            "label of the prompt from the sources retrieved (unless --source-type is "
+                            "given) and list collection and file per passage under Sources. Off by default.")
     p_ask.add_argument("--generator", choices=["claude", "openrouter", "local"], default="openrouter",
                        help="LLM backend for the answer (default: openrouter). 'local' talks to any "
                             "OpenAI-compatible server via --llm-base-url/--llm-api-key.")
@@ -677,14 +696,59 @@ def _run_ingest(args) -> None:
         print(f"\n[ERROR] Ingest finished with failures; exiting with code {EXIT_INGEST_FAILED} (--fail-on-error).")
         sys.exit(EXIT_INGEST_FAILED)
 
-def _run_search(args) -> None:
-    import math
+def _require_collection(db_path: str, name: str) -> None:
+    """search and ask only read: exit with the available collections instead of creating an empty one"""
+    import chromadb
+    if not Path(db_path).is_dir():
+        sys.exit(f"error: database '{db_path}' does not exist")
+    existing = [c.name for c in chromadb.PersistentClient(path=str(db_path)).list_collections()]
+    if name not in existing:
+        sys.exit(f"error: collection '{name}' does not exist in '{db_path}' "
+                 f"(available: {', '.join(existing) or 'none'}); pass --collection NAME")
+
+
+def _source_filter_kwargs(args, *stores) -> dict:
+    """search() kwargs for --where-source-type; empty (so nothing changes) when it is not given"""
+    source_types = getattr(args, "where_source_type", None)
+    if not source_types:
+        return {}
+    from open_telco_rag.core.source_filter import SourceTypeError, check_source_types
+    try:
+        check_source_types(list(stores), source_types)
+    except SourceTypeError as e:
+        sys.exit(f"error: {e}")
+    return {"source_types": source_types}
+
+
+_SPACE_LABELS = {"l2": "L2", "cosine": "COSINE", "ip": "IP"}
+
+
+def _retrieve(args, query: str):
+    """shared retrieval of search and ask: (results, space per collection, several collections?)"""
+    from open_telco_rag.core import multi_search as ms
     from open_telco_rag.core.pipeline import search
+
+    try:
+        names = ms.validate_collection_names(getattr(args, "collection", None))
+    except ms.CollectionSetupError as e:
+        sys.exit(f"error: {e}")
 
     embed_backend = getattr(args, "embed_backend", "local")
     embedder = _get_embedder(args.model, backend=embed_backend)
-    store    = _get_store(args.source_type, args.model, args.db_path,
-                          collection=getattr(args, "collection", None))
+    several = len(names) > 1
+    if several:
+        try:
+            opened = ms.open_collections(args.db_path, names, embedder)
+        except ms.CollectionSetupError as e:
+            sys.exit(f"error: {e}")
+        stores = [c.store for c in opened if not c.empty]
+        spaces = {c.name: c.space for c in opened}
+    else:
+        _require_collection(args.db_path, names[0] if names else f"{args.source_type}_{args.model}")
+        store = _get_store(args.source_type, args.model, args.db_path,
+                           collection=names[0] if names else None)
+        meta = getattr(getattr(store, "_collection", None), "metadata", None) or {}
+        spaces = {store.collection_name: (meta.get("hnsw:space") or "l2").lower()}
 
     reranker = None
     if args.rerank:
@@ -692,16 +756,28 @@ def _run_search(args) -> None:
         print(f"Reranking enabled ({args.reranker_model}) — "
               f"{args.top_k * 3} candidates -> top {args.rerank_top_k}")
 
-    results = search(
-        args.query,
-        store        = store,
-        embedder     = embedder,
+    options = dict(
         top_k        = args.top_k,
         reranker     = reranker,
         rerank_top_k = args.rerank_top_k,
         search_method = getattr(args, "search_method", "dense"),
         resolve_parents = getattr(args, "resolve_parents", False),
+        **_source_filter_kwargs(args, *(stores if several else [store])),
     )
+    if several:
+        results = ms.multi_search(query, stores, embedder, **options)
+        from open_telco_rag.core.source_filter import warn_if_short
+        warn_if_short(len(results), args.rerank_top_k if reranker is not None else args.top_k,
+                      options.get("source_types"))
+    else:
+        results = search(query, store=store, embedder=embedder, **options)
+    return results, spaces, several
+
+
+def _run_search(args) -> None:
+    import math
+
+    results, spaces, several = _retrieve(args, args.query)
 
     if not results:
         print("No results found.")
@@ -710,7 +786,9 @@ def _run_search(args) -> None:
     seen = set()
     displayed = 0
     for r in results:
-        key = f"{r.metadata.get('source','')}::{r.metadata.get('heading','')}"
+        collection = r.metadata.get("collection", "")
+        key = (f"{collection}::{r.metadata.get('source','')}::{r.metadata.get('heading','')}" if several
+               else f"{r.metadata.get('source','')}::{r.metadata.get('heading','')}")
         if key in seen:
             continue
         seen.add(key)
@@ -722,50 +800,41 @@ def _run_search(args) -> None:
         similarity   = round(math.exp(-r.distance), 3)
         rerank_score = r.metadata.get("rerank_score", "")
         rerank_str   = f" | rerank {rerank_score}" if rerank_score != "" else ""
-        print(f"\n--- Result {displayed} | {source}"
+        space        = spaces[collection] if several else next(iter(spaces.values()))
+        label        = _SPACE_LABELS.get(space, space.upper())
+        print(f"\n--- Result {displayed}{' | ' + collection if several else ''} | {source}"
               f"{' | ' + wg if wg else ''}"
               f"{' | ' + release if release else ''}"
               f"{' | ' + heading if heading else ''}"
-              f" | similarity {similarity} | L2 {r.distance:.3f}{rerank_str} ---")
+              f" | similarity {similarity} | {label} {r.distance:.3f}{rerank_str} ---")
         print(r.text[:600])
 
     print(f"\n{displayed} results returned for: '{args.query}'")
 
 
 def _run_ask(args) -> None:
-    from open_telco_rag.core.pipeline import generate, search
+    from open_telco_rag.core.pipeline import generate
 
-    embed_backend = getattr(args, "embed_backend", "local")
-    embedder = _get_embedder(args.model, backend=embed_backend)
-    store    = _get_store(args.source_type, args.model, args.db_path,
-                          collection=getattr(args, "collection", None))
-
-    reranker = None
-    if args.rerank:
-        reranker = _get_reranker(args.reranker_model)
-        print(f"Reranking enabled ({args.reranker_model}) — "
-              f"{args.top_k * 3} candidates -> top {args.rerank_top_k}")
-
-    results = search(
-        args.question,
-        store        = store,
-        embedder     = embedder,
-        top_k        = args.top_k,
-        reranker     = reranker,
-        rerank_top_k = args.rerank_top_k,
-        search_method = getattr(args, "search_method", "dense"),
-        resolve_parents = getattr(args, "resolve_parents", False),
-    )
+    results, spaces, several = _retrieve(args, args.question)
     generator = _get_generator(
         getattr(args, "generator", "openrouter"),
         model    = getattr(args, "generator_model", None),
         base_url = getattr(args, "llm_base_url", None),
         api_key  = getattr(args, "llm_api_key", None),
     )
-    answer = generate(args.question, results, generator=generator, source_type=args.source_type)
+    sources = None
+    source_type = args.source_type
+    if getattr(args, "label_sources", False):
+        from open_telco_rag.generators import _labels
+        collection = None if several else next(iter(spaces))
+        if isinstance(source_type, _DefaultStr):
+            source_type = _labels.system_label(results, collection) or source_type
+        sources = _labels.source_entries(results, collection)
+        results = _labels.label_results(results, collection)
+    answer = generate(args.question, results, generator=generator, source_type=source_type)
 
     print(f"\nAnswer:\n{answer['answer']}")
-    print(f"\nSources:     {answer['sources']}")
+    print(f"\nSources:     {sources if sources is not None else answer['sources']}")
     print(f"Chunks used: {answer['chunks_used']}")
 
 
@@ -1089,6 +1158,10 @@ def _run_info(args) -> None:
     import chromadb
     client      = chromadb.PersistentClient(path=args.db_path)
     collections = client.list_collections()
+    if args.collection:
+        collections = [c for c in collections if c.name == args.collection]
+        if not collections:
+            sys.exit(f"error: collection '{args.collection}' does not exist in '{args.db_path}'")
     print(f"\nDatabase: {args.db_path}")
     print(f"Collections ({len(collections)}):")
     for col in collections:
@@ -1109,7 +1182,7 @@ def _run_delete_collection(args) -> None:
         if args.collection not in existing_collections:
             print(f"Error: Collection '{args.collection}' does not exist.")
             print(f"Available collections: {', '.join(existing_collections) if existing_collections else 'None'}")
-            return
+            sys.exit(1)
 
         client.delete_collection(name=args.collection)
         from open_telco_rag.evaluation.provenance import index_settings_file

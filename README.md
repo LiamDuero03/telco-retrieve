@@ -317,7 +317,7 @@ open-telco-rag ingest oran \
 | `--enrichment` | `none` | Pre-embedding strategy registry token mapped from enrichment_strategies.json |
 | `--enrichment-model` | `google/qwen-2.5-coder-32b` | Model name to request for the `llm_metadata` enrichment strategy — sent to whichever server `--llm-backend`/`--llm-base-url` point at |
 | `--distance-metric` | `l2` | Vector space index geometry calculation mapping: l2, cosine or ip |
-| `--no-resume` | off | Disable resume — re-ingest all files |
+| `--no-resume` | off | Disable resume — re-ingest all files. The BM25 rows of the chunks written again are replaced (and counted in the output); rows of other chunks in the collection are kept |
 | `--fail-on-error` | off | Exit with code 4 when any file failed or the run stopped on an error (see "Failed files"); without it the exit code is 0 as always |
 | `--use-marker` | off | Use Datalab Marker API for PDF preprocessing |
 | `--collection` | `source_model` | Override collection name |
@@ -598,6 +598,8 @@ open-telco-rag ask "What does TS 28.312 define for intent?" \
   --rerank-top-k 5
 ```
 
+`ask --label-sources` (off by default) puts a one-line label in front of each passage (collection, source type, file, release or version, heading), builds the "technical expert" label of the prompt from the sources retrieved unless `--source-type` is given, and lists collection and file per passage under `Sources:` (the file's path when two retrieved files share a name).
+
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--source-type` | `oran` | Source type |
@@ -608,9 +610,10 @@ open-telco-rag ask "What does TS 28.312 define for intent?" \
 | `--rerank` | off | Enable reranking after retrieval |
 | `--reranker-model` | `ms-marco-minilm` | Reranker key from `configs/reranker_models.json` |
 | `--rerank-top-k` | 5 | Chunks to keep after reranking |
-| `--collection` | `source_model` | Override collection name |
+| `--collection` | `source_model` | Override collection name. Repeat it to search several collections of one database with the same embedder: the query is embedded once, each collection is searched with `--search-method`, and the ranked lists are fused by rank (reciprocal rank fusion, k=60). Collections must agree on model, prefixes and distance space; a name cannot contain a comma |
 | `--embed-backend` | `local` | Backend for computing vector embeddings (`local` or `openrouter`) |
 | `--resolve-parents` | off | Expand retrieved child chunks into full parent contexts |
+| `--where-source-type` | off | Only chunks of this source type (`source_type` in the chunk metadata, e.g. `3gpp`, `camara`); repeat for several. For a collection that holds several sources. An unknown name lists the available ones. Dense search is filtered inside Chroma; BM25 hits are post-filtered from the best 10x candidates, so a rare source can come up short (a warning says so) |
 
 `search` prints one hit per source file and heading. With the default `text_baseline` strategy the stored
 `heading` is empty, so all hits from one file collapse into a single result and fewer than `--top-k` results
@@ -900,6 +903,35 @@ usage and cost) appear only when the components report them.
 
 ---
 
+### Searching one or several collections
+
+A database folder (`--db-path`) can hold many collections. A collection holds chunks made with **one embedder and
+one distance space**; it can hold the chunks of one source or of several.
+
+| Setup | Search one asset | Search all assets |
+|---|---|---|
+| One collection, several sources (e.g. `3gpp` and `camara` ingested into `--collection docs_bge`) | not possible | `search ... --collection docs_bge` |
+| One collection per source, same embedder and distance space | `--collection camara_bge` | `--collection 3gpp_bge --collection camara_bge` |
+| One collection per source, **different embedders** | `--collection X --model <its model>` | not possible: one query vector cannot be compared with vectors of another model |
+| Same embedder, **different distance space** (`l2` vs `cosine`, set at ingest with `--distance-metric`) | works | refused, naming the collection; re-ingest one with the same `--distance-metric` |
+| Same model name, different prefixes | works | refused |
+| A collection that does not exist | | an error naming it; nothing is created |
+
+How several collections are combined: each collection is searched with `--search-method` (`dense`, `bm25` or
+`hybrid`; hybrid still fuses inside the collection). The query is embedded once. The ranked lists are then merged
+by reciprocal rank fusion (k=60), keyed by collection and chunk id, so equal ids in two collections never merge.
+Only ranks are used. Distances and BM25 scores are not mixed because they are not comparable: the same chunk
+scored 1.31 in an `l2` collection and 0.66 in a `cosine` one, and a BM25 score depends on what else is in the
+collection. `--top-k`, `--rerank`, `--rerank-top-k` and `--resolve-parents` apply after the merge. Each result
+shows its collection, and the distance label shows that collection's real space (`L2`, `COSINE`, `IP`). A
+collection without an `.ingest_settings_*.json` file is checked by its stored vector size only, with a warning;
+an empty collection contributes nothing and prints a note.
+
+```bash
+open-telco-rag search "near-RT RIC control loop" --model bge --db-path chroma_db \
+  --collection oran_bge --collection 3gpp_bge --top-k 8
+```
+
 ### Delete collection options
 
 ```bash
@@ -911,6 +943,50 @@ open-telco-rag delete my_collection --db-path chroma_db
 |------|---------|-------------|
 | `collection` | required | Name of the ChromaDB collection to permanently delete |
 | `--db-path` | `chroma_db` | ChromaDB storage path |
+
+### Which asset did a passage come from? (`ask --label-sources`)
+
+By default `ask` sends the chunk texts only. With `--label-sources` every passage starts with a label such as
+`[collection: camara_bge | source_type: camara | file: QualityOnDemand/README.md | heading: Usage]`, the prompt's
+"technical expert" label is built from the source types retrieved (unless you give `--source-type`), and
+`Sources:` lists `collection: file` per passage in context order, with the file's path when two retrieved files
+share a name.
+
+```bash
+open-telco-rag ask "Which API creates a boost session?" --model bge --db-path chroma_db \
+  --collection camara_bge --label-sources
+```
+
+### Adding another asset such as CAMARA
+
+CAMARA is already a source (`camara`): markdown (`.md`) and OpenAPI (`.yaml`, `.yml`) files, one folder per API
+repository. Ingest it like any other source.
+
+```bash
+# its own collection (recommended): same embedder as the assets you want to search it with
+open-telco-rag ingest camara --data data/camara --model bge --db-path chroma_db
+
+# or into a collection that already holds another source
+open-telco-rag ingest 3gpp   --data data/3gpp   --model bge --db-path chroma_db --collection docs_bge
+open-telco-rag ingest camara --data data/camara --model bge --db-path chroma_db --collection docs_bge
+```
+
+The first form creates `camara_bge`. Rules that keep it working:
+
+1. **Same embedder.** Assets searched together need the same `--model` and the same `--distance-metric`.
+2. **Unique relative paths.** A chunk id is `<path relative to --data>::<model>::<n>`. Two sources that share a
+   relative path (for example a `README.md` at the top of both data folders) get the same ids in a shared
+   collection, so one file is skipped or replaces the other. Keep them in distinct folders, or use one
+   collection per source.
+3. **Use a relative `--data` path** (`data/camara`, not `C:\data\camara`). The CAMARA source takes the repo name
+   from the first capitalised part of the path it is given; with an absolute path on Windows that part is the
+   drive (`C:\`), so every chunk gets `repo_name: C:\`.
+4. **Avoid `--no-resume` when ingesting a second source into a shared collection.** It re-ingests every file
+   of that run and replaces the BM25 rows of their chunks; a separate collection per source needs none of this.
+5. Release notes and changelogs (`CHANGELOG*.md`, `release-plan.yaml`) are skipped on purpose by the CAMARA
+   source.
+
+To remove one asset without touching the others (own collection per asset): `open-telco-rag delete camara_bge`.
 
 ### Info options
 

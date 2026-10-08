@@ -8,6 +8,7 @@ from open_telco_rag.core.chunking import _count_tokens, _get_encoding
 from open_telco_rag.embedders.calls import embed_query
 from open_telco_rag.types import SearchResult, Embedder
 from open_telco_rag.stores.fts import FTSStore
+from open_telco_rag.core.source_filter import BM25_OVERFETCH, chroma_where
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +136,7 @@ def _resolve_parent_chunks(results: list[SearchResult]) -> list[SearchResult]:
     substitute child text with full parent text and deduplicate by parent_id.
     """
     resolved: list[SearchResult] = []
-    seen_parents: set[str] = set()
+    seen_parents: set[tuple] = set()
 
     for r in results:
         meta = r.metadata or {}
@@ -143,9 +144,11 @@ def _resolve_parent_chunks(results: list[SearchResult]) -> list[SearchResult]:
         full_parent_text = meta.get("full_parent_text")
 
         if parent_id and full_parent_text:
-            if parent_id in seen_parents:
+            # the collection key only exists in multi-collection results
+            parent_key = (meta.get("collection"), parent_id)
+            if parent_key in seen_parents:
                 continue
-            seen_parents.add(parent_id)
+            seen_parents.add(parent_key)
             if "parent_char_start" in meta:
                 # token-sized parent_child: the text is now the parent's, so
                 # its offsets are too (the span metrics read these)
@@ -192,8 +195,12 @@ def execute_retrieval(
     context_token_budget: int | None = None,
     candidate_pool:  int | None = None,
     budget_overflow: str | None = None,
+    source_types:    list[str] | None = None,
 ) -> list[SearchResult]:
     """Run dense / bm25 / hybrid retrieval, then optional reranking and parent resolution.
+
+    source_types (default None, off) keeps only chunks of those source types, before fusion
+    (see core.source_filter).
 
     with context_token_budget set, candidate_pool (default 30) replaces top_k and
     rerank_top_k as the pool size, and the budget is filled from it in rank order.
@@ -208,13 +215,14 @@ def execute_retrieval(
     else:
         candidate_k = top_k * 3 if reranker is not None else top_k
 
+    where = chroma_where(source_types)
     dense_results: list[SearchResult] = []
     bm25_results: list[SearchResult] = []
 
     # Dense vector pass
     if search_method in ["dense", "hybrid"]:
         vector = embed_query(embedder, query)
-        dense_results = store.search(vector, n_results=candidate_k)
+        dense_results = store.search(vector, n_results=candidate_k, **({"where": where} if where else {}))
         
         if 0.0 < threshold < 1.0:
             space = "l2"
@@ -236,7 +244,7 @@ def execute_retrieval(
         store_col = getattr(store, "collection_name", "documents")
         
         fts_store = FTSStore(path=store_path, collection_name=store_col)
-        bm25_hits = fts_store.search(query, top_k=candidate_k)
+        bm25_hits = fts_store.search(query, top_k=candidate_k * BM25_OVERFETCH if where else candidate_k)
 
         if bm25_hits:
             hit_ids = [doc_id for doc_id, _ in bm25_hits]
@@ -247,6 +255,8 @@ def execute_retrieval(
             
             for doc_id, score in bm25_hits:
                 if doc_id in id_to_doc:
+                    if source_types and (id_to_meta.get(doc_id) or {}).get("source_type") not in source_types:
+                        continue
                     pseudo_distance = 1.0 / (1.0 + score)
                     bm25_results.append(SearchResult(
                         doc_id=doc_id,
@@ -254,6 +264,8 @@ def execute_retrieval(
                         metadata=id_to_meta.get(doc_id, {}),
                         distance=pseudo_distance
                     ))
+            if where:
+                bm25_results = bm25_results[:candidate_k]
 
 
     # Fusion / selection
