@@ -215,10 +215,12 @@ hold identical chunks and their results can be compared.
 - **A failed ingest leaves a header-only CSV.** After such a failure (a NaN batch, for example) the log file
   `logs/ingest_*.csv` has only its header row, although the summary prints the error count: the per-file rows are written only
   after the bulk write succeeds. Use the printed summary and the exit code, not the CSV, to see that a run failed.
-- **The OpenRouter embedder has not been run live yet.** Its retry, partial-response and 429 handling was only tested with a
-  fake HTTP layer; no real call to OpenRouter has been made with the current code.
-- **fp32 quality for EmbeddingGemma is untested.** `embeddinggemma-300m-fp32` removes the half-precision overflow by
-  construction, but I have not measured its retrieval quality, or compared it with `embeddinggemma-300m` on a CPU.
+- **The OpenRouter numbers come from one 30-file run.** The measured speed, cost and behaviour are in "OpenRouter
+  embeddings: measured behaviour and usage notes"; price and rate limits can change, and retries, 429 and partial responses
+  were only exercised with a fake HTTP layer, not live.
+- **fp32 quality for EmbeddingGemma is untested.** `embeddinggemma-300m-fp32` produced finite vectors for all 19,100 chunks
+  of a 30-file run (Chroma and the BM25 index held the same rows), but I have not measured its retrieval quality, or compared
+  it with `embeddinggemma-300m` on a CPU.
 - **Paths.** The loader reads the release and the series from any `Rel-NN` or `NN_series` folder in the whole path, so do not
   put `--out` below such a folder (the script warns).
 - Only Rel-19 has been tested.
@@ -363,6 +365,32 @@ A failure in purely cosmetic bookkeeping *after* every chunk is already safely s
 
 **Config resolution**: `--strategy`/`--enrichment`'s available choices, and whether a given strategy/enrichment needs an LLM client, are read from `configs/chunking_strategies.json`/`configs/enrichment_strategies.json` relative to the installed package location as a fallback if no local `configs/` directory is found relative to the current working directory — so these are no longer silently degraded (to `text_baseline`-only / `none`-only, with LLM-requiring strategies going undetected) when the CLI isn't run from the exact repository root.
 
+### Chunking strategies
+
+`--strategy` takes one of the keys of `configs/chunking_strategies.json`. Only `lumber_chunker` needs an LLM (its entry has
+`requires_llm`; give it `--llm-backend`, `--llm-base-url` and `--chunking-model`). The other four need none.
+
+| Strategy | Unit of `--chunk-size` | Headings stored | Notes |
+|----------|------------------------|-----------------|-------|
+| `text_baseline` (default) | characters | no | plain paragraph packing with `--overlap` |
+| `sliding_window_tokens` | **tokens** (so is `--overlap`) | no | fixed token windows |
+| `hierarchical_markdown` | characters | yes (`Title > Part A`) | splits on headings; `--overlap` is ignored; `--chunk-size` is a soft target: a block bigger than it is not split, so without the bound a chunk can be far larger (about 89,000 tokens were seen on the Rel-19 set) |
+| `parent_child` | ignored | yes | see below |
+| `lumber_chunker` | ignored | not checked | an LLM chooses the boundaries (needs an LLM server) |
+
+- **`parent_child`** stores the whole parent text in the metadata of every child chunk (`full_parent_text`), so the database is
+  about 6 times larger (measured in the GPU test run). The parent text is not bounded. `--resolve-parents` (a `search`, `ask` and
+  `evaluate` flag, not an `ingest` flag) returns that parent text instead of the child, so what the generator sees is not
+  bounded either. `--chunk-size` and `--overlap` are silently ignored for it.
+- **The bound** (`--bound-tokens`, see "Optional: hard token bound") applies to all strategies as a final pass over the
+  chunks. It does not cover a parent's text or text added by `--enrichment`.
+- **Sizes and the config file.** The CLI default is `--chunk-size 1024 --overlap 200` for every strategy (the per-strategy
+  `default_size` values in the JSON are not used). The choices of `--strategy` and the `requires_llm` flag are read from
+  `configs/chunking_strategies.json` in the current directory first, then from the installed package. The step that decides
+  whether `--chunk-size` is counted in tokens looks for a file called `chunking_strategies.json` in the **current
+  directory** (not under `configs/`), which the repository does not have; it is skipped, and the strategy itself reads the
+  number in its own unit. So run `ingest` from the repository root, and pass explicit sizes when you do not.
+
 ### Optional: token-based chunk sizing
 
 By default every strategy sizes chunks in **characters** (`--chunk-size`,
@@ -452,7 +480,7 @@ includes:
 | `bge-m3` | BAAI/bge-m3 | local; no prefix needed |
 | `qwen3-embedding-0.6b` | Qwen/Qwen3-Embedding-0.6B | local; instruction-style query prefix |
 | `embeddinggemma-300m` | google/embeddinggemma-300m | local; uses the model's named prompts (`Retrieval-query` / `Retrieval-document`); loads in float16 on a GPU, which gave NaN vectors in a GPU test |
-| `embeddinggemma-300m-fp32` | google/embeddinggemma-300m | the same model and prompts with `"dtype": "float32"`: loaded in float32 and run without autocast on a GPU, to avoid that overflow. A separate key, so its chunk ids and collection differ from `embeddinggemma-300m`. 768 dims. Retrieval quality not measured yet |
+| `embeddinggemma-300m-fp32` | google/embeddinggemma-300m | the same model and prompts with `"dtype": "float32"`: loaded in float32 and run without autocast on a GPU, to avoid that overflow. A separate key, so its chunk ids and collection differ from `embeddinggemma-300m`. 768 dims. Finite vectors for 19,100 chunks in a GPU run; retrieval quality not measured yet |
 | `qwen3-embedding-8b` | qwen/qwen3-embedding-8b | served through OpenRouter (`--embed-backend openrouter`, needs `OPENROUTER_API_KEY`), 4096 dims, instruction-style query prefix |
 | `e5-prefixed` | intfloat/e5-large-v2 | opt-in variant of `e5` with `query: ` / `passage: ` prefixes |
 | `bge-prefixed` | BAAI/bge-large-en-v1.5 | opt-in variant of `bge` with BGE's query instruction |
@@ -462,6 +490,32 @@ export OPENROUTER_API_KEY=...            # your key; never commit it
 open-telco-rag ingest 3gpp --model qwen3-embedding-8b --embed-backend openrouter
 open-telco-rag evaluate 3gpp --model qwen3-embedding-8b --embed-backend openrouter
 ```
+
+#### OpenRouter embeddings: measured behaviour and usage notes
+
+Measured once, with `qwen3-embedding-8b` through OpenRouter on a 30-file ingest (these come from that one run; price and
+rate limits can change):
+
+- The vectors were 4096-dimensional and finite. The provider was DeepInfra, at 0.01 USD per million tokens.
+- 19,100 chunks used 2,693,619 billed tokens (one special token per text more than a plain count of the chunk texts) and
+  cost 0.027 USD. The hash of the chunk texts was identical to the one from the local embedders, so every embedder saw the
+  same chunks.
+- There were no retries and no 429 answers.
+- The speed was about 26 chunks per second at the default settings, which projects to about 12 hours for the full corpus and
+  1.4 to 1.5 USD at the measured price.
+
+Usage notes:
+
+- The key starts with `sk-or-v1-` and is read from the environment variable `OPENROUTER_API_KEY`.
+- A 401 "Missing Authentication header" means the value is not an OpenRouter key (an empty variable, or another provider's
+  key).
+- A 402 "Insufficient credits" is about the **account** balance, whatever limit the key itself has.
+- At the default `--batch-size` (500 for OpenRouter) one `embed()` call holds 500 texts, which the embedder sends as requests
+  of 200: at most 3 in flight. `--embed-max-workers` (default 10) therefore has no effect unless you set it below 3. A
+  `--batch-size` of 4000 makes 20 requests per call, so up to `--embed-max-workers` of them (10 by default, 20 if you raise
+  it) can be in flight; I have not measured this.
+- `ingest` prints no token counts or cost for OpenRouter embedders (the embedder keeps the totals and `evaluate` reports
+  them); look at your OpenRouter account to see what a run cost.
 
 **Known issue: `otel-300m`.** Loading `farbodtavakkoli/OTel-Embedding-300M` fails
 with current sentence-transformers releases (checked on 5.5.0 and 5.7.0: `Dense.__init__()
