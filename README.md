@@ -1166,10 +1166,12 @@ install, put the PyTorch install of "Installation" first. The suite needs no GPU
 `all-MiniLM-L6-v2` model, which is downloaded on first use, so the first run needs network access (later runs use the
 cache); I have not run it fully offline.
 
-**Two tests are skipped by default**, one in `tests/test_chunk_bound.py` and one in `tests/test_check_chunk_bound.py`: they
-fetch a real `tokenizer.json` from Hugging Face. To run them, set `RUN_REAL_TOKENIZER_TESTS=1` and have network access
-(`RUN_REAL_TOKENIZER_TESTS=1 pytest`; in PowerShell `$env:RUN_REAL_TOKENIZER_TESTS = 1` first). A normal run therefore ends
-with "2 skipped".
+**Three tests are skipped by default**, so a normal run ends with "3 skipped":
+- one in `tests/test_chunk_bound.py` and one in `tests/test_check_chunk_bound.py` fetch a real `tokenizer.json` from Hugging
+  Face. To run them, set `RUN_REAL_TOKENIZER_TESTS=1` and have network access (`RUN_REAL_TOKENIZER_TESTS=1 pytest`; in
+  PowerShell `$env:RUN_REAL_TOKENIZER_TESTS = 1` first);
+- one in `tests/test_multi_collection_ondisk.py` repeats write-then-search on disk for about a minute. Set
+  `RUN_ONDISK_STRESS=1` to run it; it needs no network.
 
 `tests/test_default_behavior_golden.py` and `tests/test_ingest_metadata_golden.py`
 pin the output of the default settings (chunking, retrieval, evaluation
