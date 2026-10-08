@@ -77,10 +77,13 @@ without a GPU, and replacing it afterwards means a forced reinstall. So install 
 matches your hardware, then the package, then check:
 
 ```bash
+# 0. A current pip first: a stock pip 22.0.2 crashed on the large torch wheel with "ValueError: Memoryview is too large"
+pip install --upgrade pip
+
 # 1. PyTorch first. The index URL names the build; take the exact name for your CUDA or ROCm version from
 #    https://pytorch.org/get-started/locally/ (the version numbers below are examples)
 pip install torch --index-url https://download.pytorch.org/whl/cu128      # NVIDIA, CUDA 12.8 (cu126, cu130, ... to match your driver)
-pip install torch --index-url https://download.pytorch.org/whl/rocm6.4    # AMD, ROCm 6.4 (to match your ROCm)
+pip install torch --index-url https://download.pytorch.org/whl/rocm7.2    # AMD, ROCm 7.2 (the index must match the ROCm on the host, see below)
 pip install torch --index-url https://download.pytorch.org/whl/cpu        # no GPU
 
 # 2. then the package: it finds torch already installed and leaves it alone
@@ -90,10 +93,17 @@ pip install -e ".[local-embed,pdf,docx]"
 python -c "import torch; print('gpu:', torch.cuda.is_available(), '| cuda:', torch.version.cuda, '| hip:', torch.version.hip)"
 ```
 
-Run only the line of step 1 that matches your machine. NVIDIA prints `gpu: True | cuda: 12.x | hip: None`. An AMD ROCm
+Run `pip install --upgrade pip` before any torch install, then only the line of step 1 that matches your machine. NVIDIA prints `gpu: True | cuda: 12.x | hip: None`. An AMD ROCm
 build also answers `torch.cuda.is_available()`, so it prints `gpu: True | cuda: None | hip: 6.x`. A CPU build prints
 `gpu: False | cuda: None | hip: None`. If you have a GPU and see `gpu: False`, or the wrong one of `cuda` and `hip`, the wrong
 build is installed: run the matching line of step 1 again with `--force-reinstall`.
+
+**ROCm: the index must match the ROCm version on the host.** `rocm-smi` and `rocminfo` show which ROCm and which GPU
+(for example `gfx950`) the machine has. A PyTorch ROCm build for a different ROCm version can install without any error
+and still see no GPU: with the `rocm6.4` build on a `gfx950` host, the first use of the GPU stopped with "No HIP GPUs are
+available", and the host needed the `rocm7.2` build. In that case you would expect `hip:` in the check above to show a version while `gpu:`
+is `False`; install the build whose number matches the host (`pip install --force-reinstall torch --index-url
+https://download.pytorch.org/whl/rocm<version>`). Which build suits which GPU is listed on the PyTorch page above.
 
 ---
 
@@ -198,9 +208,19 @@ hold identical chunks and their results can be compared.
 - **The cleaning leaves noise.** The cover page and contents list are kept in about 170 specs (the cover pattern is
   deliberately limited to the start of a document), and table separator rows (long runs of `-`) and dot leaders in contents
   tables are not collapsed. They cost tokens, and are why a few chunks are mostly formatting.
-- **float16 on a GPU, and EmbeddingGemma.** Embedders load in float16 on a GPU. `embeddinggemma-300m` returned NaN vectors in a
-  GPU test. Until the per-key `dtype` option and the `embeddinggemma-300m-fp32` key are merged, do not rely on it on a GPU. On
-  the current main a NaN batch is rejected by Chroma while the BM25 index keeps its rows, and ingest still exits with code 0.
+- **float16 on a GPU, and EmbeddingGemma.** Embedders load in float16 on a GPU (the default for every key), and
+  `embeddinggemma-300m` returned NaN vectors that way in a GPU test. Use the key `embeddinggemma-300m-fp32` for that model on
+  a GPU (see "Embedding models and prefixes"). If a batch does contain NaN or infinite values, the run now stops before that
+  batch is written, names the chunk ids, and exits with code 4 when you pass `--fail-on-error` (otherwise 0).
+- **A failed ingest leaves a header-only CSV.** After such a failure (a NaN batch, for example) the log file
+  `logs/ingest_*.csv` has only its header row, although the summary prints the error count: the per-file rows are written only
+  after the bulk write succeeds. Use the printed summary and the exit code, not the CSV, to see that a run failed.
+- **The OpenRouter numbers come from one 30-file run.** The measured speed, cost and behaviour are in "OpenRouter
+  embeddings: measured behaviour and usage notes"; price and rate limits can change, and retries, 429 and partial responses
+  were only exercised with a fake HTTP layer, not live.
+- **fp32 quality for EmbeddingGemma is untested.** `embeddinggemma-300m-fp32` produced finite vectors for all 19,100 chunks
+  of a 30-file run (Chroma and the BM25 index held the same rows), but I have not measured its retrieval quality, or compared
+  it with `embeddinggemma-300m` on a CPU.
 - **Paths.** The loader reads the release and the series from any `Rel-NN` or `NN_series` folder in the whole path, so do not
   put `--out` below such a folder (the script warns).
 - Only Rel-19 has been tested.
@@ -298,6 +318,7 @@ open-telco-rag ingest oran \
 | `--enrichment-model` | `google/qwen-2.5-coder-32b` | Model name to request for the `llm_metadata` enrichment strategy — sent to whichever server `--llm-backend`/`--llm-base-url` point at |
 | `--distance-metric` | `l2` | Vector space index geometry calculation mapping: l2, cosine or ip |
 | `--no-resume` | off | Disable resume — re-ingest all files. The BM25 rows of the chunks written again are replaced (and counted in the output); rows of other chunks in the collection are kept |
+| `--fail-on-error` | off | Exit with code 4 when any file failed or the run stopped on an error (see "Failed files"); without it the exit code is 0 as always |
 | `--use-marker` | off | Use Datalab Marker API for PDF preprocessing |
 | `--collection` | `source_model` | Override collection name |
 | `--embed-backend` | `local` | Backend for computing vector embeddings: `local` (CPU/GPU) or `openrouter` (Cloud APIs) |
@@ -321,9 +342,16 @@ up mixed; use `--no-resume` to rebuild it or a new `--collection`.
 
 **Failed files:** a file that cannot be parsed (a corrupt `.docx`, an empty file) is counted under `Errors:` or
 `Skipped:`, logged in `logs/ingest_*.csv`, and retried by the next run; the rest of the run continues. `ingest`
-exits with status 0 even when some files failed, and it does not check that a parsed file's text is sensible
+exits with status 0 by default even when some files failed, and it does not check that a parsed file's text is sensible
 (a binary file named `.md` is ingested as text), so check the `Errors:` line or the CSV, and the chunk count with
 `open-telco-rag info`.
+
+**`--fail-on-error` and exit code 4.** With `--fail-on-error`, `ingest` exits with code 4 when the `Errors:` count is above
+zero (a file that could not be parsed, or a file that did not get all its chunks stored) or when the run itself stopped on an
+error: a failed Chroma or BM25 write, or an embedder that returned a vector with NaN or infinite values, a wrong length, or
+the wrong number of vectors (the run stops before that batch is written and names the chunk ids). Files that are only
+`Skipped:` do not count. A clean run exits 0 with or without the flag. After a failed write nothing more is dispatched and the
+BM25 index is never ahead of Chroma, so a later run resumes the rest.
 
 **Chunk ids** are `<path relative to --data>::<model key>::<chunk index>`, with the path written using the
 operating system's separator: a collection built on Windows has backslashes in its ids. The evaluation metrics
@@ -336,6 +364,32 @@ Ingest also builds a per-collection SQLite FTS5 BM25 index alongside ChromaDB, e
 A failure in purely cosmetic bookkeeping *after* every chunk is already safely stored (writing the resume-progress JSON file, a CSV log row, or a run's `_ingest_complete.json` completion marker) is now isolated from the write-critical path — it's logged as a `[WARN]`, but it can no longer retroactively misreport a fully successful ingest as `[ERROR] Bulk indexing failed` with an inflated `error_files` count. This applies to both `ingest()` and `ingest_multi_enrichment()` — the latter isolates it per enrichment variant, so one variant's marker-write hiccup doesn't take down the reported status of every other variant in the same run.
 
 **Config resolution**: `--strategy`/`--enrichment`'s available choices, and whether a given strategy/enrichment needs an LLM client, are read from `configs/chunking_strategies.json`/`configs/enrichment_strategies.json` relative to the installed package location as a fallback if no local `configs/` directory is found relative to the current working directory — so these are no longer silently degraded (to `text_baseline`-only / `none`-only, with LLM-requiring strategies going undetected) when the CLI isn't run from the exact repository root.
+
+### Chunking strategies
+
+`--strategy` takes one of the keys of `configs/chunking_strategies.json`. Only `lumber_chunker` needs an LLM (its entry has
+`requires_llm`; give it `--llm-backend`, `--llm-base-url` and `--chunking-model`). The other four need none.
+
+| Strategy | Unit of `--chunk-size` | Headings stored | Notes |
+|----------|------------------------|-----------------|-------|
+| `text_baseline` (default) | characters | no | plain paragraph packing with `--overlap` |
+| `sliding_window_tokens` | **tokens** (so is `--overlap`) | no | fixed token windows |
+| `hierarchical_markdown` | characters | yes (`Title > Part A`) | splits on headings; `--overlap` is ignored; `--chunk-size` is a soft target: a block bigger than it is not split, so without the bound a chunk can be far larger (about 89,000 tokens were seen on the Rel-19 set) |
+| `parent_child` | ignored | yes | see below |
+| `lumber_chunker` | ignored | not checked | an LLM chooses the boundaries (needs an LLM server) |
+
+- **`parent_child`** stores the whole parent text in the metadata of every child chunk (`full_parent_text`), so the database is
+  about 6 times larger (measured in the GPU test run). The parent text is not bounded. `--resolve-parents` (a `search`, `ask` and
+  `evaluate` flag, not an `ingest` flag) returns that parent text instead of the child, so what the generator sees is not
+  bounded either. `--chunk-size` and `--overlap` are silently ignored for it.
+- **The bound** (`--bound-tokens`, see "Optional: hard token bound") applies to all strategies as a final pass over the
+  chunks. It does not cover a parent's text or text added by `--enrichment`.
+- **Sizes and the config file.** The CLI default is `--chunk-size 1024 --overlap 200` for every strategy (the per-strategy
+  `default_size` values in the JSON are not used). The choices of `--strategy` and the `requires_llm` flag are read from
+  `configs/chunking_strategies.json` in the current directory first, then from the installed package. The step that decides
+  whether `--chunk-size` is counted in tokens looks for a file called `chunking_strategies.json` in the **current
+  directory** (not under `configs/`), which the repository does not have; it is skipped, and the strategy itself reads the
+  number in its own unit. So run `ingest` from the repository root, and pass explicit sizes when you do not.
 
 ### Optional: token-based chunk sizing
 
@@ -425,7 +479,8 @@ includes:
 |-----|-------|-------|
 | `bge-m3` | BAAI/bge-m3 | local; no prefix needed |
 | `qwen3-embedding-0.6b` | Qwen/Qwen3-Embedding-0.6B | local; instruction-style query prefix |
-| `embeddinggemma-300m` | google/embeddinggemma-300m | local; uses the model's named prompts (`Retrieval-query` / `Retrieval-document`) |
+| `embeddinggemma-300m` | google/embeddinggemma-300m | local; uses the model's named prompts (`Retrieval-query` / `Retrieval-document`); loads in float16 on a GPU, which gave NaN vectors in a GPU test |
+| `embeddinggemma-300m-fp32` | google/embeddinggemma-300m | the same model and prompts with `"dtype": "float32"`: loaded in float32 and run without autocast on a GPU, to avoid that overflow. A separate key, so its chunk ids and collection differ from `embeddinggemma-300m`. 768 dims. Finite vectors for 19,100 chunks in a GPU run; retrieval quality not measured yet |
 | `qwen3-embedding-8b` | qwen/qwen3-embedding-8b | served through OpenRouter (`--embed-backend openrouter`, needs `OPENROUTER_API_KEY`), 4096 dims, instruction-style query prefix |
 | `e5-prefixed` | intfloat/e5-large-v2 | opt-in variant of `e5` with `query: ` / `passage: ` prefixes |
 | `bge-prefixed` | BAAI/bge-large-en-v1.5 | opt-in variant of `bge` with BGE's query instruction |
@@ -436,11 +491,42 @@ open-telco-rag ingest 3gpp --model qwen3-embedding-8b --embed-backend openrouter
 open-telco-rag evaluate 3gpp --model qwen3-embedding-8b --embed-backend openrouter
 ```
 
+#### OpenRouter embeddings: measured behaviour and usage notes
+
+Measured once, with `qwen3-embedding-8b` through OpenRouter on a 30-file ingest (these come from that one run; price and
+rate limits can change):
+
+- The vectors were 4096-dimensional and finite. The provider was DeepInfra, at 0.01 USD per million tokens.
+- 19,100 chunks used 2,693,619 billed tokens (one special token per text more than a plain count of the chunk texts) and
+  cost 0.027 USD. The hash of the chunk texts was identical to the one from the local embedders, so every embedder saw the
+  same chunks.
+- There were no retries and no 429 answers.
+- The speed was about 26 chunks per second at the default settings, which projects to about 12 hours for the full corpus and
+  1.4 to 1.5 USD at the measured price.
+
+Usage notes:
+
+- The key starts with `sk-or-v1-` and is read from the environment variable `OPENROUTER_API_KEY`.
+- A 401 "Missing Authentication header" means the value is not an OpenRouter key (an empty variable, or another provider's
+  key).
+- A 402 "Insufficient credits" is about the **account** balance, whatever limit the key itself has.
+- At the default `--batch-size` (500 for OpenRouter) one `embed()` call holds 500 texts, which the embedder sends as requests
+  of 200: at most 3 in flight. `--embed-max-workers` (default 10) therefore has no effect unless you set it below 3. A
+  `--batch-size` of 4000 makes 20 requests per call, so up to `--embed-max-workers` of them (10 by default, 20 if you raise
+  it) can be in flight; I have not measured this.
+- `ingest` prints no token counts or cost for OpenRouter embedders (the embedder keeps the totals and `evaluate` reports
+  them); look at your OpenRouter account to see what a run cost.
+
 **Known issue: `otel-300m`.** Loading `farbodtavakkoli/OTel-Embedding-300M` fails
 with current sentence-transformers releases (checked on 5.5.0 and 5.7.0: `Dense.__init__()
 missing 'in_features' and 'out_features'`) because of the model's saved layer
 configuration. It fails the same way with plain `SentenceTransformer(...)`, so it
 is not specific to this project; the other local models load normally.
+
+**Precision on a GPU.** A registry entry may carry `"dtype": "float16" | "bfloat16" | "float32"`. On a GPU it sets both the
+dtype the model is loaded in and the autocast dtype; `float32` runs without autocast. Without a `dtype`, nothing changed:
+float16 on a GPU, nothing special on a CPU. Only `embeddinggemma-300m-fp32` has one. The OTel reranker entries in
+`configs/reranker_models.json` accept the same field (default: float16 on a GPU, float32 on a CPU).
 
 Prefixes are configured per registry entry (`query_prefix`,
 `document_prefix`, or `query_prompt_name`/`document_prompt_name`); entries
@@ -1072,6 +1158,20 @@ Each supports `--help`.
 pip install -e ".[dev,local-embed,pdf,docx,cloud-embed]"
 pytest
 ```
+
+The test suite needs these extras. They differ from the install extras (`local-embed,pdf,docx`, see "Installation") by two:
+`dev` (pytest, pytest-cov and ruff) and `cloud-embed` (httpx, which some tests import; the base dependency `anthropic`
+already brings httpx in, so `cloud-embed` mainly makes it explicit; I have not run the suite without it). As with a normal
+install, put the PyTorch install of "Installation" first. The suite needs no GPU and no API key. Some tests load the small
+`all-MiniLM-L6-v2` model, which is downloaded on first use, so the first run needs network access (later runs use the
+cache); I have not run it fully offline.
+
+**Three tests are skipped by default**, so a normal run ends with "3 skipped":
+- one in `tests/test_chunk_bound.py` and one in `tests/test_check_chunk_bound.py` fetch a real `tokenizer.json` from Hugging
+  Face. To run them, set `RUN_REAL_TOKENIZER_TESTS=1` and have network access (`RUN_REAL_TOKENIZER_TESTS=1 pytest`; in
+  PowerShell `$env:RUN_REAL_TOKENIZER_TESTS = 1` first);
+- one in `tests/test_multi_collection_ondisk.py` repeats write-then-search on disk for about a minute. Set
+  `RUN_ONDISK_STRESS=1` to run it; it needs no network.
 
 `tests/test_default_behavior_golden.py` and `tests/test_ingest_metadata_golden.py`
 pin the output of the default settings (chunking, retrieval, evaluation
