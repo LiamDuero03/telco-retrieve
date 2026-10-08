@@ -297,7 +297,7 @@ open-telco-rag ingest oran \
 | `--enrichment` | `none` | Pre-embedding strategy registry token mapped from enrichment_strategies.json |
 | `--enrichment-model` | `google/qwen-2.5-coder-32b` | Model name to request for the `llm_metadata` enrichment strategy — sent to whichever server `--llm-backend`/`--llm-base-url` point at |
 | `--distance-metric` | `l2` | Vector space index geometry calculation mapping: l2, cosine or ip |
-| `--no-resume` | off | Disable resume — re-ingest all files |
+| `--no-resume` | off | Disable resume — re-ingest all files. The BM25 rows of the chunks written again are replaced (and counted in the output); rows of other chunks in the collection are kept |
 | `--use-marker` | off | Use Datalab Marker API for PDF preprocessing |
 | `--collection` | `source_model` | Override collection name |
 | `--embed-backend` | `local` | Backend for computing vector embeddings: `local` (CPU/GPU) or `openrouter` (Cloud APIs) |

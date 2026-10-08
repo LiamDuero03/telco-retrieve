@@ -681,6 +681,17 @@ def _run_ingest(args) -> None:
         print(f"\n[ERROR] Ingest finished with failures; exiting with code {EXIT_INGEST_FAILED} (--fail-on-error).")
         sys.exit(EXIT_INGEST_FAILED)
 
+def _require_collection(db_path: str, name: str) -> None:
+    """search and ask only read: exit with the available collections instead of creating an empty one"""
+    import chromadb
+    if not Path(db_path).is_dir():
+        sys.exit(f"error: database '{db_path}' does not exist")
+    existing = [c.name for c in chromadb.PersistentClient(path=str(db_path)).list_collections()]
+    if name not in existing:
+        sys.exit(f"error: collection '{name}' does not exist in '{db_path}' "
+                 f"(available: {', '.join(existing) or 'none'}); pass --collection NAME")
+
+
 _SPACE_LABELS = {"l2": "L2", "cosine": "COSINE", "ip": "IP"}
 
 
@@ -705,6 +716,7 @@ def _retrieve(args, query: str):
         stores = [c.store for c in opened if not c.empty]
         spaces = {c.name: c.space for c in opened}
     else:
+        _require_collection(args.db_path, names[0] if names else f"{args.source_type}_{args.model}")
         store = _get_store(args.source_type, args.model, args.db_path,
                            collection=names[0] if names else None)
         meta = getattr(getattr(store, "_collection", None), "metadata", None) or {}
@@ -1105,6 +1117,10 @@ def _run_info(args) -> None:
     import chromadb
     client      = chromadb.PersistentClient(path=args.db_path)
     collections = client.list_collections()
+    if args.collection:
+        collections = [c for c in collections if c.name == args.collection]
+        if not collections:
+            sys.exit(f"error: collection '{args.collection}' does not exist in '{args.db_path}'")
     print(f"\nDatabase: {args.db_path}")
     print(f"Collections ({len(collections)}):")
     for col in collections:
@@ -1125,7 +1141,7 @@ def _run_delete_collection(args) -> None:
         if args.collection not in existing_collections:
             print(f"Error: Collection '{args.collection}' does not exist.")
             print(f"Available collections: {', '.join(existing_collections) if existing_collections else 'None'}")
-            return
+            sys.exit(1)
 
         client.delete_collection(name=args.collection)
         from open_telco_rag.evaluation.provenance import index_settings_file
