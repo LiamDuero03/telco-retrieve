@@ -206,6 +206,9 @@ def main(argv: list[str] | None = None) -> None:
                       help="Backend for computing embeddings (default: local)")
     p_search.add_argument("--resolve-parents", action="store_true",
                       help="Expand retrieved child chunks into full parent contexts")
+    p_search.add_argument("--where-source-type", action="append", default=None, metavar="NAME",
+                          help="Optional: only chunks of this source type (the source_type chunk metadata, "
+                               "e.g. 3gpp or camara); repeat for several. Off by default.")
 
     # ── ask ───────────────────────────────────────────────────────────────────
     p_ask = sub.add_parser("ask", help="Ask a question (search + generate)")
@@ -228,6 +231,9 @@ def main(argv: list[str] | None = None) -> None:
                       help="Backend for computing embeddings (default: local)")
     p_ask.add_argument("--resolve-parents", action="store_true",
                    help="Expand retrieved child chunks into full parent contexts")
+    p_ask.add_argument("--where-source-type", action="append", default=None, metavar="NAME",
+                       help="Optional: only chunks of this source type (the source_type chunk metadata, "
+                            "e.g. 3gpp or camara); repeat for several. Off by default.")
     p_ask.add_argument("--generator", choices=["claude", "openrouter", "local"], default="openrouter",
                        help="LLM backend for the answer (default: openrouter). 'local' talks to any "
                             "OpenAI-compatible server via --llm-base-url/--llm-api-key.")
@@ -692,6 +698,19 @@ def _require_collection(db_path: str, name: str) -> None:
                  f"(available: {', '.join(existing) or 'none'}); pass --collection NAME")
 
 
+def _source_filter_kwargs(args, *stores) -> dict:
+    """search() kwargs for --where-source-type; empty (so nothing changes) when it is not given"""
+    source_types = getattr(args, "where_source_type", None)
+    if not source_types:
+        return {}
+    from open_telco_rag.core.source_filter import SourceTypeError, check_source_types
+    try:
+        check_source_types(list(stores), source_types)
+    except SourceTypeError as e:
+        sys.exit(f"error: {e}")
+    return {"source_types": source_types}
+
+
 _SPACE_LABELS = {"l2": "L2", "cosine": "COSINE", "ip": "IP"}
 
 
@@ -734,9 +753,13 @@ def _retrieve(args, query: str):
         rerank_top_k = args.rerank_top_k,
         search_method = getattr(args, "search_method", "dense"),
         resolve_parents = getattr(args, "resolve_parents", False),
+        **_source_filter_kwargs(args, *(stores if several else [store])),
     )
     if several:
         results = ms.multi_search(query, stores, embedder, **options)
+        from open_telco_rag.core.source_filter import warn_if_short
+        warn_if_short(len(results), args.rerank_top_k if reranker is not None else args.top_k,
+                      options.get("source_types"))
     else:
         results = search(query, store=store, embedder=embedder, **options)
     return results, spaces, several

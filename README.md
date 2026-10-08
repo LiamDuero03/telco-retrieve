@@ -525,6 +525,7 @@ open-telco-rag ask "What does TS 28.312 define for intent?" \
 | `--collection` | `source_model` | Override collection name. Repeat it to search several collections of one database with the same embedder: the query is embedded once, each collection is searched with `--search-method`, and the ranked lists are fused by rank (reciprocal rank fusion, k=60). Collections must agree on model, prefixes and distance space; a name cannot contain a comma |
 | `--embed-backend` | `local` | Backend for computing vector embeddings (`local` or `openrouter`) |
 | `--resolve-parents` | off | Expand retrieved child chunks into full parent contexts |
+| `--where-source-type` | off | Only chunks of this source type (`source_type` in the chunk metadata, e.g. `3gpp`, `camara`); repeat for several. For a collection that holds several sources. An unknown name lists the available ones. Dense search is filtered inside Chroma; BM25 hits are post-filtered from the best 10x candidates, so a rare source can come up short (a warning says so) |
 
 `search` prints one hit per source file and heading. With the default `text_baseline` strategy the stored
 `heading` is empty, so all hits from one file collapse into a single result and fewer than `--top-k` results

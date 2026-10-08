@@ -1088,12 +1088,14 @@ def search(
     context_token_budget: int | None = None,
     candidate_pool:  int | None = None,
     budget_overflow: str | None = None,
+    source_types:    list[str] | None = None,
 ) -> list[SearchResult]:
-    """Embed a query and retrieve nearest neighbours; the budget arguments are
-    described on core.retrieval.execute_retrieval"""
+    """Embed a query and retrieve nearest neighbours; the budget and source_types
+    arguments are described on core.retrieval.execute_retrieval"""
     from open_telco_rag.core.retrieval import execute_retrieval
+    from open_telco_rag.core.source_filter import warn_if_short
 
-    return execute_retrieval(
+    results = execute_retrieval(
         query=query,
         store=store,
         embedder=embedder,
@@ -1106,7 +1108,11 @@ def search(
         context_token_budget=context_token_budget,
         candidate_pool=candidate_pool,
         budget_overflow=budget_overflow,
+        **({"source_types": source_types} if source_types else {}),
     )
+    if source_types and context_token_budget is None:
+        warn_if_short(len(results), rerank_top_k if reranker is not None else top_k, source_types)
+    return results
 
 # ── Generate ──────────────────────────────────────────────────────────────────
 
