@@ -512,6 +512,8 @@ open-telco-rag ask "What does TS 28.312 define for intent?" \
   --rerank-top-k 5
 ```
 
+`ask --label-sources` (off by default) puts a one-line label in front of each passage (collection, source type, file, release or version, heading), builds the "technical expert" label of the prompt from the sources retrieved unless `--source-type` is given, and lists collection and file per passage under `Sources:` (the file's path when two retrieved files share a name).
+
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--source-type` | `oran` | Source type |
@@ -855,6 +857,50 @@ open-telco-rag delete my_collection --db-path chroma_db
 |------|---------|-------------|
 | `collection` | required | Name of the ChromaDB collection to permanently delete |
 | `--db-path` | `chroma_db` | ChromaDB storage path |
+
+### Which asset did a passage come from? (`ask --label-sources`)
+
+By default `ask` sends the chunk texts only. With `--label-sources` every passage starts with a label such as
+`[collection: camara_bge | source_type: camara | file: QualityOnDemand/README.md | heading: Usage]`, the prompt's
+"technical expert" label is built from the source types retrieved (unless you give `--source-type`), and
+`Sources:` lists `collection: file` per passage in context order, with the file's path when two retrieved files
+share a name.
+
+```bash
+open-telco-rag ask "Which API creates a boost session?" --model bge --db-path chroma_db \
+  --collection camara_bge --label-sources
+```
+
+### Adding another asset such as CAMARA
+
+CAMARA is already a source (`camara`): markdown (`.md`) and OpenAPI (`.yaml`, `.yml`) files, one folder per API
+repository. Ingest it like any other source.
+
+```bash
+# its own collection (recommended): same embedder as the assets you want to search it with
+open-telco-rag ingest camara --data data/camara --model bge --db-path chroma_db
+
+# or into a collection that already holds another source
+open-telco-rag ingest 3gpp   --data data/3gpp   --model bge --db-path chroma_db --collection docs_bge
+open-telco-rag ingest camara --data data/camara --model bge --db-path chroma_db --collection docs_bge
+```
+
+The first form creates `camara_bge`. Rules that keep it working:
+
+1. **Same embedder.** Assets searched together need the same `--model` and the same `--distance-metric`.
+2. **Unique relative paths.** A chunk id is `<path relative to --data>::<model>::<n>`. Two sources that share a
+   relative path (for example a `README.md` at the top of both data folders) get the same ids in a shared
+   collection, so one file is skipped or replaces the other. Keep them in distinct folders, or use one
+   collection per source.
+3. **Use a relative `--data` path** (`data/camara`, not `C:\data\camara`). The CAMARA source takes the repo name
+   from the first capitalised part of the path it is given; with an absolute path on Windows that part is the
+   drive (`C:\`), so every chunk gets `repo_name: C:\`.
+4. **Avoid `--no-resume` when ingesting a second source into a shared collection.** It re-ingests every file
+   of that run and replaces the BM25 rows of their chunks; a separate collection per source needs none of this.
+5. Release notes and changelogs (`CHANGELOG*.md`, `release-plan.yaml`) are skipped on purpose by the CAMARA
+   source.
+
+To remove one asset without touching the others (own collection per asset): `open-telco-rag delete camara_bge`.
 
 ### Info options
 
