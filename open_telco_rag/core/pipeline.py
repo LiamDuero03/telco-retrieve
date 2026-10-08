@@ -194,6 +194,29 @@ def _report_repeated_rows(fts_store: Any) -> None:
               f"collection with --no-resume to remove them.")
 
 
+def _warn_skipped_under_another_source(store: Any, rels: list[str], model_key: str, source_name: str) -> None:
+    """files skipped because the resume record says they are done, whose relative path is already in
+    the collection under another source type: the second source's file never got in. only warns"""
+    get_metadata = getattr(store, "get_metadata", None)
+    if not rels or get_metadata is None:
+        return
+    other: list[str] = []
+    try:
+        for start in range(0, len(rels), 500):
+            batch = rels[start:start + 500]
+            metas = get_metadata([f"{rel}::{model_key}::0" for rel in batch])
+            other += [f"{rel} ({m['source_type']!r})" for rel, m in zip(batch, metas)
+                      if m.get("source_type") not in (None, source_name)]
+    except Exception:  # noqa: BLE001 - a warning only
+        return
+    if other:
+        shown = ", ".join(other[:5]) + (f" and {len(other) - 5} more" if len(other) > 5 else "")
+        print(f"\n[WARN] {len(other)} file(s) were skipped because the resume record lists them as done, but "
+              f"the collection already holds chunks for the same relative path under another source type "
+              f"(this run is {source_name!r}): {shown}. Nothing was written for them. If they are different "
+              f"files, give them unique relative paths or ingest into another --collection.")
+
+
 def _write_progress(progress_file: Path, fingerprint: str, settings: dict, completed: set[str]) -> None:
     progress_file.write_text(json.dumps(
         {"version": 2, "fingerprint": fingerprint, "settings": settings, "completed": sorted(completed)}
@@ -451,9 +474,7 @@ def ingest(
     fts_store  = FTSStore(path=store_path, collection_name=store_col)
 
     fts_seen: dict[str, list[tuple[int, int]]] = {}
-    if not resume:
-        fts_store.clear()
-    else:
+    if resume:
         # a run that was killed after some FTS writes but before the matching Chroma writes would
         # otherwise insert those rows a second time
         removed, _ = fts_store.remove_exact_duplicates()
@@ -464,16 +485,20 @@ def ingest(
     max_workers = max(1, (os.cpu_count() or 2) - 1)
     
     tasks = []
+    skipped_rels: list[str] = []
     for file_path in files:
         rel = str(file_path.relative_to(data_dir))
         if rel in completed:
             stats.skipped_files += 1
+            skipped_rels.append(rel)
             continue
 
         tasks.append((
             file_path, data_dir, source_name, use_marker,
             chunk_kwargs, min_length, embedder.model_key
         ))
+
+    _warn_skipped_under_another_source(store, skipped_rels, embedder.model_key, source_name)
 
     if not tasks:
         _report_repeated_rows(fts_store)
@@ -526,6 +551,14 @@ def ingest(
     total_chunks = len(all_texts)
     if total_chunks == 0:
         return stats
+
+    if not resume:
+        # only the chunks this run writes again: other rows of the collection stay searchable
+        removed = fts_store.delete_ids(all_ids)
+        if removed:
+            print(f"\n[INFO] --no-resume: removed {removed} BM25 rows for the chunk ids being ingested again; "
+                  f"the other rows of the collection were left in place.")
+        fts_seen = fts_store.load_rows()
 
     # ── PHASE 2: EMBEDDING + STORAGE ── (the bottleneck)
     print(f"\nPhase 2: Embedding & storing {total_chunks:,} chunks "
@@ -1055,12 +1088,14 @@ def search(
     context_token_budget: int | None = None,
     candidate_pool:  int | None = None,
     budget_overflow: str | None = None,
+    source_types:    list[str] | None = None,
 ) -> list[SearchResult]:
-    """Embed a query and retrieve nearest neighbours; the budget arguments are
-    described on core.retrieval.execute_retrieval"""
+    """Embed a query and retrieve nearest neighbours; the budget and source_types
+    arguments are described on core.retrieval.execute_retrieval"""
     from open_telco_rag.core.retrieval import execute_retrieval
+    from open_telco_rag.core.source_filter import warn_if_short
 
-    return execute_retrieval(
+    results = execute_retrieval(
         query=query,
         store=store,
         embedder=embedder,
@@ -1073,7 +1108,11 @@ def search(
         context_token_budget=context_token_budget,
         candidate_pool=candidate_pool,
         budget_overflow=budget_overflow,
+        **({"source_types": source_types} if source_types else {}),
     )
+    if source_types and context_token_budget is None:
+        warn_if_short(len(results), rerank_top_k if reranker is not None else top_k, source_types)
+    return results
 
 # ── Generate ──────────────────────────────────────────────────────────────────
 
