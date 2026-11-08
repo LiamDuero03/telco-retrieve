@@ -1,0 +1,13 @@
+{
+  "model": "otel-0.6b",
+  "reranker": "otel-reranker-0.6b",
+  "rerank": true,
+  "rerank_top_k": 5,
+  "search_method": "hybrid",
+  "top_k": 10,
+  "generator_model": "google/gemma-3n-E4B-it",
+  "temperature": 0.0,
+  "max_tokens": 8,
+  "seed": 1234,
+  "max_prompt_tokens": 4096
+}
