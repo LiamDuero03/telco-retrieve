@@ -69,7 +69,7 @@ include = ["open_telco_rag*", "cli*", "configs"]
 # registries (embedding_models.json etc.) need an explicit package-data
 # entry or a `pip install .` silently ships without them, degrading every
 # --model/--strategy/--enrichment choice to a single hardcoded fallback.
-configs = ["*.json", "eval_questions/*.json"]
+configs = ["*.json", "eval_questions/*.json", "profiles/*.json"]
 
 [tool.ruff]
 line-length = 100
