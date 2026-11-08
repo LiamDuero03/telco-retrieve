@@ -382,6 +382,9 @@ def main(argv: list[str] | None = None) -> None:
     p_pull_hf.add_argument("path_in_repo", help="Folder name inside HF repository (e.g. run_name)")
     p_pull_hf.add_argument("--local-dir", default="./runs", help="Local directory to store downloaded DB")
 
+    from open_telco_rag.challenge.cli import add_challenge_parser
+    add_challenge_parser(sub)
+
 
     args = parser.parse_args(argv)
 
@@ -420,6 +423,9 @@ def main(argv: list[str] | None = None) -> None:
             path_in_repo=args.path_in_repo,
             local_dir=args.local_dir,
         )
+    elif args.command == "challenge":
+        from open_telco_rag.challenge.cli import run_challenge
+        run_challenge(args)
 
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
