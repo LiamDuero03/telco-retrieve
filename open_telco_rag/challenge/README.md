@@ -11,7 +11,7 @@ hybrid search, top-k 10, prompt cap 4096 tokens.
    whatever metric the index has.
 
        open-telco-rag ingest 3gpp --data DATA --model otel-0.6b \
-           --db-path db --collection 3gpp_otel
+           --db-path db --collection 3gpp_otel --distance-metric cosine
 
 2. Export answers from the Gemma endpoint (vLLM, include `/v1`). The API key, if any, comes
    from `LOCAL_LLM_API_KEY` only.
@@ -60,8 +60,10 @@ The builder returns a `Prompt(messages, input_prompt, n_tokens, n_passages)`; th
 is exactly `input_prompt` and the generator gets exactly `messages`.
 
     # my_hooks.py
+    from open_telco_rag.challenge.normalise import normalise_answer
+
     def answer(model_text, options):
-        return model_text.strip().split()[0].upper()[:1]
+        return normalise_answer(model_text.splitlines()[0] if model_text else "", options)
 
     --answer-parser my_hooks:answer
 
