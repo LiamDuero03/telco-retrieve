@@ -9,6 +9,10 @@ An open, vendor-neutral RAG pipeline for telecom specifications, covering 7 stan
 
 Part of the [GSMA Open Telco AI](https://www.open-telco.ai/).
 
+<p align="center">
+  <img src="docs/graphics/telcoretrieve-pipeline.png" alt="TelcoRetrieve pipeline: documents are chunked and embedded into an index, then retrieved, reranked and passed to the generator to produce an answer with sources" width="700">
+</p>
+
 ---
 
 ## Overview
@@ -256,6 +260,32 @@ open-telco-rag ask "What interfaces does the Near-RT RIC expose?" --source-type 
 
 ---
 
+## TelcoRetrieve Challenge
+
+`open-telco-rag challenge` answers a challenge Test CSV with the retrieval stack above and an OpenAI-compatible generator, checks the submission file and scores it with the official scripts. Full guide: [`open_telco_rag/challenge/README.md`](open_telco_rag/challenge/README.md).
+
+```bash
+open-telco-rag ingest 3gpp --data DATA --model otel-0.6b --db-path db --collection 3gpp_otel
+open-telco-rag challenge export --questions Test.csv --out submission.csv \
+    --db-path db --collection 3gpp_otel --llm-base-url http://localhost:8000/v1
+open-telco-rag challenge check --submission submission.csv --questions Test.csv
+open-telco-rag challenge score --submission submission.csv --reference Reference.csv
+```
+
+Defaults of `challenge export` (all can be overridden by flags):
+
+| Component | Default |
+|-----------|---------|
+| Query embedder | OTel-Embedding-0.6B (`otel-0.6b`); must be the model the index was built with |
+| Reranker | OTel-Reranker-0.6B (`otel-reranker-0.6b`), on, keeps 5 |
+| Retrieval | hybrid (dense + BM25), top-k 10 |
+| Generator | Gemma 3n E4B-it (`google/gemma-3n-E4B-it`), served by your endpoint |
+| Prompt cap | 4096 tokens (the official cap) |
+
+Note that `ingest` defaults to MiniLM and L2, so pass `--model otel-0.6b` to match.
+
+---
+
 ## Cookbook
 
 The Open Telco RAG Cookbook is available as a [PDF](https://github.com/Znbne/telco-retrieve/blob/main/Telco-Retrieve-Guidebook.pdf) and as interactive Jupyter notebooks in the [`notebooks/`](notebooks/) directory — one per corpus:
@@ -285,6 +315,9 @@ open-telco-rag info              Show database info
 open-telco-rag delete <collection> Delete a collection from the vector database
 open-telco-rag push-hf <db_path> <repo_id>            Push a local Chroma+FTS database folder to HF Hub
 open-telco-rag pull-hf <repo_id> <path_in_repo>       Pull a database folder from HF Hub for evaluation
+open-telco-rag challenge export     Answer a challenge Test CSV and write the submission CSV
+open-telco-rag challenge check      Validate a submission CSV against its Test CSV
+open-telco-rag challenge score      Score a submission with the official scripts
 ```
 
 `pull_collection_from_hf()` (`open_telco_rag/stores/hf.py`, used by both `pull-hf` and the evaluation grid scripts below) correctly handles a multi-segment `path_in_repo` (e.g. `final-ingestion-grid/{run_name}`), not just a bare `run_name` — a real bug previously made a multi-segment path land the downloaded files one directory level deeper than the function claimed to return, so `ChromaStore` silently opened an empty directory and reported `0` chunks even though the download itself had genuinely succeeded.
@@ -614,6 +647,8 @@ open-telco-rag ask "What does TS 28.312 define for intent?" \
 | `--embed-backend` | `local` | Backend for computing vector embeddings (`local` or `openrouter`) |
 | `--resolve-parents` | off | Expand retrieved child chunks into full parent contexts |
 | `--where-source-type` | off | Only chunks of this source type (`source_type` in the chunk metadata, e.g. `3gpp`, `camara`); repeat for several. For a collection that holds several sources. An unknown name lists the available ones. Dense search is filtered inside Chroma; BM25 hits are post-filtered from the best 10x candidates, so a rare source can come up short (a warning says so) |
+
+These defaults are for `search` and `ask`. `challenge export` has its own defaults (OTel-0.6B embedder, OTel-Reranker-0.6B, hybrid, top-k 10); see "TelcoRetrieve Challenge".
 
 `search` prints one hit per source file and heading. With the default `text_baseline` strategy the stored
 `heading` is empty, so all hits from one file collapse into a single result and fewer than `--top-k` results
@@ -1117,6 +1152,7 @@ open-telco-rag/
 │   │       ├── generation.py
 │   │       ├── retrieval.py
 │   │       └── ground_truth.py
+│   ├── challenge/               # challenge command group: export, check, score (see its README)
 │   └── stores/
 │       └── chroma.py
 ├── cli/
@@ -1128,6 +1164,7 @@ open-telco-rag/
 ├── configs/
 │   ├── embedding_models.json    # embedder registry
 │   ├── reranker_models.json     # reranker registry
+│   ├── profiles/                # named settings presets (challenge.json)
 |   ├── chunking_strategies.json     # Central registry for character/token splitters
 |   ├── enrichment_strategies.json   # Central registry for tagging, glossary, & LLM expansion
 │   └── eval_questions/          # evaluation question sets per corpus
