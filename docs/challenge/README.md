@@ -12,7 +12,7 @@ cd telco-retrieve
 pip install -e ".[local-embed]"
 ```
 
-For a specific GPU or a CPU-only PyTorch, see [Installation](../../README.md#installation).
+For a specific GPU or a CPU-only PyTorch, see [Installation](../reference/installation.md).
 
 ## 2. Get the questions and the index
 

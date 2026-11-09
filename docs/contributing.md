@@ -25,7 +25,7 @@ pip install -e ".[dev,local-embed,pdf,docx,cloud-embed]"
 pytest
 ```
 
-The test suite needs these extras. They differ from the install extras (`local-embed,pdf,docx`, see [Installation](../README.md#installation)) by two:
+The test suite needs these extras. They differ from the install extras (`local-embed,pdf,docx`, see [Installation](reference/installation.md)) by two:
 `dev` (pytest, pytest-cov and ruff) and `cloud-embed` (httpx, which some tests import; the base dependency `anthropic`
 already brings httpx in, so `cloud-embed` mainly makes it explicit). As with a normal
 install, put the PyTorch install of "Installation" first. The suite needs no GPU and no API key. Some tests load the small

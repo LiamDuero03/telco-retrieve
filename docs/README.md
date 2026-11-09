@@ -1,8 +1,13 @@
 # Documentation
 
+TelcoRetrieve is part of the [GSMA Open Telco AI](https://www.open-telco.ai/).
+
 | Page | Content |
 |---|---|
-| [Main README](../README.md) | Install, quick start, commands |
+| [Main README](../README.md) | Install and quick start |
+| [Installation](reference/installation.md) | PyTorch builds, API keys |
+| [Corpora](reference/corpora.md) | Supported corpora, pre-built dataset, getting documents |
+| [Prepare 3GPP Rel-19 data](reference/3gpp-data.md) | Stage and ingest the Rel-19 specifications |
 | [CLI reference](reference/cli.md) | Options of ingest, search, ask, info, delete, push-hf and pull-hf |
 | [Chunking and enrichment](reference/chunking.md) | Chunk strategies, token bound, LLM enrichment, Marker |
 | [Embedding and reranker models](reference/embedding.md) | Model registries, prefixes, how to add a model |
@@ -11,7 +16,27 @@
 | [Architecture](architecture.md) | Pipeline stages and the project layout |
 | [Contributing](contributing.md) | Helper scripts, tests, adding a source |
 | [TelcoRetrieve Challenge](challenge/README.md) | Guide for challenge participants |
+| [Challenge options](reference/challenge-options.md) | Own embedder, prompt builder, answer parser |
 | [Graphics](graphics/README.md) | Pipeline and metrics figures |
+
+## TelcoRetrieve Cookbook
+
+The notebooks in [`notebooks/`](../notebooks/) are the TelcoRetrieve Cookbook, one per corpus. Each covers ingestion, search, question answering and evaluation. The PDF [Telco-Retrieve-Guidebook.pdf](../Telco-Retrieve-Guidebook.pdf) is the Guidebook.
+
+| Notebook | Corpus |
+|----------|--------|
+| [`01_oran_quickstart.ipynb`](../notebooks/01_oran_quickstart.ipynb) | O-RAN Alliance R005 |
+| [`02_3gpp_quickstart.ipynb`](../notebooks/02_3gpp_quickstart.ipynb) | 3GPP Release 8 through 19 |
+| [`03_camara_quickstart.ipynb`](../notebooks/03_camara_quickstart.ipynb) | CAMARA Fall25 |
+| [`04_tmforum_quickstart.ipynb`](../notebooks/04_tmforum_quickstart.ipynb) | TM Forum Open APIs & ODA Components |
+| [`05_gsma_quickstart.ipynb`](../notebooks/05_gsma_quickstart.ipynb) | GSMA Open Gateway |
+| [`06_itu_quickstart.ipynb`](../notebooks/06_itu_quickstart.ipynb) | ITU-T |
+| [`07_etsi_quickstart.ipynb`](../notebooks/07_etsi_quickstart.ipynb) | ETSI ISG groups |
+
+## Related
+
+- [telco-qna-generation](https://github.com/Znbne/telco-qna-generation): synthetic QnA generation toolkit for building evaluation datasets
+- [TelcoRetrieve Cookbook](https://github.com/Znbne/telcoretrieve-cookbook): worked examples per corpus
 
 ## Glossary
 
