@@ -1,11 +1,11 @@
-# Telco-Retrieve
+# TelcoRetrieve
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![GSMA Open Telco AI](https://img.shields.io/badge/GSMA-Open%20Telco%20AI-red.svg)](https://www.gsma.com/solutions-and-impact/technologies/networks/gsma_resources/open-telco-ai/)
-[![HuggingFace](https://img.shields.io/badge/🤗%20HuggingFace-GSMA-orange.svg)](https://huggingface.co/datasets/GSMA/telco-retrieve-chunks)
+[![HuggingFace](https://img.shields.io/badge/HuggingFace-GSMA-orange.svg)](https://huggingface.co/datasets/GSMA/telco-retrieve-chunks)
 
-An open, vendor-neutral RAG pipeline for telecom specifications, covering 7 standards bodies, 4.6M+ chunks and 1B+ tokens across O-RAN, 3GPP, ETSI, ITU-T, TM Forum, CAMARA, and GSMA.
+An open, vendor-neutral RAG pipeline for telecom specifications: ingest, hybrid search, rerank and answer with sources.
 
 Part of the [GSMA Open Telco AI](https://www.open-telco.ai/).
 
@@ -17,46 +17,41 @@ Part of the [GSMA Open Telco AI](https://www.open-telco.ai/).
 
 ## Overview
 
-Telco-Retrieve enables engineers and researchers to ask natural language questions directly against authoritative telecom standards, with source citations, no hallucination, and full corpus coverage across all major SDOs.
+TelcoRetrieve answers natural-language questions about telecom standards. It retrieves the relevant passages from an index you build or download, and the generator answers from those passages and cites them.
 
-```
+```bash
 open-telco-rag ask "What does O-RAN WG3 define for the E2 interface?" --source-type oran
 open-telco-rag ask "What does 3GPP TS 28.312 define for intent management?" --source-type 3gpp
 open-telco-rag ask "What are the ETSI ZSM closed-loop automation requirements?" --source-type etsi
 ```
 
+The package is `open_telco_rag` and the command is `open-telco-rag`.
+
 ---
 
 ## Supported Corpora
 
-| Corpus | Source | Format | Status |
-|--------|--------|--------|--------|
-| O-RAN Alliance | O-RAN R003–R005, all WGs | PDF, DOCX | ✅ Available |
-| 3GPP | TSpec-LLM dataset, Rel-8 through Rel-19 | Markdown | ✅ Available |
-| ETSI | ENI, ZSM, MEC, NFV, SAI, F5G, RIS | PDF, YAML | ✅ Available |
-| ITU-T | All 27 active series (G, Y, Q, X, M…) | PDF | ✅ Available |
-| CAMARA | Fall25 — 75+ API repos | Markdown, YAML | ✅ Available |
-| GSMA | OPG, IG, AID, SGP, RCS and more | PDF, DOCX | ✅ Available |
-| TM Forum | TMF Open APIs, ODA Component specs ([tmforum-rand/tmf-otel](https://github.com/tmforum-rand/tmf-otel)) | YAML, JSON | ✅ Available |
+| Corpus | Source | Format |
+|--------|--------|--------|
+| O-RAN Alliance | O-RAN R003–R005, all WGs | PDF, DOCX |
+| 3GPP | TSpec-LLM dataset, Rel-8 through Rel-19 | Markdown |
+| ETSI | ENI, ZSM, MEC, NFV, SAI, F5G, RIS | PDF, YAML |
+| ITU-T | All 27 active series (G, Y, Q, X, M…) | PDF |
+| CAMARA | Fall25, 75+ API repos | Markdown, YAML |
+| GSMA | OPG, IG, AID, SGP, RCS and more | PDF, DOCX |
+| TM Forum | TMF Open APIs, ODA Component specs ([tmforum-rand/tmf-otel](https://github.com/tmforum-rand/tmf-otel)) | YAML, JSON |
 
 ---
 
 ## Pre-built Dataset
 
-The full indexed corpus — 4.6M+ chunks across all 7 SDOs — is available on HuggingFace:
-
-🤗 **[GSMA/telco-retrieve-chunks](https://huggingface.co/datasets/GSMA/telco-retrieve-chunks)**
-
-Download individual corpora or the full dataset without running ingestion yourself:
+The indexed corpus (4.6M+ chunks, 1B+ tokens, 7 standards bodies) is on Hugging Face as [GSMA/telco-retrieve-chunks](https://huggingface.co/datasets/GSMA/telco-retrieve-chunks). Download one corpus or all of it without running ingestion:
 
 ```python
 from datasets import load_dataset
 
-# Load one corpus
-ds = load_dataset("GSMA/telco-retrieve-chunks", data_files="etsi.jsonl")
-
-# Load all corpora
-ds = load_dataset("GSMA/telco-retrieve-chunks")
+ds = load_dataset("GSMA/telco-retrieve-chunks", data_files="etsi.jsonl")   # one corpus
+ds = load_dataset("GSMA/telco-retrieve-chunks")                            # all corpora
 ```
 
 ---
@@ -141,7 +136,7 @@ open-telco-rag ingest 3gpp --data data/3gpp/3GPP-clean --strategy hierarchical_m
 
 The layout is `3GPP-clean/Rel-<N>/<NN>_series/<spec>.md`; the release, series, spec number and version come from
 those folder and file names (`28312-i11.md` is TS 28.312, Rel-18). Files whose names do not follow that pattern
-still ingest but may lack `spec_number`. All releases are millions of chunks: see "Resume" below and ingest one
+still ingest but may lack `spec_number`. All releases are millions of chunks: see "Resume" in the [CLI reference](docs/reference/cli.md) and ingest one
 release at a time if you want the smallest possible restart unit.
 
 ### Preparing the GSMA/3GPP Rel-19 data
@@ -235,16 +230,7 @@ hold identical chunks and their results can be compared.
 open-telco-rag ingest oran --model bge --data data/oran/
 ```
 
-Available embedding models:
-
-| Key | Model | Dimensions | Notes |
-|-----|-------|------------|-------|
-| `minilm` | all-MiniLM-L6-v2 | 384 | Fast — good for development |
-| `mpnet` | all-mpnet-base-v2 | 768 | Balanced quality and speed |
-| `e5` | intfloat/e5-large-v2 | 1024 | High quality — recommended for production |
-| `bge` | BAAI/bge-large-en-v1.5 | 1024 | Strong on technical domains |
-| `otel-109m` | OTel-Embedding-109M | 768 | Telecom-domain fine-tuned — 109M params |
-| `otel-0.6b` | OTel-Embedding-0.6B | 1024 | Telecom-domain fine-tuned — 0.6B params |
+Embedding models are listed in the [embedding reference](docs/reference/embedding.md); `bge` is used above.
 
 ### 4. Search
 
@@ -260,35 +246,33 @@ open-telco-rag ask "What interfaces does the Near-RT RIC expose?" --source-type 
 
 ---
 
-## TelcoRetrieve Challenge
+---
 
-`open-telco-rag challenge` answers a challenge Test CSV with the retrieval stack above and an OpenAI-compatible generator, checks the submission file and scores it with the official scripts. Full guide: [`open_telco_rag/challenge/README.md`](open_telco_rag/challenge/README.md).
+## Configuration
 
-```bash
-open-telco-rag ingest 3gpp --data DATA --model otel-0.6b --db-path db --collection 3gpp_otel
-open-telco-rag challenge export --questions Test.csv --out submission.csv \
-    --db-path db --collection 3gpp_otel --llm-base-url http://localhost:8000/v1
-open-telco-rag challenge check --submission submission.csv --questions Test.csv
-open-telco-rag challenge score --submission submission.csv --reference Reference.csv
-```
-
-Defaults of `challenge export` (all can be overridden by flags):
-
-| Component | Default |
-|-----------|---------|
-| Query embedder | OTel-Embedding-0.6B (`otel-0.6b`); must be the model the index was built with |
-| Reranker | OTel-Reranker-0.6B (`otel-reranker-0.6b`), on, keeps 5 |
-| Retrieval | hybrid (dense + BM25), top-k 10 |
-| Generator | Gemma 3n E4B-it (`google/gemma-3n-E4B-it`), served by your endpoint |
-| Prompt cap | 4096 tokens (the official cap) |
-
-Note that `ingest` defaults to MiniLM and L2, so pass `--model otel-0.6b` to match.
+- API keys and the local endpoint go in `.env` (see `.env.example`).
+- Model, chunking and enrichment choices are JSON registries in `configs/`: `embedding_models.json`, `reranker_models.json`, `llm_models.json`, `chunking_strategies.json`, `enrichment_strategies.json`.
+- Every command takes its options as flags. `open-telco-rag <command> --help` lists them all.
 
 ---
 
-## Cookbook
+## Commands
 
-The Open Telco RAG Cookbook is available as a [PDF](https://github.com/Znbne/telco-retrieve/blob/main/Telco-Retrieve-Guidebook.pdf) and as interactive Jupyter notebooks in the [`notebooks/`](notebooks/) directory — one per corpus:
+```
+open-telco-rag ingest <source>        Ingest documents into the vector database
+open-telco-rag search <query>         Search the vector database
+open-telco-rag ask <question>         Search, then answer with sources
+open-telco-rag evaluate <corpus>      Run the evaluation suite
+open-telco-rag info                   Show what a database holds
+open-telco-rag delete <collection>    Delete a collection
+open-telco-rag push-hf, pull-hf       Push or pull a database folder on the Hugging Face Hub
+```
+
+---
+
+## TelcoRetrieve Cookbook
+
+The notebooks in [`notebooks/`](notebooks/) are the TelcoRetrieve Cookbook, one per corpus. Each covers ingestion, search, question answering and evaluation. The PDF [Telco-Retrieve-Guidebook.pdf](Telco-Retrieve-Guidebook.pdf) is the Guidebook.
 
 | Notebook | Corpus |
 |----------|--------|
@@ -300,995 +284,21 @@ The Open Telco RAG Cookbook is available as a [PDF](https://github.com/Znbne/tel
 | [`06_itu_quickstart.ipynb`](notebooks/06_itu_quickstart.ipynb) | ITU-T |
 | [`07_etsi_quickstart.ipynb`](notebooks/07_etsi_quickstart.ipynb) | ETSI ISG groups |
 
-Each notebook covers ingestion, search, question answering, and evaluation for its corpus.
-
 ---
 
-## CLI Reference
-
-```
-open-telco-rag ingest <source>   Ingest documents into the vector database
-open-telco-rag search <query>    Search the vector database
-open-telco-rag ask <question>    Ask a question (search + generate)
-open-telco-rag evaluate <corpus> Run evaluation suite
-open-telco-rag info              Show database info
-open-telco-rag delete <collection> Delete a collection from the vector database
-open-telco-rag push-hf <db_path> <repo_id>            Push a local Chroma+FTS database folder to HF Hub
-open-telco-rag pull-hf <repo_id> <path_in_repo>       Pull a database folder from HF Hub for evaluation
-open-telco-rag challenge export     Answer a challenge Test CSV and write the submission CSV
-open-telco-rag challenge check      Validate a submission CSV against its Test CSV
-open-telco-rag challenge score      Score a submission with the official scripts
-```
-
-`pull_collection_from_hf()` (`open_telco_rag/stores/hf.py`, used by both `pull-hf` and the evaluation grid scripts below) correctly handles a multi-segment `path_in_repo` (e.g. `final-ingestion-grid/{run_name}`), not just a bare `run_name` — a real bug previously made a multi-segment path land the downloaded files one directory level deeper than the function claimed to return, so `ChromaStore` silently opened an empty directory and reported `0` chunks even though the download itself had genuinely succeeded.
-
-### Ingest options
-
-```bash
-open-telco-rag ingest oran \
-  --data data/oran/ \
-  --model bge \
-  --strategy sliding_window_tokens \
-  --chunk-size 512 \
-  --overlap 50 \
-  --enrichment acronym_expansion \
-  --distance-metric cosine \
-  --db-path chroma_db
-```
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--data` | `data/<source>` | Path to corpus directory |
-| `--model` | `minilm` | Embedding model key |
-| `--db-path` | `chroma_db` | ChromaDB storage path |
-| `--strategy` | `text_baseline` | Segmentation strategy registered in chunking_strategies.json |
-| `--chunk-size` | `1024` | Chunk size in characters |
-| `--overlap` | `200` | Overlap between chunks in characters |
-| `--target-tokens` | off | Optional: size chunks in tokens instead of characters (see [Token-based chunk sizing](#optional-token-based-chunk-sizing)) |
-| `--max-tokens` | off | Optional: hard cap on tokens per chunk (defaults to `--target-tokens`) |
-| `--overlap-tokens` | off | Optional: token overlap between chunks (`text_baseline` and `sliding_window_tokens` only) |
-| `--enrichment` | `none` | Pre-embedding strategy registry token mapped from enrichment_strategies.json |
-| `--enrichment-model` | `google/qwen-2.5-coder-32b` | Model name to request for the `llm_metadata` enrichment strategy — sent to whichever server `--llm-backend`/`--llm-base-url` point at |
-| `--distance-metric` | `l2` | Vector space index geometry calculation mapping: l2, cosine or ip |
-| `--no-resume` | off | Disable resume — re-ingest all files. The BM25 rows of the chunks written again are replaced (and counted in the output); rows of other chunks in the collection are kept |
-| `--fail-on-error` | off | Exit with code 4 when any file failed or the run stopped on an error (see "Failed files"); without it the exit code is 0 as always |
-| `--use-marker` | off | Use Datalab Marker API for PDF preprocessing |
-| `--collection` | `source_model` | Override collection name |
-| `--embed-backend` | `local` | Backend for computing vector embeddings: `local` (CPU/GPU) or `openrouter` (Cloud APIs) |
-| `--batch-size` | 256 / 500 | Embedding batch size: 256 locally, 500 with `--embed-backend openrouter` (the `ingest()` Python function itself defaults to 64) |
-| `--embed-max-workers` | `10` | OpenRouter embeddings only: in-flight requests per `embed()` call |
-
-`--overlap` has no effect on `hierarchical_markdown`, which splits on headings and `--chunk-size` only.
-
-**Resume**: by default an interrupted ingest continues where it stopped. Progress is saved during the run, as
-soon as every chunk of a file is confirmed stored in both ChromaDB and the FTS5 index, so a run that is killed
-resumes with the files that were not fully stored (a file with any unwritten chunk is not recorded). The
-progress file in `logs/` belongs to one configuration (database path, collection,
-embedding model, chunking and enrichment settings; secrets are never recorded),
-so ingesting into a different collection or with different settings starts from
-scratch instead of skipping files. An unreadable or foreign progress file is
-renamed to `*.bak` with a warning, and progress files from older versions
-(which did not record their configuration) are set aside the same way, so an
-ingest interrupted before upgrading restarts from scratch. Re-ingesting into a
-collection that already holds chunks from other settings warns that they can end
-up mixed; use `--no-resume` to rebuild it or a new `--collection`.
-
-**Failed files:** a file that cannot be parsed (a corrupt `.docx`, an empty file) is counted under `Errors:` or
-`Skipped:`, logged in `logs/ingest_*.csv`, and retried by the next run; the rest of the run continues. `ingest`
-exits with status 0 by default even when some files failed, and it does not check that a parsed file's text is sensible
-(a binary file named `.md` is ingested as text), so check the `Errors:` line or the CSV, and the chunk count with
-`open-telco-rag info`.
-
-**`--fail-on-error` and exit code 4.** With `--fail-on-error`, `ingest` exits with code 4 when the `Errors:` count is above
-zero (a file that could not be parsed, or a file that did not get all its chunks stored) or when the run itself stopped on an
-error: a failed Chroma or BM25 write, or an embedder that returned a vector with NaN or infinite values, a wrong length, or
-the wrong number of vectors (the run stops before that batch is written and names the chunk ids). Files that are only
-`Skipped:` do not count. A clean run exits 0 with or without the flag. After a failed write nothing more is dispatched and the
-BM25 index is never ahead of Chroma, so a later run resumes the rest.
-
-**Chunk ids** are `<path relative to --data>::<model key>::<chunk index>`, with the path written using the
-operating system's separator: a collection built on Windows has backslashes in its ids. The evaluation metrics
-compare ids independently of the separator; the stored ids are not rewritten.
-
-Ingest also builds a per-collection SQLite FTS5 BM25 index alongside ChromaDB, enabling `--search-method bm25` and `--search-method hybrid` retrieval.
-
-**Write reliability**: `ChromaStore` queries its Chroma installation's real max batch size live at construction (`ChromaStore.max_batch_size`, from `chromadb`'s own `get_max_batch_size()` — not a hardcoded constant, since this depends on the local SQLite build). Every internal write is capped at that value regardless of `--batch-size`, so a large `--batch-size` on a bulk/high-throughput run can no longer produce a Chroma `"Batch size of N is greater than max batch size of M"` crash partway through — previously possible on large runs once accumulated writes exceeded Chroma's real limit, sometimes only surfacing after the progress bar had already reported 100%. Reported `chunks_stored` counts also only ever reflect confirmed-successful writes, not chunks merely attempted, so a partial failure produces an accurate partial count instead of continuing to count chunks that were never actually persisted.
-
-A failure in purely cosmetic bookkeeping *after* every chunk is already safely stored (writing the resume-progress JSON file, a CSV log row, or a run's `_ingest_complete.json` completion marker) is now isolated from the write-critical path — it's logged as a `[WARN]`, but it can no longer retroactively misreport a fully successful ingest as `[ERROR] Bulk indexing failed` with an inflated `error_files` count. This applies to both `ingest()` and `ingest_multi_enrichment()` — the latter isolates it per enrichment variant, so one variant's marker-write hiccup doesn't take down the reported status of every other variant in the same run.
-
-**Config resolution**: `--strategy`/`--enrichment`'s available choices, and whether a given strategy/enrichment needs an LLM client, are read from `configs/chunking_strategies.json`/`configs/enrichment_strategies.json` relative to the installed package location as a fallback if no local `configs/` directory is found relative to the current working directory — so these are no longer silently degraded (to `text_baseline`-only / `none`-only, with LLM-requiring strategies going undetected) when the CLI isn't run from the exact repository root.
-
-### Chunking strategies
-
-`--strategy` takes one of the keys of `configs/chunking_strategies.json`. Only `lumber_chunker` needs an LLM (its entry has
-`requires_llm`; give it `--llm-backend`, `--llm-base-url` and `--chunking-model`). The other four need none.
-
-| Strategy | Unit of `--chunk-size` | Headings stored | Notes |
-|----------|------------------------|-----------------|-------|
-| `text_baseline` (default) | characters | no | plain paragraph packing with `--overlap` |
-| `sliding_window_tokens` | **tokens** (so is `--overlap`) | no | fixed token windows |
-| `hierarchical_markdown` | characters | yes (`Title > Part A`) | splits on headings; `--overlap` is ignored; `--chunk-size` is a soft target: a block bigger than it is not split, so without the bound a chunk can be far larger (about 89,000 tokens were seen on the Rel-19 set) |
-| `parent_child` | ignored | yes | see below |
-| `lumber_chunker` | ignored | not checked | an LLM chooses the boundaries (needs an LLM server) |
-
-- **`parent_child`** stores the whole parent text in the metadata of every child chunk (`full_parent_text`), so the database is
-  about 6 times larger (measured in the GPU test run). The parent text is not bounded. `--resolve-parents` (a `search`, `ask` and
-  `evaluate` flag, not an `ingest` flag) returns that parent text instead of the child, so what the generator sees is not
-  bounded either. `--chunk-size` and `--overlap` are silently ignored for it.
-- **The bound** (`--bound-tokens`, see "Optional: hard token bound") applies to all strategies as a final pass over the
-  chunks. It does not cover a parent's text or text added by `--enrichment`.
-- **Sizes and the config file.** The CLI default is `--chunk-size 1024 --overlap 200` for every strategy (the per-strategy
-  `default_size` values in the JSON are not used). The choices of `--strategy` and the `requires_llm` flag are read from
-  `configs/chunking_strategies.json` in the current directory first, then from the installed package. The step that decides
-  whether `--chunk-size` is counted in tokens looks for a file called `chunking_strategies.json` in the **current
-  directory** (not under `configs/`), which the repository does not have; it is skipped, and the strategy itself reads the
-  number in its own unit. So run `ingest` from the repository root, and pass explicit sizes when you do not.
-
-### Optional: token-based chunk sizing
-
-By default every strategy sizes chunks in **characters** (`--chunk-size`,
-`--overlap`; `parent_size`/`child_size` for `parent_child`;
-`chunk_tokens`/`overlap_tokens` for `sliding_window_tokens`), exactly as
-before. Token sizing is opt-in and works for all five strategies:
-
-```bash
-open-telco-rag ingest 3gpp --model bge --strategy hierarchical_markdown \
-  --target-tokens 256 --max-tokens 320
-```
-
-- `--target-tokens` is the size to aim for; `--max-tokens` is a hard cap
-  (defaults to `--target-tokens`). Either one switches the run to token
-  sizing. Tokens are counted with `cl100k_base`.
-- Every chunk is an exact slice of the cleaned source text, and the ingest
-  metadata of token-sized chunks additionally stores `char_start`, `char_end`
-  and `n_tokens` (used by the span metrics below). Default ingests store
-  exactly the metadata they always did.
-- Combining token sizing with a character size (`--chunk-size`, `--overlap`,
-  `parent_size`, `child_size`, or `chunk_tokens` for `sliding_window_tokens`)
-  is an error rather than a silent choice. `max_tokens` must be at least
-  `target_tokens`, and `overlap_tokens` must be smaller than the chunk size.
-- `parent_child`: `target_tokens` sizes the child chunks (parents default to
-  4x), so `max_tokens` bounds the retrieved chunk.
-- The tokenizer is only initialized when token sizing is used.
-
-```python
-from open_telco_rag.core.chunking import chunk_document
-chunks = chunk_document(text, "text_baseline", target_tokens=200, max_tokens=256)
-```
-
-### Optional: hard token bound
-
-Embedding models cut their input at a fixed length (512 tokens for many of them), and the text past it
-is silently ignored. `--bound-tokens N` guarantees that no stored chunk is longer than N tokens, for
-every strategy and with character or token sizing; without it nothing changes.
-
-```bash
-open-telco-rag ingest 3gpp --model bge-m3 --strategy hierarchical_markdown \
-  --target-tokens 400 --bound-tokens 512 --bound-tokenizer bge-m3
-```
-
-- A chunk over the bound is split after chunking at the coarsest boundary that works: paragraphs, then
-  table and text blocks, then sentences, then lines, and last a cut by token count. A markdown table is
-  split by rows and its header rows are repeated at the top of every part (those parts are not exact
-  slices of the source). The heading and the metadata stay on every piece; chunks within the bound are
-  untouched.
-- **The bound is counted in one tokenizer, `tiktoken:cl100k_base` by default, and only guarantees that
-  chunks fit in those tokens.** Other embedders count differently (on technical text 4-20% more than
-  cl100k), so set the ceiling with headroom for the strictest embedder you use, and verify it with
-  `scripts/check_chunk_bound.py`, which reports chunks over each model's own limit and can calibrate the
-  ceiling from your data.
-- `--bound-tokenizer` changes the counting tokenizer: `tiktoken:<encoding>`, an embedding model key from
-  `configs/embedding_models.json`, a Hugging Face model name or a `tokenizer.json` path. Only tokenizer
-  files are downloaded, never model weights.
-- `--bound-margin K` reserves K tokens for special tokens (default 2: a 512 limit cuts at 510).
-- The bound, the tokenizer name and the margin (with their defaults filled in) are part of the resume
-  record and of the settings sidecar: changing any of them starts a new ingest instead of skipping
-  finished files.
-- `--bound-verify NAME=LIMIT,...` (for example `bge-m3=512,minilm=256`) names other embedders to check
-  the chunks against after the cl100k pass. A chunk still over one of those limits is only logged
-  (`--bound-outliers warn`, the default) or cut further (`--bound-outliers split`). Nothing happens
-  without `--bound-verify`.
-- Enrichment (`--enrichment`) adds text after chunking, and `--resolve-parents` returns the parent
-  text; neither is bounded. Leave room with `--bound-margin` when enrichment is on.
-- Check a collection or a staged directory without changing anything:
-  `python scripts/check_chunk_bound.py --data-dir DIR --source-type 3gpp --tokenizers minilm bge bge-m3 --calibrate`
-  reports, per tokenizer, chunks over its limit, how its token counts compare with cl100k (p50, p99,
-  p99.9, max), the largest chunks and what makes them long, the text retained by the bound pass and by
-  the `min_length` filter, and with `--calibrate` the largest cl100k ceiling that leaves no chunk (or at
-  most 0.1%) over each limit, so the ceiling is chosen from your data.
-
-```python
-from open_telco_rag.core.chunking import chunk_document
-chunks = chunk_document(text, "text_baseline", chunk_size=2000, bound_tokens=512, bound_tokenizer="bge-m3")
-```
-
-### Embedding models and prefixes
-
-`--model` takes any key from `configs/embedding_models.json`. Besides the
-original keys (`minilm`, `mpnet`, `e5`, `bge`, `otel-*`, `or-*`) the registry
-includes:
-
-| Key | Model | Notes |
-|-----|-------|-------|
-| `bge-m3` | BAAI/bge-m3 | local; no prefix needed |
-| `qwen3-embedding-0.6b` | Qwen/Qwen3-Embedding-0.6B | local; instruction-style query prefix |
-| `embeddinggemma-300m` | google/embeddinggemma-300m | local; uses the model's named prompts (`Retrieval-query` / `Retrieval-document`); loads in float16 on a GPU, which gave NaN vectors in a GPU test |
-| `embeddinggemma-300m-fp32` | google/embeddinggemma-300m | the same model and prompts with `"dtype": "float32"`: loaded in float32 and run without autocast on a GPU, to avoid that overflow. A separate key, so its chunk ids and collection differ from `embeddinggemma-300m`. 768 dims. Finite vectors for 19,100 chunks in a GPU run; retrieval quality not measured yet |
-| `qwen3-embedding-8b` | qwen/qwen3-embedding-8b | served through OpenRouter (`--embed-backend openrouter`, needs `OPENROUTER_API_KEY`), 4096 dims, instruction-style query prefix |
-| `e5-prefixed` | intfloat/e5-large-v2 | opt-in variant of `e5` with `query: ` / `passage: ` prefixes |
-| `bge-prefixed` | BAAI/bge-large-en-v1.5 | opt-in variant of `bge` with BGE's query instruction |
-
-```bash
-export OPENROUTER_API_KEY=...            # your key; never commit it
-open-telco-rag ingest 3gpp --model qwen3-embedding-8b --embed-backend openrouter
-open-telco-rag evaluate 3gpp --model qwen3-embedding-8b --embed-backend openrouter
-```
-
-#### OpenRouter embeddings: measured behaviour and usage notes
-
-Measured once, with `qwen3-embedding-8b` through OpenRouter on a 30-file ingest (these come from that one run; price and
-rate limits can change):
-
-- The vectors were 4096-dimensional and finite. The provider was DeepInfra, at 0.01 USD per million tokens.
-- 19,100 chunks used 2,693,619 billed tokens (one special token per text more than a plain count of the chunk texts) and
-  cost 0.027 USD. The hash of the chunk texts was identical to the one from the local embedders, so every embedder saw the
-  same chunks.
-- There were no retries and no 429 answers.
-- The speed was about 26 chunks per second at the default settings, which projects to about 12 hours for the full corpus and
-  1.4 to 1.5 USD at the measured price.
-
-Usage notes:
-
-- The key starts with `sk-or-v1-` and is read from the environment variable `OPENROUTER_API_KEY`.
-- A 401 "Missing Authentication header" means the value is not an OpenRouter key (an empty variable, or another provider's
-  key).
-- A 402 "Insufficient credits" is about the **account** balance, whatever limit the key itself has.
-- At the default `--batch-size` (500 for OpenRouter) one `embed()` call holds 500 texts, which the embedder sends as requests
-  of 200: at most 3 in flight. `--embed-max-workers` (default 10) therefore has no effect unless you set it below 3. A
-  `--batch-size` of 4000 makes 20 requests per call, so up to `--embed-max-workers` of them (10 by default, 20 if you raise
-  it) can be in flight; I have not measured this.
-- `ingest` prints no token counts or cost for OpenRouter embedders (the embedder keeps the totals and `evaluate` reports
-  them); look at your OpenRouter account to see what a run cost.
-
-**Known issue: `otel-300m`.** Loading `farbodtavakkoli/OTel-Embedding-300M` fails
-with current sentence-transformers releases (checked on 5.5.0 and 5.7.0: `Dense.__init__()
-missing 'in_features' and 'out_features'`) because of the model's saved layer
-configuration. It fails the same way with plain `SentenceTransformer(...)`, so it
-is not specific to this project; the other local models load normally.
-
-**Precision on a GPU.** A registry entry may carry `"dtype": "float16" | "bfloat16" | "float32"`. On a GPU it sets both the
-dtype the model is loaded in and the autocast dtype; `float32` runs without autocast. Without a `dtype`, nothing changed:
-float16 on a GPU, nothing special on a CPU. Only `embeddinggemma-300m-fp32` has one. The OTel reranker entries in
-`configs/reranker_models.json` accept the same field (default: float16 on a GPU, float32 on a CPU).
-
-Prefixes are configured per registry entry (`query_prefix`,
-`document_prefix`, or `query_prompt_name`/`document_prompt_name`); entries
-without them embed text unchanged. The plain `e5` and `bge` keys keep their
-original behavior (no prefixes), so existing indexes still match.
-
-**An index built with a key must be queried with the same key.** Documents and
-queries are embedded with that key's prefixes, so `e5` and `e5-prefixed`
-produce different, incompatible vectors even though the underlying model is the
-same (they also get different collection names). Metrics that compare two
-plain texts (answer relevancy, answer correctness) never use prefixes, whatever
-the key.
-
-`SentenceTransformerEmbedder(track_truncation=True)` (off by default) counts
-texts longer than the model's `max_seq_length` and reports them in the
-evaluation results. OpenRouter embedders report token usage and cost when the
-API returns it.
-
-### LLM-based chunking and enrichment
-
-Two pipeline stages can optionally call an LLM during ingestion instead of running purely deterministic logic — a strategy/enrichment opts into this via `"requires_llm": true` in `chunking_strategies.json` / `enrichment_strategies.json`:
-
-- **`--strategy lumber_chunker`** — uses an LLM to detect content-shift boundaries instead of fixed-size windows.
-- **`--enrichment llm_metadata`** — uses an LLM to extract and explain domain terms/acronyms per chunk, instead of the deterministic `metadata_tagging`/`acronym_expansion` strategies.
-
-Both share the same connection, configured the same way:
-
-```bash
-open-telco-rag ingest 3gpp \
-  --strategy lumber_chunker \
-  --enrichment llm_metadata \
-  --llm-backend local \
-  --llm-base-url http://localhost:8000/v1 \
-  --chunking-model Qwen/Qwen2.5-32B-Instruct \
-  --enrichment-model Qwen/Qwen2.5-32B-Instruct
-```
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--llm-backend` | `local` | `local` talks to any OpenAI-compatible server — **vLLM**, Ollama, llama.cpp, etc. — on `--llm-base-url`. `openrouter` reuses `OPENROUTER_API_KEY`, useful for testing without a GPU. |
-| `--llm-base-url` | `http://localhost:8000/v1` (or `LOCAL_LLM_BASE_URL`) | Where to reach the local server, e.g. after `vllm serve Qwen/Qwen2.5-32B-Instruct --port 8000`. Ignored for `--llm-backend openrouter`. |
-| `--chunking-model` | `Qwen/Qwen2.5-32B-Instruct` (local) / `openai/gpt-4o-mini` (openrouter) | Model name sent for `lumber_chunker`'s chunking calls. |
-| `--enrichment-model` | `google/qwen-2.5-coder-32b` | Model name sent for `llm_metadata`'s enrichment calls. Can differ from `--chunking-model` — both are just the `"model"` field sent to the same `--llm-base-url` server. |
-
-Connectivity is checked once, up front, before any files are processed — a bad endpoint/model fails fast with one clear message instead of every parsing worker independently discovering (and retrying against) a dead server.
-
-**Minimizing LLM calls across a grid**: neither chunking nor enrichment depends on the embedding model, so for a sweep over many embedding models, chunk and enrich each (chunking config, enrichment strategy) pair once, cache the result, and repeat only the cheap LLM-free embedding step per model — rather than rerunning the LLM passes for every model.
-
-### Marker preprocessing
-
-For table-heavy corpora (ETSI, TM Forum), the Marker API produces higher quality chunks by preserving table structure and headings:
-
-```bash
-open-telco-rag ingest etsi --model bge --use-marker --data data/etsi/
-```
-
-Requires `DATALAB_API_KEY` in `.env`. See [datalab.to](https://www.datalab.to) for pricing.
-
-### Search and Ask options
-
-```bash
-open-telco-rag ask "What does TS 28.312 define for intent?" \
-  --source-type 3gpp \
-  --model bge \
-  --search-method dense \
-  --top-k 8 \
-  --rerank \
-  --reranker-model ms-marco-minilm \
-  --rerank-top-k 5
-```
-
-`ask --label-sources` (off by default) puts a one-line label in front of each passage (collection, source type, file, release or version, heading), builds the "technical expert" label of the prompt from the sources retrieved unless `--source-type` is given, and lists collection and file per passage under `Sources:` (the file's path when two retrieved files share a name).
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--source-type` | `oran` | Source type |
-| `--model` | `minilm` | Embedding model key |
-| `--db-path` | `chroma_db` | ChromaDB storage path |
-| `--search-method` | `dense` | Multi-method search routing pass algorithm selection: `dense`, `bm25`, or `hybrid` |
-| `--top-k` | 5 / 8 | Chunks to retrieve |
-| `--rerank` | off | Enable reranking after retrieval |
-| `--reranker-model` | `ms-marco-minilm` | Reranker key from `configs/reranker_models.json` |
-| `--rerank-top-k` | 5 | Chunks to keep after reranking |
-| `--collection` | `source_model` | Override collection name. Repeat it to search several collections of one database with the same embedder: the query is embedded once, each collection is searched with `--search-method`, and the ranked lists are fused by rank (reciprocal rank fusion, k=60). Collections must agree on model, prefixes and distance space; a name cannot contain a comma |
-| `--embed-backend` | `local` | Backend for computing vector embeddings (`local` or `openrouter`) |
-| `--resolve-parents` | off | Expand retrieved child chunks into full parent contexts |
-| `--where-source-type` | off | Only chunks of this source type (`source_type` in the chunk metadata, e.g. `3gpp`, `camara`); repeat for several. For a collection that holds several sources. An unknown name lists the available ones. Dense search is filtered inside Chroma; BM25 hits are post-filtered from the best 10x candidates, so a rare source can come up short (a warning says so) |
-
-These defaults are for `search` and `ask`. `challenge export` has its own defaults (OTel-0.6B embedder, OTel-Reranker-0.6B, hybrid, top-k 10); see "TelcoRetrieve Challenge".
-
-`search` prints one hit per source file and heading. With the default `text_baseline` strategy the stored
-`heading` is empty, so all hits from one file collapse into a single result and fewer than `--top-k` results
-are shown; ingest with `--strategy hierarchical_markdown` to store section headings.
-
-### Reranker models
-
-| Key | Model | Notes |
-|-----|-------|-------|
-| `ms-marco-minilm` | cross-encoder/ms-marco-MiniLM-L-6-v2 | Fast, general-purpose |
-| `ms-marco-large` | cross-encoder/ms-marco-MiniLM-L-12-v2 | Larger, more accurate |
-| `bge-reranker` | BAAI/bge-reranker-large | Strong on technical domains |
-| `otel-reranker-0.6b` | OTel-Reranker-0.6B | Telecom-domain fine-tuned (recommended) |
-| `otel-reranker-4b` | OTel-Reranker-4B | Higher accuracy, requires GPU |
-
-The `otel-*` rerankers truncate the query and each document to 512 / 1024
-characters before scoring (unchanged default). A registry entry can override
-this with optional `query_max_chars` / `doc_max_chars` keys; truncation counts
-are written to the evaluation results (`reranker_stats`) when the reranker
-reports them.
-
-### Evaluate options
-
-```bash
-# Cloud (OpenRouter/Claude)
-open-telco-rag evaluate 3gpp \
-  --model bge \
-  --db-path chroma_db \
-  --collection 3gpp_r19_marker_bge \
-  --questions-file configs/eval_questions/3gpp_r19_qna.json \
-  --rag-generator openrouter \
-  --rag-generator-model meta-llama/llama-3.3-70b-instruct \
-  --generator openrouter \
-  --generator-model anthropic/claude-sonnet-4.5 \
-  --top-k 5 \
-  --include-baseline \
-  --output results/
-
-# Local — self-hosted GPU node serving both RAG generation and the
-# eval-metrics judge on the same OpenAI-compatible endpoint
-open-telco-rag evaluate 3gpp \
-  --model bge --db-path chroma_db \
-  --generator local --generator-model Qwen/Qwen3-32B \
-  --llm-base-url http://localhost:8001/v1 \
-  --rag-generator local --rag-generator-model openai/gpt-oss-120b \
-  --rag-llm-base-url http://localhost:8000/v1 \
-  --top-k 5 --output results/
-```
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--model` | `minilm` | Embedding model key. |
-| `--db-path` | `chroma_db` | ChromaDB storage path. |
-| `--collection` | `corpus_model` | Override collection name (e.g., `3gpp_r19_marker_bge`). |
-| `--questions-file` | `configs/eval_questions/{corpus}.json` | Path to a custom QnA JSON file — supports mixed `mc`/`tf`/`open`/`fill_blank` question sets in one run, see "Per-format results" below. |
-| `--top-k` | `5` | Chunks to retrieve per question. |
-| `--threshold` | `0.5` | Similarity threshold for the `coverage_ratio` metric (fraction of retrieved chunks meeting this similarity floor). |
-| `--output` | `results` | Directory to save result JSON files. |
-| `--delay` | `1.0` | Seconds between questions for rate-limiting API calls. |
-| `--no-save` | `off` | Print summary only, do not save JSON results. |
-| `--generator` | `openrouter` | LLM provider for evaluation metrics (`claude`, `openrouter`, or `local`). |
-| `--generator-model` | `None` | Model for evaluation metrics (Claude default: `claude-sonnet-4-20250514`, OpenRouter default: `meta-llama/llama-3.3-70b-instruct`, local: required — whatever your server is serving). |
-| `--llm-base-url` | `None` | Base URL for `--generator local` (default: env var `LOCAL_LLM_BASE_URL`, or `http://localhost:8000/v1`). Ignored for claude/openrouter. |
-| `--llm-api-key` | `None` | API key for `--generator local` (default: env var `LOCAL_LLM_API_KEY`). Omitted entirely if unset — unauthenticated local servers still work. Ignored for claude/openrouter. |
-| `--rag-generator` | `None` | LLM provider for RAG answer generation (defaults to `--generator`). |
-| `--rag-generator-model` | `None` | Model for RAG answer generation (defaults to `--generator-model`). |
-| `--rag-llm-base-url` | `None` | Base URL for `--rag-generator local`. Defaults to `--llm-base-url` — set this explicitly to route RAG generation and metrics judging to two different endpoints/models. |
-| `--rag-llm-api-key` | `None` | API key for `--rag-generator local`. Defaults to `--llm-api-key`. |
-| `--debug` | `off` | Log raw LLM responses for every metric call. |
-| `--leaderboard` | `results/leaderboard.json` | Path to leaderboard JSON file. |
-| `--no-leaderboard` | `off` | Do not update the leaderboard file. |
-| `--include-baseline` | `off` | Run second pass with no retrieval and store baseline metrics alongside RAG metrics. |
-| `--rerank` | `off` | Enable reranking during evaluation retrieval. |
-| `--rerank-top-k` | `5` | Chunks to keep after reranking. |
-| `--reranker-model` | `ms-marco-minilm` | Reranker model key from `configs/reranker_models.json` (telecom: `otel-reranker-0.6b`). |
-| `--embed-backend` | `local` | Backend for computing vector embeddings (`local` or `openrouter`). |
-| `--inject-metadata` | `off` | Simulate domain expert queries by prepending canonical source metadata to the question. |
-| `--run-name` | `None` | Custom label to identify this evaluation run (e.g., `exp_prompt_v2`). |
-| `--include-keywords` | `off` | Append question keywords to the search query. |
-| `--resolve-parents` | `off` | Expand retrieved child chunks into full parent contexts. |
-| `--search-method` | `dense` | Retrieval method: `dense`, `bm25` or `hybrid` (same choices as `search`/`ask`). |
-| `--context-token-budget` | off | Optional: fill the generator's context up to this many tokens instead of a fixed chunk count (see below). |
-| `--candidate-pool` | `30` with a budget | With `--context-token-budget`: candidates to retrieve and rerank before filling the budget. |
-| `--budget-overflow` | `stop` with a budget | With `--context-token-budget`: `stop`, `skip` or `truncate` the first chunk that does not fit. |
-| `--retrieval-only` | `off` | Optional: run retrieval and retrieval metrics only, with no generation, no LLM calls and no API keys needed. Does not update the leaderboard. |
-| `--log-level` | unset | Global option (before the command): configure Python logging at `DEBUG`/`INFO`/`WARNING`/`ERROR` with timestamped lines on stderr. Unset, logging behaves as before. |
-| `--record-retrieval-scores` | `off` | Optional: store the store distance of every retrieved chunk per question (`candidate_distances` / `used_distances`, aligned with the chunk ids). |
-| `--record-judge-responses` | `off` | Optional: store every judge prompt and raw response per question in the results file. |
-
-#### How scoring works, per question type
-
-Every question goes through the same retrieve → (optional rerank) →
-generate pipeline; scoring then branches by `answer_type`:
-
-- **`mc` / `tf`** — deterministic exact-match against `reference_answer`,
-  stored in `QuestionResult.accuracy` (1.0/0.0). A correctly-labeled
-  *false* `tf` statement scores 1.0, not 0.0 — this checks whether the
-  label matches, not whether the statement reads true at face value.
-- **`open` / `fill_blank`** — four LLM-judged/embedding-based metrics in
-  `QuestionResult.faithfulness` / `answer_relevancy` / `context_recall`
-  (needs `reference_answer`) / `answer_correctness` (needs
-  `reference_answer`): claim-decomposition-and-verification against the
-  retrieved chunks, reverse-question embedding similarity, reference-
-  statement attribution, and fact-F1 + semantic similarity, respectively.
-
-`accuracy` and the four OE metrics are mutually exclusive per question —
-each is `-1.0` ("not applicable") for the format it doesn't apply to, so a
-run mixing `mc`+`tf`+`open` in one questions file doesn't blend two
-different kinds of score into one uninterpretable mean.
-
-#### Per-format results
-
-`CorpusResult.by_format` (and the "Per-format breakdown" section printed
-after every run) reports metrics separately per `answer_type`, in addition
-to the overall aggregate — needed for exactly the mixed `mc`+`tf`+`open`
-questions-file case: run one `--questions-file` containing all three
-formats, and get an accuracy figure for `mc`, a separate accuracy figure
-for `tf`, and separate faithfulness/relevancy/context-recall/correctness
-figures for `open`, rather than one flat number across everything. Also
-saved in the leaderboard row (`by_format` column) and the JSON output file.
-
-#### Using your own LLM endpoint
-
-Any OpenAI-compatible server (vLLM, Ollama, a hosted gateway, ...) can serve
-the LLM stages. Point the CLI at it with the existing options; nothing is
-hardcoded to a particular host:
-
-```bash
-export LOCAL_LLM_BASE_URL=http://my-host:8000/v1     # or pass --llm-base-url
-export LOCAL_LLM_API_KEY=...                         # optional; omit for unauthenticated servers
-
-# answer generation for `ask`
-open-telco-rag ask "What does the AMF do?" --source-type 3gpp \
-  --generator local --generator-model my-model
-
-# evaluation: one endpoint for the judge, another (or the same) for answers
-open-telco-rag evaluate 3gpp --model bge \
-  --generator local --generator-model my-judge-model --llm-base-url http://judge-host:8001/v1 \
-  --rag-generator local --rag-generator-model my-model --rag-llm-base-url http://rag-host:8000/v1
-
-# LLM-based chunking / enrichment during ingest
-open-telco-rag ingest 3gpp --strategy lumber_chunker \
-  --llm-backend local --llm-base-url http://my-host:8000/v1 --chunking-model my-model
-```
-
-`--llm-base-url` / `--rag-llm-base-url` fall back to `LOCAL_LLM_BASE_URL`, then
-to `http://localhost:8000/v1`. Use `--generator claude` or `openrouter` for the
-hosted providers instead (their keys come from `ANTHROPIC_API_KEY` /
-`OPENROUTER_API_KEY`).
-
-#### Optional: budgeted context
-
-By default the generator receives the top `--top-k` chunks (or
-`--rerank-top-k` after reranking). With `--context-token-budget N` the
-context is instead filled in rank order up to `N` tokens (`cl100k_base`), so
-runs with different chunk sizes can be compared at the same context size:
-`--candidate-pool` candidates are retrieved (and reranked) first, then
-`--budget-overflow` decides what happens at the first chunk that does not fit:
-`stop` (strict rank order), `skip` (keep looking for smaller chunks) or
-`truncate` (cut that chunk to fill the budget exactly). `--top-k` and
-`--rerank-top-k` are ignored in this mode. `--candidate-pool` and
-`--budget-overflow` require a budget; giving either without one is an error.
-Budgeted runs add `context_tokens`, `n_chunks_used`, `budget`, `fill_ratio` and
-`budget_stats` (what the fill did: candidates, kept, skipped, truncated, stopped by
-policy, pool exhausted, empty) per question, and `mean_context_tokens` / `mean_fill_ratio` to the totals.
-
-#### Optional: retrieval-only runs
-
-`--retrieval-only` skips answer generation and judging, so it is cheap and
-needs no LLM key. Retrieval (reranker and budget respected) and every
-retrieval metric are computed; accuracy and the four LLM-judged metrics stay
-at their "not applicable" value. With `--include-baseline` the baseline pass
-still runs normally (and then needs LLM access).
-
-#### Reproducibility record
-
-Every saved result contains a `run_record` (new in this version; older files
-simply lack it) describing what was run:
-
-- `code`: package version, git commit and whether the working tree was modified (both
-  `"unknown"` when there is no `.git` directory, e.g. an installed wheel);
-  `environment`: Python, platform and the versions of the key dependencies
-- `settings`: the resolved evaluation settings, including every optional feature
-  (search method, reranking, budget, retrieval-only, keyword/metadata injection,
-  generation temperature, top-p, prompt mode, concurrency, ...)
-- `embedder` (model key and name, dimensions, prefixes, sequence limit),
-  `reranker` (model and truncation limits), `tokenizer` (`cl100k_base`), and under
-  `extra.judge` the judge provider and model
-- `index`: collection name, number of chunks, distance space and the settings the
-  collection was ingested with (chunking and enrichment, read from a small
-  `.ingest_settings_<collection>.json` that `ingest` writes next to the database;
-  `configurations_seen` is above 1 if the collection was ingested under more
-  than one configuration); `delete` removes it together with the collection
-- `dataset`: question file name, number of questions and a SHA-256 of the
-  questions as evaluated
-- `started_at` / `finished_at` (UTC), and `randomness`: the pipeline has no seeded
-  randomness (only retry jitter), so there is no seed to record; generation is
-  deterministic only at temperature 0 and only as far as the provider is
-
-The record never contains API keys, base URLs or local file paths. Results are
-otherwise deterministic for the same inputs: questions keep their order under
-`--max-concurrency`, and retrieval and metrics use no random choices.
-
-#### Metrics reference
-
-Retrieval metrics (computed for every non-baseline question):
-
-| Metric | Meaning |
-|--------|---------|
-| `mean_similarity`, `min_similarity`, `max_similarity` | Similarity of the retrieved chunks to the query (`exp(-distance)`). |
-| `coverage_ratio` | Fraction of retrieved chunks with similarity at or above `--threshold`. |
-| `distinct_sources_retrieved` | Number of distinct source documents among the retrieved chunks. |
-| `canonical_hit` | 1 if the question's expected source (and release, if given) appears in a retrieved chunk's metadata or id, 0 if not, -1 when the question has no (or only a too-generic) canonical source. |
-| `exact_chunk_hit` | 1 if the exact chunk the question was generated from was retrieved (matched by chunk id, or by text containment across configurations), 0 if not, -1 without chunk provenance. |
-| `candidate_chunk_rank`, `used_chunk_rank` | 1-based rank of that chunk before / after reranking; 0 = not found, -1 = not applicable. The corpus-level `mean_reciprocal_rank` is the mean of `1/used_chunk_rank` (0 when not found) over questions with provenance. |
-| `span_hit_at_k`, `span_hit_in_context` | Chunker-agnostic companions to `exact_chunk_hit`: 1 if any retrieved chunk (respectively any chunk placed in the budgeted context) overlaps the question's evidence span, 0 if none does. See the three states below. |
-
-**Span metrics have three states.** They are computed only for questions that
-carry an evidence span (`evidence_doc_id`, `evidence_char_start`,
-`evidence_char_end` in the question file):
-
-- absent (`None`, left out of the result files and totals): the question has no
-  evidence span, so the metric does not apply. Runs without any spans report
-  no span metrics at all.
-- `-1`: the question has a span, but no retrieved chunk carries character
-  offsets (the collection was ingested without `--target-tokens` /
-  `--max-tokens`), so it cannot be checked.
-- `0` or `1`: a real result.
-
-The `span_hit_*_rate` totals are the mean over questions with a real value.
-
-With `--resolve-parents` on a token-sized `parent_child` collection, a retrieved
-child is replaced by its parent text and the span metrics use the parent's
-span (collections ingested before this was recorded fall back to the child's).
-
-**Evidence-span fields in question files.** A question file is
-`{"questions": [...]}`. To enable the span metrics, each question needs three
-optional fields, next to the usual `question`, `corpus`, `answer_type`, ...:
-
-| Field | Meaning |
-|-------|---------|
-| `evidence_doc_id` | The source document, as the relative file path used at ingest (the part of a chunk id before the first `::`). |
-| `evidence_char_start` | Start offset (inclusive) of the evidence in the cleaned text of that document. |
-| `evidence_char_end` | End offset (exclusive). |
-
-"Cleaned text" is what ingestion sees after the source's `load()` and `clean()`.
-`scripts/add_evidence_spans.py` computes the three fields for a question file
-whose questions carry `chunk_id` and `source_text` (see the script's `--help`);
-questions it cannot match are kept unchanged, without spans. Files without these
-fields work as before and simply produce no span metrics.
-
-Generation metrics: `accuracy` (mc/tf exact match; abstentions count as 0 but
-are tracked separately), `faithfulness`, `answer_relevancy`, `context_recall`
-and `answer_correctness` (open questions, LLM-judged; see "How scoring works"
-above).
-
-**Denominators.** Every mean or rate skips the `-1` "not applicable" value, so each
-one is taken over the questions it applies to (and that did not fail):
-
-| Metric | Computed over |
-|--------|---------------|
-| `mean_accuracy` | mc/tf questions that produced an outcome; `accuracy` per question is 1 for correct and 0 for incorrect or abstained |
-| `mean_accuracy_attempted` | correct / (correct + incorrect), abstentions excluded |
-| `abstention_rate`, `wrong_rate` | abstained (resp. incorrect) / all mc/tf outcomes |
-| `weighted_score_pct` | (mc/tf correct + 5 x open correct) / (mc/tf total + 5 x open total) x 100; open questions without a reference answer are left out |
-| `mean_faithfulness`, `mean_answer_relevancy` | open questions that were scored (non-baseline for faithfulness) |
-| `mean_context_recall`, `mean_answer_correctness` | open questions that have a reference answer |
-| `canonical_hit_rate`, `exact_chunk_hit_rate`, span rates | questions where the check applies (value 0 or 1, not -1) |
-| `mean_similarity`, `mean_coverage_ratio`, `mean_distinct_sources_retrieved` | questions that ran retrieval without failing; N/A (-1) if none did |
-| latency, token and cost totals | every question, including failed ones |
-
-**Failed questions.** A question that fails (network error, missing key, ...) is
-recorded with `error` and `error_type` and the run continues. When at least one
-question failed, the results add `n_errors`, `error_rate` and `errors_by_type`
-(also per answer type), and the summary prints a "FAILED questions" line; runs
-with no failures do not have these keys. Failed questions are excluded from the
-retrieval means (`mean_similarity`, coverage, distinct sources) and from every
-rate, so a failure never counts as a score of zero; `n_questions` still includes
-them. If **every** question of a corpus fails, `evaluate` still saves the results
-but prints an error, skips the leaderboard row and exits with status **3**
-(status 1 stays "the command itself failed"); partial failures exit 0.
-
-Optional per-question fields (`difficulty`, the span and budget fields,
-`judge_calls`) appear in result files only when they were set. Run-level
-`reranker_stats` and `embedder_stats` (truncation counts, OpenRouter token
-usage and cost) appear only when the components report them.
-
----
-
-### Searching one or several collections
-
-A database folder (`--db-path`) can hold many collections. A collection holds chunks made with **one embedder and
-one distance space**; it can hold the chunks of one source or of several.
-
-| Setup | Search one asset | Search all assets |
-|---|---|---|
-| One collection, several sources (e.g. `3gpp` and `camara` ingested into `--collection docs_bge`) | not possible | `search ... --collection docs_bge` |
-| One collection per source, same embedder and distance space | `--collection camara_bge` | `--collection 3gpp_bge --collection camara_bge` |
-| One collection per source, **different embedders** | `--collection X --model <its model>` | not possible: one query vector cannot be compared with vectors of another model |
-| Same embedder, **different distance space** (`l2` vs `cosine`, set at ingest with `--distance-metric`) | works | refused, naming the collection; re-ingest one with the same `--distance-metric` |
-| Same model name, different prefixes | works | refused |
-| A collection that does not exist | | an error naming it; nothing is created |
-
-How several collections are combined: each collection is searched with `--search-method` (`dense`, `bm25` or
-`hybrid`; hybrid still fuses inside the collection). The query is embedded once. The ranked lists are then merged
-by reciprocal rank fusion (k=60), keyed by collection and chunk id, so equal ids in two collections never merge.
-Only ranks are used. Distances and BM25 scores are not mixed because they are not comparable: the same chunk
-scored 1.31 in an `l2` collection and 0.66 in a `cosine` one, and a BM25 score depends on what else is in the
-collection. `--top-k`, `--rerank`, `--rerank-top-k` and `--resolve-parents` apply after the merge. Each result
-shows its collection, and the distance label shows that collection's real space (`L2`, `COSINE`, `IP`). A
-collection without an `.ingest_settings_*.json` file is checked by its stored vector size only, with a warning;
-an empty collection contributes nothing and prints a note.
-
-```bash
-open-telco-rag search "near-RT RIC control loop" --model bge --db-path chroma_db \
-  --collection oran_bge --collection 3gpp_bge --top-k 8
-```
-
-### Delete collection options
-
-```bash
-open-telco-rag delete my_collection --db-path chroma_db
-```
-
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `collection` | required | Name of the ChromaDB collection to permanently delete |
-| `--db-path` | `chroma_db` | ChromaDB storage path |
-
-### Which asset did a passage come from? (`ask --label-sources`)
-
-By default `ask` sends the chunk texts only. With `--label-sources` every passage starts with a label such as
-`[collection: camara_bge | source_type: camara | file: QualityOnDemand/README.md | heading: Usage]`, the prompt's
-"technical expert" label is built from the source types retrieved (unless you give `--source-type`), and
-`Sources:` lists `collection: file` per passage in context order, with the file's path when two retrieved files
-share a name.
-
-```bash
-open-telco-rag ask "Which API creates a boost session?" --model bge --db-path chroma_db \
-  --collection camara_bge --label-sources
-```
-
-### Adding another asset such as CAMARA
-
-CAMARA is already a source (`camara`): markdown (`.md`) and OpenAPI (`.yaml`, `.yml`) files, one folder per API
-repository. Ingest it like any other source.
-
-```bash
-# its own collection (recommended): same embedder as the assets you want to search it with
-open-telco-rag ingest camara --data data/camara --model bge --db-path chroma_db
-
-# or into a collection that already holds another source
-open-telco-rag ingest 3gpp   --data data/3gpp   --model bge --db-path chroma_db --collection docs_bge
-open-telco-rag ingest camara --data data/camara --model bge --db-path chroma_db --collection docs_bge
-```
-
-The first form creates `camara_bge`. Rules that keep it working:
-
-1. **Same embedder.** Assets searched together need the same `--model` and the same `--distance-metric`.
-2. **Unique relative paths.** A chunk id is `<path relative to --data>::<model>::<n>`. Two sources that share a
-   relative path (for example a `README.md` at the top of both data folders) get the same ids in a shared
-   collection, so one file is skipped or replaces the other. Keep them in distinct folders, or use one
-   collection per source.
-3. **Use a relative `--data` path** (`data/camara`, not `C:\data\camara`). The CAMARA source takes the repo name
-   from the first capitalised part of the path it is given; with an absolute path on Windows that part is the
-   drive (`C:\`), so every chunk gets `repo_name: C:\`.
-4. **Avoid `--no-resume` when ingesting a second source into a shared collection.** It re-ingests every file
-   of that run and replaces the BM25 rows of their chunks; a separate collection per source needs none of this.
-5. Release notes and changelogs (`CHANGELOG*.md`, `release-plan.yaml`) are skipped on purpose by the CAMARA
-   source.
-
-To remove one asset without touching the others (own collection per asset): `open-telco-rag delete camara_bge`.
-
-### Info options
-
-```bash
-open-telco-rag info --db-path chroma_db --collection oran_bge
-```
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--db-path` | `chroma_db` | ChromaDB storage path |
-| `--collection` | `None` | Collection name to inspect |
-
-
----
-
-## Python API
-
-```python
-from open_telco_rag.sources.oran import ORANSource
-from open_telco_rag.embedders.openrouter_embedder import OpenRouterEmbedder
-from open_telco_rag.stores.chroma import ChromaStore
-from open_telco_rag.generators.openrouter import OpenRouterGenerator
-from open_telco_rag.generators.local_llm import LocalLLMClient
-from open_telco_rag.core.pipeline import ingest, search, generate
-
-# Ingest (Using OpenRouter for High-Throughput Bulk Processing)
-source   = ORANSource()
-embedder = OpenRouterEmbedder(model_key="bge", batch_size=200) # Throttled safely for OpenAI limits
-store    = ChromaStore(path="chroma_db", collection_name="oran_bge", metadata={"hnsw:space": "cosine"})
-
-# llm_metadata needs an LLM client explicitly passed as enrichment_llm_client
-# — LocalLLMClient talks to any OpenAI-compatible server (vLLM, Ollama, etc.);
-# OpenRouterLLMClient (same module) is the cloud alternative.
-llm_client = LocalLLMClient(base_url="http://localhost:8000/v1")
-
-ingest(
-    source=source, 
-    store=store, 
-    embedder=embedder, 
-    data_dir="data/oran/",
-    strategy="sliding_window_tokens",
-    chunk_tokens=512,
-    overlap_tokens=50,
-    enrichment="llm_metadata",
-    enrichment_model="Qwen/Qwen2.5-32B-Instruct",
-    enrichment_llm_client=llm_client,
-    batch_size=5000 # Feed 5,000 chunks concurrently to the embedder!
-)
-
-# Search
-results = search("E2 interface service models", store=store, embedder=embedder, top_k=5, search_method="dense")
-
-# Generate
-generator = OpenRouterGenerator(model="meta-llama/llama-3.3-70b-instruct")
-answer    = generate("What does WG3 define for the E2 interface?", results, generator=generator)
-print(answer["answer"])
-```
-
----
-
-## Architecture
-
-```
-Documents (PDF / DOCX / YAML / Markdown)
-        │
-        ▼
-   Source class          load() → clean() → metadata()
-   (per SDO)             optional: Marker API for PDF
-        │
-        ▼
-   Dynamic Chunker       Routes text to selected strategies (e.g. baseline, tokens, 
-                         parent-child, lumberchunker) via configs
-        │
-        ▼
-   Enrichment            Pre-embedding passes: Structural Tagging, Acronym Expansion 
-                         or dynamic LLM Domain Expansion (metadata tracking)
-        │
-        ▼
-   Embedder              SentenceTransformerEmbedder (local GPU/CPU)
-                         OR OpenRouterEmbedder (Cloud API ThreadPool)
-        |                 general-purpose or OTel telecom-domain models
-        |
-        ▼
-   ChromaDB              Persistent vector store via configurable space metrics 
-                         (L2 Euclidean geometric, Cosine angular, Inner Product)
-        │
-        ▼
-   Search                Multi-method retrieval pipeline: Dense vector, Sparse keyword (BM25),
-                         or Reciprocal Rank Fusion (Hybrid)
-                         optional: cross-encoder or OTel reranking
-        |
-        ▼
-   Generator             any LLM via OpenRouter or direct API
-        │
-        ▼
-   Answer + sources
-```
-
----
-
-## Project Structure
-
-```
-open-telco-rag/
-├── open_telco_rag/
-│   ├── types.py
-│   ├── core/
-│   │   ├── pipeline.py          # Master orchestrator tracking stats and logging
-│   │   ├── chunking.py          # Implements multi-strategy splitters (Token, etc.)
-│   │   ├── enrichment.py        # Implements metadata tagging, glossary, and LLM-aided expansion
-│   │   ├── retrieval.py         # Implements Multi-Method retrieval passes (Dense, BM25, and RRF)
-│   │   ├── cleaning.py
-│   │   └── marker_loader.py     # Datalab Marker API mixin
-│   ├── sources/                 # one class per SDO
-│   ├── embedders/
-│   │   ├── sentense_transformers.py
-│   │   ├── openrouter_embedder.py
-│   │   ├── calls.py             # embed_query / embed_plain helpers
-│   │   └── reranker.py          # CrossEncoderReranker, OTelReranker
-│   ├── generators/
-│   │   ├── claude.py
-│   │   └── openrouter.py
-│   ├── evaluation/
-│   │   ├── evaluate.py
-│   │   ├── questions.py
-│   │   ├── results.py
-│   │   └── metrics/
-│   │       ├── generation.py
-│   │       ├── retrieval.py
-│   │       └── ground_truth.py
-│   ├── challenge/               # challenge command group: export, check, score (see its README)
-│   └── stores/
-│       └── chroma.py
-├── cli/
-│   └── main.py
-├── scripts/                     # helper tools (embedder smoke test, cost estimate, throughput timing)
-├── docs/graphics/               # pipeline diagrams and tables
-├── tests/                       # pytest suite (incl. golden default-behavior tests)
-├── notebooks/                   # quickstart cookbook
-├── configs/
-│   ├── embedding_models.json    # embedder registry
-│   ├── reranker_models.json     # reranker registry
-│   ├── profiles/                # named settings presets (challenge.json)
-|   ├── chunking_strategies.json     # Central registry for character/token splitters
-|   ├── enrichment_strategies.json   # Central registry for tagging, glossary, & LLM expansion
-│   └── eval_questions/          # evaluation question sets per corpus
-└── pyproject.toml
-```
-
----
-
-## Helper scripts
-
-Small tools in `scripts/` (run from the repository root, after `pip install -e .`):
-
-| Script | Purpose |
-|--------|---------|
-| `add_evidence_spans.py` | Optional: add evidence spans to a question file so the span metrics can be computed. |
-| `check_chunk_bound.py` | Read-only: per tokenizer, chunks over its limit, token-count ratio against cl100k, the largest chunks, text retained, and a calibration of the cl100k ceiling, for a collection or a staged directory. |
-| `embedder_smoke_test.py` | Embed a few sample texts with every locally hosted embedder and report dimension, throughput and truncation. |
-| `estimate_embedding_cost.py` | Estimate what re-embedding a collection would cost through OpenRouter (prices are a dated snapshot; `--refresh-pricing` fetches live ones). |
-| `stage_3gpp.py` | Download the GSMA/3GPP Rel-19 Markdown files (only `raw.md` and the conversion log) from a pinned revision and stage them under names the 3GPP loader reads, with a manifest. See "Preparing the GSMA/3GPP Rel-19 data". |
-| `time_embedding_throughput.py` | Measure local embedding throughput on real chunk texts from an existing collection. |
-| `time_openrouter_embedding.py` | Same for OpenRouter. Makes real, paid API calls, so keep `--sample-size` small. |
-
-Each supports `--help`.
-
-## Testing
-
-```bash
-pip install -e ".[dev,local-embed,pdf,docx,cloud-embed]"
-pytest
-```
-
-The test suite needs these extras. They differ from the install extras (`local-embed,pdf,docx`, see "Installation") by two:
-`dev` (pytest, pytest-cov and ruff) and `cloud-embed` (httpx, which some tests import; the base dependency `anthropic`
-already brings httpx in, so `cloud-embed` mainly makes it explicit; I have not run the suite without it). As with a normal
-install, put the PyTorch install of "Installation" first. The suite needs no GPU and no API key. Some tests load the small
-`all-MiniLM-L6-v2` model, which is downloaded on first use, so the first run needs network access (later runs use the
-cache); I have not run it fully offline.
-
-**Three tests are skipped by default**, so a normal run ends with "3 skipped":
-- one in `tests/test_chunk_bound.py` and one in `tests/test_check_chunk_bound.py` fetch a real `tokenizer.json` from Hugging
-  Face. To run them, set `RUN_REAL_TOKENIZER_TESTS=1` and have network access (`RUN_REAL_TOKENIZER_TESTS=1 pytest`; in
-  PowerShell `$env:RUN_REAL_TOKENIZER_TESTS = 1` first);
-- one in `tests/test_multi_collection_ondisk.py` repeats write-then-search on disk for about a minute. Set
-  `RUN_ONDISK_STRESS=1` to run it; it needs no network.
-
-`tests/test_default_behavior_golden.py` and `tests/test_ingest_metadata_golden.py`
-pin the output of the default settings (chunking, retrieval, evaluation
-results, stored chunk metadata) against files in `tests/golden/`. They should
-only ever change when a default is changed on purpose; regenerate with
-`python tests/test_default_behavior_golden.py --write` (and the ingest
-equivalent) in that case.
-
----
-
-## Extending the Pipeline
-
-### Adding a new source
-
-```python
-from open_telco_rag.types import Source
-from pathlib import Path
-
-class MySource:
-    def supported_extensions(self) -> list[str]:
-        return [".pdf"]
-
-    def load(self, path: Path) -> str: ...
-    def clean(self, text: str) -> str: ...
-
-    def metadata(self, path: Path) -> dict:
-        return {"source": path.name, "source_type": "my_source"}
-```
-
-### Adding a new embedding model
-
-Add an entry to `configs/embedding_models.json`:
-
-```json
-"my-model": {
-    "model_name": "org/model-name",
-    "dimensions": 768,
-    "description": "My custom embedding model"
-}
-```
-
-Optional keys: `query_prefix` / `document_prefix` (plain strings prepended to
-queries / documents), `query_prompt_name` / `document_prompt_name`
-(sentence-transformers named prompts) and `"backend": "openrouter"` (marks an
-entry served through OpenRouter). Then use `--model my-model` in any CLI command.
-
-### Adding a new reranker
-
-Add an entry to `configs/reranker_models.json`:
-
-```json
-"my-reranker": {
-    "model_name": "org/reranker-name",
-    "description": "My custom reranker",
-    "backend": "cross-encoder"
-}
-```
-
----
+## Documentation
+
+- [Reference](docs/reference/): [CLI](docs/reference/cli.md), [chunking](docs/reference/chunking.md), [embedding and reranker models](docs/reference/embedding.md), [evaluation](docs/reference/evaluation.md), [Python API](docs/reference/python-api.md)
+- [Architecture](docs/architecture.md) and [project structure](docs/architecture.md#project-structure)
+- [Contributing](docs/contributing.md), including helper scripts, tests and how to add a source
+- [TelcoRetrieve Challenge](docs/challenge/README.md)
+- [Glossary and index](docs/README.md)
 
 ## Related
 
-- [telco-qna-generation](https://github.com/Znbne/telco-qna-generation) — synthetic QnA generation toolkit for building evaluation datasets
-- [GSMA/telco-retrieve-chunks](https://huggingface.co/datasets/GSMA/telco-retrieve-chunks) — 4.6M chunks, 1.09B tokens across 7 SDOs
-- [telcolens-cookbook](https://github.com/Znbne/telcolens-cookbook) — worked examples per corpus
-
----
-
-## Contributing
-
-Contributions welcome. Please open an issue before submitting a pull request for significant changes.
-
----
-
-## Acknowledgements
-
-This work is part of the GSMA Open Telco AI Initiative. For more information visit [open-telco-ai](https://www.open-telco.ai/).
-
----
+- [telco-qna-generation](https://github.com/Znbne/telco-qna-generation): synthetic QnA generation toolkit for building evaluation datasets
+- [TelcoRetrieve Cookbook](https://github.com/Znbne/telcoretrieve-cookbook): worked examples per corpus
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE) for details.
+Apache 2.0. See [LICENSE](LICENSE).
