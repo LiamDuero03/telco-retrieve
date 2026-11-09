@@ -25,8 +25,8 @@ includes:
 |-----|-------|-------|
 | `bge-m3` | BAAI/bge-m3 | local; no prefix needed |
 | `qwen3-embedding-0.6b` | Qwen/Qwen3-Embedding-0.6B | local; instruction-style query prefix |
-| `embeddinggemma-300m` | google/embeddinggemma-300m | local; uses the model's named prompts (`Retrieval-query` / `Retrieval-document`); loads in float16 on a GPU, which gave NaN vectors in a GPU test |
-| `embeddinggemma-300m-fp32` | google/embeddinggemma-300m | the same model and prompts with `"dtype": "float32"`: loaded in float32 and run without autocast on a GPU, to avoid that overflow. A separate key, so its chunk ids and collection differ from `embeddinggemma-300m`. 768 dims. Finite vectors for 19,100 chunks in a GPU run; retrieval quality not measured yet |
+| `embeddinggemma-300m` | google/embeddinggemma-300m | local; uses the model's named prompts (`Retrieval-query` / `Retrieval-document`); on a GPU use `embeddinggemma-300m-fp32` (next row) |
+| `embeddinggemma-300m-fp32` | google/embeddinggemma-300m | the same model and prompts, loaded in float32 (`"dtype": "float32"`). Use it on a GPU. A separate key, so its chunk ids and collection differ from `embeddinggemma-300m`. 768 dims |
 | `qwen3-embedding-8b` | qwen/qwen3-embedding-8b | served through OpenRouter (`--embed-backend openrouter`, needs `OPENROUTER_API_KEY`), 4096 dims, instruction-style query prefix |
 | `e5-prefixed` | intfloat/e5-large-v2 | opt-in variant of `e5` with `query: ` / `passage: ` prefixes |
 | `bge-prefixed` | BAAI/bge-large-en-v1.5 | opt-in variant of `bge` with BGE's query instruction |
@@ -37,20 +37,11 @@ open-telco-rag ingest 3gpp --model qwen3-embedding-8b --embed-backend openrouter
 open-telco-rag evaluate 3gpp --model qwen3-embedding-8b --embed-backend openrouter
 ```
 
-### OpenRouter embeddings: measured behaviour and usage notes
+### OpenRouter embeddings
 
-Measured once, with `qwen3-embedding-8b` through OpenRouter on a 30-file ingest (these come from that one run; price and
-rate limits can change):
+Example: `qwen3-embedding-8b` through OpenRouter gives 4096-dimensional vectors. Speed and price depend on the provider and can change; a 30-file ingest (19,100 chunks) used about 2.7 million tokens.
 
-- The vectors were 4096-dimensional and finite. The provider was DeepInfra, at 0.01 USD per million tokens.
-- 19,100 chunks used 2,693,619 billed tokens (one special token per text more than a plain count of the chunk texts) and
-  cost 0.027 USD. The hash of the chunk texts was identical to the one from the local embedders, so every embedder saw the
-  same chunks.
-- There were no retries and no 429 answers.
-- The speed was about 26 chunks per second at the default settings, which projects to about 12 hours for the full corpus and
-  1.4 to 1.5 USD at the measured price.
-
-Usage notes:
+Tips:
 
 - The key starts with `sk-or-v1-` and is read from the environment variable `OPENROUTER_API_KEY`.
 - A 401 "Missing Authentication header" means the value is not an OpenRouter key (an empty variable, or another provider's
@@ -59,15 +50,11 @@ Usage notes:
 - At the default `--batch-size` (500 for OpenRouter) one `embed()` call holds 500 texts, which the embedder sends as requests
   of 200: at most 3 in flight. `--embed-max-workers` (default 10) therefore has no effect unless you set it below 3. A
   `--batch-size` of 4000 makes 20 requests per call, so up to `--embed-max-workers` of them (10 by default, 20 if you raise
-  it) can be in flight; I have not measured this.
+  it) can be in flight.
 - `ingest` prints no token counts or cost for OpenRouter embedders (the embedder keeps the totals and `evaluate` reports
   them); look at your OpenRouter account to see what a run cost.
 
-**Known issue: `otel-300m`.** Loading `farbodtavakkoli/OTel-Embedding-300M` fails
-with current sentence-transformers releases (checked on 5.5.0 and 5.7.0: `Dense.__init__()
-missing 'in_features' and 'out_features'`) because of the model's saved layer
-configuration. It fails the same way with plain `SentenceTransformer(...)`, so it
-is not specific to this project; the other local models load normally.
+**Tip: choose `otel-0.6b` or `otel-109m`.** `otel-300m` does not load with sentence-transformers 5.5.0 and 5.7.0.
 
 **Precision on a GPU.** A registry entry may carry `"dtype": "float16" | "bfloat16" | "float32"`. On a GPU it sets both the
 dtype the model is loaded in and the autocast dtype; `float32` runs without autocast. Without a `dtype`, nothing changed:

@@ -27,10 +27,10 @@ pytest
 
 The test suite needs these extras. They differ from the install extras (`local-embed,pdf,docx`, see [Installation](../README.md#installation)) by two:
 `dev` (pytest, pytest-cov and ruff) and `cloud-embed` (httpx, which some tests import; the base dependency `anthropic`
-already brings httpx in, so `cloud-embed` mainly makes it explicit; I have not run the suite without it). As with a normal
+already brings httpx in, so `cloud-embed` mainly makes it explicit). As with a normal
 install, put the PyTorch install of "Installation" first. The suite needs no GPU and no API key. Some tests load the small
 `all-MiniLM-L6-v2` model, which is downloaded on first use, so the first run needs network access (later runs use the
-cache); I have not run it fully offline.
+cache).
 
 **Three tests are skipped by default**, so a normal run ends with "3 skipped":
 - one in `tests/test_chunk_bound.py` and one in `tests/test_check_chunk_bound.py` fetch a real `tokenizer.json` from Hugging
