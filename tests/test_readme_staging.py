@@ -86,12 +86,11 @@ def test_the_install_section_puts_torch_before_the_package_for_nvidia_amd_and_cp
     assert "pulls" in text and "CUDA" in " ".join(text.split())
 
 
-def test_the_known_limitations_cover_the_four_open_points():
-    section = _section("#### Known limitations", "### 3. Ingest")
-    text = " ".join(section.split())
+def test_the_tips_cover_the_open_points():
+    page = (Path(__file__).resolve().parent.parent / "docs" / "reference" / "3gpp-data.md").read_text(encoding="utf-8")
+    text = " ".join(page[page.index("## Tips"):page.index("## Next step")].split())
     assert "256" in text and "minilm" in text
-    assert "no `version`" in text and "manifest" in text
-    assert "170 specs" in text and "table separator" in text
+    assert "`doc_part`" in text and "manifest" in text
     assert "float16" in text and "NaN" in text
 
 
