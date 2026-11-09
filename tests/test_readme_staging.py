@@ -1,4 +1,4 @@
-"""The staging and install pages of docs/reference: the ingest command it gives must be accepted by the real CLI and the real
+"""The README's staging and install sections: the ingest command it gives must be accepted by the real CLI and the real
 bound validation, and the sections must say what a new user needs. No network."""
 from __future__ import annotations
 
@@ -11,18 +11,16 @@ import pytest
 import cli.main as cli_main
 from open_telco_rag.core.chunk_bound import parse_verify, validate_bound
 
-REFERENCE = Path(__file__).resolve().parent.parent / "docs" / "reference"
-STAGING_PAGE = (REFERENCE / "3gpp-data.md").read_text(encoding="utf-8")
-INSTALL_PAGE = (REFERENCE / "installation.md").read_text(encoding="utf-8")
+README = (Path(__file__).resolve().parent.parent / "README.md").read_text(encoding="utf-8")
 
 
-def _section(page: str, start: str, end: str) -> str:
-    i = page.index(start)
-    return page[i:page.index(end, i + len(start))]
+def _section(start: str, end: str) -> str:
+    i = README.index(start)
+    return README[i:README.index(end, i + len(start))]
 
 
-STAGING = _section(STAGING_PAGE, "# Preparing the GSMA/3GPP Rel-19 data", "## Tips")
-INSTALL = _section(INSTALL_PAGE, "# Installation", "## API keys")
+STAGING = _section("### Preparing the GSMA/3GPP Rel-19 data", "### 3. Ingest")
+INSTALL = _section("## Installation", "## Quick Start")
 
 
 def _ingest_command() -> list[str]:
@@ -89,8 +87,8 @@ def test_the_install_section_puts_torch_before_the_package_for_nvidia_amd_and_cp
 
 
 def test_the_tips_cover_the_open_points():
-    section = _section(STAGING_PAGE, "## Tips", "## Next step")
-    text = " ".join(section.split())
+    page = (Path(__file__).resolve().parent.parent / "docs" / "reference" / "3gpp-data.md").read_text(encoding="utf-8")
+    text = " ".join(page[page.index("## Tips"):page.index("## Next step")].split())
     assert "256" in text and "minilm" in text
     assert "`doc_part`" in text and "manifest" in text
     assert "float16" in text and "NaN" in text
