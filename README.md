@@ -1,5 +1,7 @@
 # TelcoRetrieve
 
+## One retrieval layer for telecom knowledge every AI model can reason over
+
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![GSMA Open Telco AI](https://img.shields.io/badge/GSMA-Open%20Telco%20AI-red.svg)](https://www.gsma.com/solutions-and-impact/technologies/networks/gsma_resources/open-telco-ai/)
@@ -263,8 +265,8 @@ The notebooks in [`notebooks/`](notebooks/) are the TelcoRetrieve Cookbook, one 
 - [CLI reference](docs/reference/cli.md), [chunking](docs/reference/chunking.md), [embedding models](docs/reference/embedding.md), [evaluation](docs/reference/evaluation.md), [Python API](docs/reference/python-api.md)
 - [Architecture](docs/architecture.md) and [project structure](docs/architecture.md#project-structure)
 - [Contributing](docs/contributing.md)
-- [TelcoRetrieve Challenge](docs/challenge/README.md)
-- Related: [telco-qna-generation](https://github.com/Znbne/telco-qna-generation), a toolkit for building evaluation datasets
+- [TelcoRetrieve Challenge](docs/challenge/README.md). The challenge question set is on [Zindi](https://zindi.world/competitions/telcoretrieve-challenge-unlocking-telco-knowledge).
+- Q&A generation: under development
 
 ---
 
