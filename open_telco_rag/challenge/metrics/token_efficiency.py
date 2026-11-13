@@ -22,8 +22,8 @@ import csv
 import sys
 
 # ----------------------------- challenge settings ----------------------------
-BASELINE_TOKENS_PER_QUESTION = 2000   # proposed, not confirmed
-MAX_PROMPT_TOKENS = 4096              # proposed: a longer prompt makes the submission invalid
+BASELINE_TOKENS_PER_QUESTION = 850   # not confirmed
+MAX_PROMPT_TOKENS = 4096              # a longer prompt makes the submission invalid
 SCORE_SCALE = 100                     # the score is a percentage
 ID_COL, PROMPT_COL, ANSWER_COL = "ID", "input_prompt", "answer"
 # -----------------------------------------------------------------------------
