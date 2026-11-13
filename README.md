@@ -11,6 +11,8 @@ An open, vendor-neutral RAG pipeline for telecom specifications. It ingests docu
 
 Part of the [GSMA Open Telco AI](https://www.open-telco.ai/).
 
+> **TelcoRetrieve Challenge: open 13 Nov 2026 – 13 Jan 2027.** Optimise this pipeline on 3GPP Rel-19 and compete for €25,000 in prizes. [Challenge guide](docs/challenge/README.md) · [Join on Zindi](https://zindi.world/competitions/telcoretrieve-challenge-unlocking-telco-knowledge) · [Challenge slides](https://github.com/Znbne/telco-retrieve/blob/main/TelcoRetrieve%20Challenge%20Slides.pdf)
+
 <p align="center">
   <img src="docs/graphics/telcoretrieve-pipeline.png" alt="TelcoRetrieve pipeline: documents are chunked and embedded into an index, then retrieved, reranked and passed to the generator to produce an answer with sources" width="700">
 </p>
