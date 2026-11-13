@@ -27,12 +27,12 @@
     "otel-300m": {
         "model_name": "farbodtavakkoli/OTel-Embedding-300M",
         "dimensions": 1024,
-        "description": "Telecom-domain fine-tuned — 300M params, based on Gemma3-Embedding-300M (recommended)"
+        "description": "Telecom-domain fine-tuned — 300M params, based on Gemma3-Embedding-300M "
     },
     "otel-0.6b": {
         "model_name": "farbodtavakkoli/OTel-Embedding-0.6B",
         "dimensions": 1024,
-        "description": "Telecom-domain fine-tuned — 0.6B params, highest quality OTel embedder"
+        "description": "Telecom-domain fine-tuned — 0.6B params, highest quality OTel embedder (recommended)"
     },
     "or-3-small": {
         "model_name": "openai/text-embedding-3-small",
