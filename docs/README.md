@@ -33,10 +33,7 @@ The notebooks in [`notebooks/`](../notebooks/) are the TelcoRetrieve Cookbook, o
 | [`06_itu_quickstart.ipynb`](../notebooks/06_itu_quickstart.ipynb) | ITU-T |
 | [`07_etsi_quickstart.ipynb`](../notebooks/07_etsi_quickstart.ipynb) | ETSI ISG groups |
 
-## Related
 
-- [telco-qna-generation](https://github.com/Znbne/telco-qna-generation): synthetic QnA generation toolkit for building evaluation datasets
-- [TelcoRetrieve Cookbook](https://github.com/Znbne/telcoretrieve-cookbook): worked examples per corpus
 
 ## Glossary
 
